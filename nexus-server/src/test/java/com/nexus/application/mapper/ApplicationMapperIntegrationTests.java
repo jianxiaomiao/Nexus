@@ -124,6 +124,32 @@ class ApplicationMapperIntegrationTests {
         assertEquals(secondOwner.getId(), second.getOwnerUserId());
     }
 
+    @Test
+    void deletedNameShouldBeReusableMoreThanOnce() {
+        User owner = insertUser();
+        String name = "reusable-" + UUID.randomUUID();
+
+        Application first = insertApplication(owner.getId(), name);
+        softDelete(first);
+        Application second = insertApplication(owner.getId(), name);
+        softDelete(second);
+        Application third = insertApplication(owner.getId(), name);
+
+        assertNotEquals(first.getId(), second.getId());
+        assertNotEquals(second.getId(), third.getId());
+        assertEquals(3L, applicationMapper.selectCount(
+                Wrappers.<Application>lambdaQuery()
+                        .eq(Application::getOwnerUserId, owner.getId())
+                        .eq(Application::getName, name)
+        ));
+    }
+
+    private void softDelete(Application application) {
+        application.setIsDeleted(1);
+        application.setDeletedAt(LocalDateTime.now());
+        assertEquals(1, applicationMapper.updateById(application));
+    }
+
     private User insertUser() {
         User user = new User();
         user.setEmail("application-mapper-" + UUID.randomUUID() + "@example.com");

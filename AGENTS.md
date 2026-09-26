@@ -374,12 +374,12 @@ JWT issuance and the Login application flow are implemented:
 
 The Login verification set—JWT property binding, Controller, Service, deterministic JWT, and full-flow integration tests—passed 16/16. The request flow and the boundaries between configuration, signing, MVC tests, unit tests, and integration tests have been reviewed.
 
-The current phase is **authenticated Application creation checkpoint**. Its Flyway schema, entity, Mapper, create DTOs and Service, JWT request decoder and Bearer user-ID resolver, Controller, and focused persistence/Service/Resolver/MVC tests are in place. A full-flow test now verifies real login → signed JWT → protected HTTP creation → MySQL owner persistence, invalid-token rejection, and per-owner name uniqueness. The complete test suite passed 46/46 with a test-only JWT secret.
+The current phase is **Application list boundary**. Authenticated Application creation is verified end to end. V3 now allows deleted names to be reused; `listMyApplications` filters by owner and non-deleted state and maps entities to response DTOs, with focused Service and persistence tests. The list HTTP endpoint is not implemented yet. The complete test suite passed 49/49 with a test-only JWT secret.
 
 Current priorities:
 
-1. review the Application create API contract, error mappings, and database uniqueness/soft-delete semantics;
-2. confirm the developer can trace the authenticated creation flow and its failure paths;
-3. design the next Application behavior and its ownership rules only after this checkpoint.
+1. implement a read-only authenticated GET endpoint for the current user's non-deleted Applications, without accepting owner ID from the client;
+2. test its HTTP contract and owner isolation through real JWT and MySQL boundaries;
+3. review list pagination and later Application update/delete rules only when needed.
 
 Do not rewrite working code solely for practice. Use focused experiments or isolated implementations when repetition improves understanding. Do not introduce full Spring Security web authentication, Redis, RabbitMQ, observability infrastructure, or later-stage systems until a concrete requirement calls for them.

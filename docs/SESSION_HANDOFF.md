@@ -2,7 +2,7 @@
 
 ## Current stage
 
-User Registration and Login have completed their current engineering checkpoints. Authenticated Application creation now has focused unit/MVC tests and a passing real HTTP → JWT → MySQL integration test.
+User Registration and Login have completed their current engineering checkpoints. Authenticated Application creation is verified end to end. The next active slice is listing the current user's Applications; Service and persistence work is present, but the GET HTTP endpoint is not yet implemented.
 
 ## Completed work
 
@@ -17,6 +17,7 @@ User Registration and Login have completed their current engineering checkpoints
 - The Login checkpoint verification set passed 16/16: JWT properties 1, Controller 7, Service 6, JWT signing 1, full flow 1.
 - Application V2 schema, entity, Mapper, create DTOs and Service, JWT decoder, Bearer user-ID resolver, Controller, and their focused persistence/unit/MVC tests are present. Resolver and Controller tests passed 8/8 after the 401 exception mapping was added.
 - Application creation full-flow tests cover login-issued JWT, persisted owner ID, tampered-token rejection, same-owner duplicate names, and same-name creation by different owners. The complete test suite passed 46/46 with a test-only JWT secret.
+- V3 introduces an active-only uniqueness slot so deleted names can be reused repeatedly. `listMyApplications` selects only the verified owner’s non-deleted rows and maps them to `ApplicationResponse`. Focused tests and the full suite passed 49/49 with a test-only JWT secret.
 
 ## Decisions and constraints
 
@@ -29,7 +30,7 @@ User Registration and Login have completed their current engineering checkpoints
 
 ## First task in the new session
 
-Review the Application create API contract, error mappings, and soft-delete uniqueness rule. Confirm the authenticated creation request flow and failure paths are understood, then choose the next Application read/update/delete behavior with explicit ownership rules.
+Add a GET endpoint for "my Applications" using only the Authorization header for identity; do not accept a client-supplied owner ID. Verify list response, empty list, invalid token, and cross-user isolation at the HTTP boundary. Pagination and update/delete behavior can be decided after this list slice.
 
 ## Relevant files
 
@@ -48,3 +49,5 @@ Review the Application create API contract, error mappings, and soft-delete uniq
 - `nexus-server/src/test/java/com/nexus/application/controller/ApplicationControllerTests.java`
 - `nexus-server/src/test/java/com/nexus/auth/web/BearerUserIdResolverTests.java`
 - `nexus-server/src/test/java/com/nexus/application/flowTest/ApplicationCreationFlowIntegrationTests.java`
+- `nexus-server/src/main/resources/db/migration/V3__change_application.sql`
+- `nexus-server/src/main/java/com/nexus/application/dto/ApplicationResponse.java`
