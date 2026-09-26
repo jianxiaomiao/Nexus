@@ -2,7 +2,7 @@
 
 ## Current stage
 
-User Registration and Login have completed their current engineering checkpoints. Authenticated Application creation is implemented through focused unit and MVC boundaries, but has not yet been verified end to end.
+User Registration and Login have completed their current engineering checkpoints. Authenticated Application creation now has focused unit/MVC tests and a passing real HTTP → JWT → MySQL integration test.
 
 ## Completed work
 
@@ -16,6 +16,7 @@ User Registration and Login have completed their current engineering checkpoints
 - A successful-login integration test covering real Spring wiring, MySQL, password matching, JWT signing/decoding, and the HTTP response.
 - The Login checkpoint verification set passed 16/16: JWT properties 1, Controller 7, Service 6, JWT signing 1, full flow 1.
 - Application V2 schema, entity, Mapper, create DTOs and Service, JWT decoder, Bearer user-ID resolver, Controller, and their focused persistence/unit/MVC tests are present. Resolver and Controller tests passed 8/8 after the 401 exception mapping was added.
+- Application creation full-flow tests cover login-issued JWT, persisted owner ID, tampered-token rejection, same-owner duplicate names, and same-name creation by different owners. The complete test suite passed 46/46 with a test-only JWT secret.
 
 ## Decisions and constraints
 
@@ -28,7 +29,7 @@ User Registration and Login have completed their current engineering checkpoints
 
 ## First task in the new session
 
-Write an authenticated Application creation integration test using a real signed JWT and MySQL. Verify that the persisted `owner_user_id` comes from the verified JWT `sub`, the response returns the inserted ID/name, and invalid credentials or duplicate names fail as intended. Then review whether the create API contract and soft-delete uniqueness rule need adjustment before designing read/update/delete operations.
+Review the Application create API contract, error mappings, and soft-delete uniqueness rule. Confirm the authenticated creation request flow and failure paths are understood, then choose the next Application read/update/delete behavior with explicit ownership rules.
 
 ## Relevant files
 
@@ -46,3 +47,4 @@ Write an authenticated Application creation integration test using a real signed
 - `nexus-server/src/main/java/com/nexus/auth/web/BearerUserIdResolver.java`
 - `nexus-server/src/test/java/com/nexus/application/controller/ApplicationControllerTests.java`
 - `nexus-server/src/test/java/com/nexus/auth/web/BearerUserIdResolverTests.java`
+- `nexus-server/src/test/java/com/nexus/application/flowTest/ApplicationCreationFlowIntegrationTests.java`

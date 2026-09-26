@@ -374,12 +374,12 @@ JWT issuance and the Login application flow are implemented:
 
 The Login verification set—JWT property binding, Controller, Service, deterministic JWT, and full-flow integration tests—passed 16/16. The request flow and the boundaries between configuration, signing, MVC tests, unit tests, and integration tests have been reviewed.
 
-The current phase is **authenticated Application creation**. Its Flyway schema, entity, Mapper and persistence tests, create DTOs and Service, JWT request decoder and Bearer user-ID resolver, Controller, and focused Service/Resolver/MVC tests are in place. The Application HTTP-to-database flow has not yet been verified end to end.
+The current phase is **authenticated Application creation checkpoint**. Its Flyway schema, entity, Mapper, create DTOs and Service, JWT request decoder and Bearer user-ID resolver, Controller, and focused persistence/Service/Resolver/MVC tests are in place. A full-flow test now verifies real login → signed JWT → protected HTTP creation → MySQL owner persistence, invalid-token rejection, and per-owner name uniqueness. The complete test suite passed 46/46 with a test-only JWT secret.
 
 Current priorities:
 
-1. verify authenticated Application creation with a real HTTP → JWT validation → Service → MySQL integration test;
-2. review the API contract, owner isolation, error mappings, and database uniqueness/soft-delete semantics;
-3. design the next Application behavior only after this slice reaches an engineering and learning checkpoint.
+1. review the Application create API contract, error mappings, and database uniqueness/soft-delete semantics;
+2. confirm the developer can trace the authenticated creation flow and its failure paths;
+3. design the next Application behavior and its ownership rules only after this checkpoint.
 
 Do not rewrite working code solely for practice. Use focused experiments or isolated implementations when repetition improves understanding. Do not introduce full Spring Security web authentication, Redis, RabbitMQ, observability infrastructure, or later-stage systems until a concrete requirement calls for them.
