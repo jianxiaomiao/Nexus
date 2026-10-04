@@ -3,10 +3,19 @@ package com.nexus.application.service;
 import com.nexus.application.dto.CreateApplicationRequest;
 import com.nexus.application.dto.CreateApplicationResponse;
 import com.nexus.application.dto.ApplicationResponse;
+import com.nexus.application.dto.UpdateApplicationRequest;
 import com.nexus.application.entity.Application;
 import com.nexus.application.exception.ApplicationNameAlreadyExistsException;
+import com.nexus.application.exception.ApplicationNotFoundException;
+import com.nexus.application.exception.InvalidApplicationIdException;
+import com.nexus.application.exception.InvalidApplicationUpdateException;
 import com.nexus.application.mapper.ApplicationMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -18,12 +27,16 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
@@ -34,6 +47,14 @@ class ApplicationServiceImplTests {
     private ApplicationMapper applicationMapper;
 
     private ApplicationServiceImpl applicationService;
+
+    @BeforeAll
+    static void initializeApplicationTableInfo() {
+        MapperBuilderAssistant assistant = new MapperBuilderAssistant(
+                new MybatisConfiguration(), ApplicationMapper.class.getName());
+        assistant.setCurrentNamespace(ApplicationMapper.class.getName());
+        TableInfoHelper.initTableInfo(assistant, Application.class);
+    }
 
     @BeforeEach
     void setUp() {
@@ -141,5 +162,173 @@ class ApplicationServiceImplTests {
         assertTrue(responses.isEmpty());
         verify(applicationMapper).selectList(any());
         verifyNoMoreInteractions(applicationMapper);
+    }
+
+    @Test
+    void updateShouldScopeWriteToActiveOwnerAndReturnPersistedResponse() {
+        LocalDateTime createdAt = LocalDateTime.of(2026, 9, 26, 10, 0);
+        LocalDateTime updatedAt = createdAt.plusHours(1);
+        Application persisted = new Application();
+        persisted.setId(100L);
+        persisted.setName("renamed-app");
+        persisted.setStatus(1);
+        persisted.setCreatedAt(createdAt);
+        persisted.setUpdatedAt(updatedAt);
+        when(applicationMapper.update(isNull(), any(LambdaUpdateWrapper.class))).thenReturn(1);
+        when(applicationMapper.selectById(100L)).thenReturn(persisted);
+
+        ApplicationResponse response = applicationService.updateMyApplication(
+                42L, new UpdateApplicationRequest(100L, "  renamed-app  ", 1));
+
+        assertEquals(new ApplicationResponse(100L, "renamed-app", 1, createdAt, updatedAt), response);
+        verify(applicationMapper).update(isNull(), argThat(wrapper -> {
+            if (!(wrapper instanceof LambdaUpdateWrapper<?> update)) {
+                return false;
+            }
+            String where = update.getExpression().getSqlSegment();
+            String set = update.getSqlSet();
+            return where.contains("owner_user_id")
+                    && where.contains("is_deleted")
+                    && where.contains("id")
+                    && set.contains("name")
+                    && set.contains("status")
+                    && set.contains("updated_at")
+                    && update.getParamNameValuePairs().containsValue(100L)
+                    && update.getParamNameValuePairs().containsValue(42L)
+                    && update.getParamNameValuePairs().containsValue("renamed-app")
+                    && update.getParamNameValuePairs().containsValue(1);
+        }));
+        verify(applicationMapper).selectById(100L);
+        verifyNoMoreInteractions(applicationMapper);
+    }
+
+    @Test
+    void statusOnlyUpdateShouldNotWriteName() {
+        when(applicationMapper.update(isNull(), any(LambdaUpdateWrapper.class))).thenReturn(0);
+
+        assertThrows(ApplicationNotFoundException.class,
+                () -> applicationService.updateMyApplication(
+                        42L, new UpdateApplicationRequest(100L, null, 1)));
+
+        verify(applicationMapper).update(isNull(), argThat(wrapper -> {
+            if (!(wrapper instanceof LambdaUpdateWrapper<?> update)) {
+                return false;
+            }
+            return !update.getSqlSet().contains("name")
+                    && update.getSqlSet().contains("status");
+        }));
+        verifyNoMoreInteractions(applicationMapper);
+    }
+
+    @Test
+    void nameOnlyUpdateShouldNotWriteStatus() {
+        when(applicationMapper.update(isNull(), any(LambdaUpdateWrapper.class))).thenReturn(0);
+
+        assertThrows(ApplicationNotFoundException.class,
+                () -> applicationService.updateMyApplication(
+                        42L, new UpdateApplicationRequest(100L, " appA ", null)));
+
+        verify(applicationMapper).update(isNull(), argThat(wrapper -> {
+            if (!(wrapper instanceof LambdaUpdateWrapper<?> update)) {
+                return false;
+            }
+            return update.getSqlSet().contains("name")
+                    && !update.getSqlSet().contains("status")
+                    && update.getParamNameValuePairs().containsValue("appA");
+        }));
+        verifyNoMoreInteractions(applicationMapper);
+    }
+
+    @Test
+    void updateShouldReturnNotFoundWithoutReadingWhenNoOwnedActiveRowMatches() {
+        when(applicationMapper.update(isNull(), any(LambdaUpdateWrapper.class))).thenReturn(0);
+
+        assertThrows(ApplicationNotFoundException.class,
+                () -> applicationService.updateMyApplication(
+                        42L, new UpdateApplicationRequest(100L, "appA", null)));
+
+        verify(applicationMapper).update(isNull(), any(LambdaUpdateWrapper.class));
+        verifyNoMoreInteractions(applicationMapper);
+    }
+
+    @Test
+    void updateShouldTranslateDuplicateNameWithoutReading() {
+        DuplicateKeyException databaseException = new DuplicateKeyException("duplicate name");
+        when(applicationMapper.update(isNull(), any(LambdaUpdateWrapper.class)))
+                .thenThrow(databaseException);
+
+        ApplicationNameAlreadyExistsException exception = assertThrows(
+                ApplicationNameAlreadyExistsException.class,
+                () -> applicationService.updateMyApplication(
+                        42L, new UpdateApplicationRequest(100L, "appA", null)));
+
+        assertEquals(databaseException, exception.getCause());
+        verify(applicationMapper).update(isNull(), any(LambdaUpdateWrapper.class));
+        verifyNoMoreInteractions(applicationMapper);
+    }
+
+    @Test
+    void invalidUpdateRequestsShouldBeRejectedBeforePersistence() {
+        List<UpdateApplicationRequest> requests = List.of(
+                new UpdateApplicationRequest(null, "appA", null),
+                new UpdateApplicationRequest(0L, "appA", null),
+                new UpdateApplicationRequest(100L, null, null),
+                new UpdateApplicationRequest(100L, "   ", null),
+                new UpdateApplicationRequest(100L, "a".repeat(65), null),
+                new UpdateApplicationRequest(100L, null, 2));
+
+        for (UpdateApplicationRequest request : requests) {
+            assertThrows(InvalidApplicationUpdateException.class,
+                    () -> applicationService.updateMyApplication(42L, request),
+                    () -> "应拒绝非法更新请求: " + request);
+        }
+        verifyNoInteractions(applicationMapper);
+    }
+
+    @Test
+    void deleteShouldSoftDeleteOnlyActiveApplicationOwnedByUser() {
+        when(applicationMapper.update(isNull(), any(LambdaUpdateWrapper.class))).thenReturn(1);
+
+        assertDoesNotThrow(() -> applicationService.deleteMyApplication(42L, 100L));
+
+        verify(applicationMapper).update(isNull(), argThat(wrapper -> {
+            if (!(wrapper instanceof LambdaUpdateWrapper<?> update)) {
+                return false;
+            }
+            String where = update.getExpression().getSqlSegment();
+            String set = update.getSqlSet();
+            return where.contains("id")
+                    && where.contains("owner_user_id")
+                    && where.contains("is_deleted")
+                    && set.contains("is_deleted")
+                    && set.contains("deleted_at")
+                    && update.getParamNameValuePairs().containsValue(100L)
+                    && update.getParamNameValuePairs().containsValue(42L)
+                    && update.getParamNameValuePairs().containsValue(0)
+                    && update.getParamNameValuePairs().containsValue(1)
+                    && update.getParamNameValuePairs().values().stream()
+                            .anyMatch(LocalDateTime.class::isInstance);
+        }));
+        verifyNoMoreInteractions(applicationMapper);
+    }
+
+    @Test
+    void deleteShouldReturnNotFoundWhenNoActiveOwnedApplicationMatches() {
+        when(applicationMapper.update(isNull(), any(LambdaUpdateWrapper.class))).thenReturn(0);
+
+        assertThrows(ApplicationNotFoundException.class,
+                () -> applicationService.deleteMyApplication(42L, 100L));
+
+        verify(applicationMapper).update(isNull(), any(LambdaUpdateWrapper.class));
+        verifyNoMoreInteractions(applicationMapper);
+    }
+
+    @Test
+    void deleteShouldRejectNonPositiveIdBeforeCallingMapper() {
+        for (Long appId : new Long[] {null, 0L, -1L}) {
+            assertThrows(InvalidApplicationIdException.class,
+                    () -> applicationService.deleteMyApplication(42L, appId));
+        }
+        verifyNoInteractions(applicationMapper);
     }
 }

@@ -1,6 +1,9 @@
 package com.nexus.common.web;
 
 import com.nexus.application.exception.ApplicationNameAlreadyExistsException;
+import com.nexus.application.exception.ApplicationNotFoundException;
+import com.nexus.application.exception.InvalidApplicationIdException;
+import com.nexus.application.exception.InvalidApplicationUpdateException;
 import com.nexus.auth.exception.AccountForbiddenException;
 import com.nexus.auth.exception.EmailAlreadyRegisteredException;
 import com.nexus.auth.exception.InvalidAccessTokenException;
@@ -89,6 +92,35 @@ public class GlobalExceptionHandler{
     public ApiResponse<Void> handleInvalidAccessTokenException(InvalidAccessTokenException exception){
         return new ApiResponse<>(
                 "INVALID_ACCESS_TOKEN",
+                exception.getMessage(),
+                null
+        );
+    }
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    @ExceptionHandler(ApplicationNotFoundException.class)
+    public ApiResponse<Void> handleApplicationNotFoundException(ApplicationNotFoundException exception){
+        return new ApiResponse<>(
+                "APPLICATION_NOT_FOUND",
+                exception.getMessage(),
+                null
+        );
+    }
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ExceptionHandler(InvalidApplicationUpdateException.class)
+    public ApiResponse<Void> handleInvalidApplicationUpdateException(InvalidApplicationUpdateException exception) {
+        return new ApiResponse<>(
+                "INVALID_APPLICATION_UPDATE",
+                exception.getMessage(),
+                null
+        );
+    }
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ExceptionHandler(InvalidApplicationIdException.class)
+    public ApiResponse<Void> handleInvalidApplicationIdException(InvalidApplicationIdException exception) {
+        return new ApiResponse<>(
+                "INVALID_APPLICATION_ID",
                 exception.getMessage(),
                 null
         );

@@ -374,12 +374,11 @@ JWT issuance and the Login application flow are implemented:
 
 The Login verification set—JWT property binding, Controller, Service, deterministic JWT, and full-flow integration tests—passed 16/16. The request flow and the boundaries between configuration, signing, MVC tests, unit tests, and integration tests have been reviewed.
 
-The current phase is **Application list boundary**. Authenticated Application creation is verified end to end. V3 now allows deleted names to be reused; `listMyApplications` filters by owner and non-deleted state and maps entities to response DTOs, with focused Service and persistence tests. The list HTTP endpoint is not implemented yet. The complete test suite passed 49/49 with a test-only JWT secret.
+The Application management checkpoint is complete. V3 allows deleted names to be reused. Authenticated creation, listing, update, and soft deletion are verified through real JWT, HTTP, and MySQL, including cross-user list isolation and non-deleted filtering. The complete test suite passed 86/86 with a temporary test-only JWT secret.
 
 Current priorities:
 
-1. implement a read-only authenticated GET endpoint for the current user's non-deleted Applications, without accepting owner ID from the client;
-2. test its HTTP contract and owner isolation through real JWT and MySQL boundaries;
-3. review list pagination and later Application update/delete rules only when needed.
+1. design the API Key lifecycle and schema: effective use checks both key and parent state; parent soft deletion will also soft-delete child keys when that module exists;
+2. revisit Application list pagination and update API semantics only when a concrete requirement calls for them.
 
 Do not rewrite working code solely for practice. Use focused experiments or isolated implementations when repetition improves understanding. Do not introduce full Spring Security web authentication, Redis, RabbitMQ, observability infrastructure, or later-stage systems until a concrete requirement calls for them.
