@@ -1,7 +1,7 @@
 package com.nexus.application.controller;
 
 import com.nexus.application.dto.*;
-import com.nexus.application.service.ApplicationServiceImpl;
+import com.nexus.application.service.ApplicationService;
 import com.nexus.auth.web.BearerUserIdResolver;
 import com.nexus.common.web.ApiResponse;
 import jakarta.validation.Valid;
@@ -15,7 +15,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/application")
 public class ApplicationController {
-    private final ApplicationServiceImpl applicationService;
+    private final ApplicationService applicationService;
 
     private final BearerUserIdResolver bearerUserIdResolver;
 

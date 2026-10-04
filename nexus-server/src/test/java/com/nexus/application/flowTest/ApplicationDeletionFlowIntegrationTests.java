@@ -1,8 +1,17 @@
 package com.nexus.application.flowTest;
 
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.nexus.apikey.dto.CreateApiKeyRequest;
+import com.nexus.apikey.dto.CreateApiKeyResponse;
+import com.nexus.apikey.dto.DeleteApiKeyRequest;
+import com.nexus.apikey.entity.ApiKey;
+import com.nexus.apikey.mapper.ApiKeyMapper;
+import com.nexus.apikey.service.ApiKeyService;
 import com.nexus.application.dto.CreateApplicationRequest;
 import com.nexus.application.entity.Application;
+import com.nexus.application.exception.ApplicationNotFoundException;
 import com.nexus.application.mapper.ApplicationMapper;
+import com.nexus.application.service.ApplicationService;
 import com.nexus.auth.dto.LoginRequest;
 import com.nexus.user.entity.User;
 import com.nexus.user.mapper.UserMapper;
@@ -16,17 +25,30 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -62,6 +84,18 @@ class ApplicationDeletionFlowIntegrationTests {
     private ApplicationMapper applicationMapper;
 
     @Autowired
+    private ApiKeyMapper apiKeyMapper;
+
+    @Autowired
+    private ApiKeyService apiKeyService;
+
+    @Autowired
+    private ApplicationService applicationService;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
     @Test
@@ -85,6 +119,90 @@ class ApplicationDeletionFlowIntegrationTests {
                         .header("Authorization", "Bearer " + owner.accessToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()").value(0));
+    }
+
+    @Test
+    void deletingApplicationSoftDeletesOnlyItsActiveKeys() throws Exception {
+        AuthenticatedUser owner = loginAsNewUser();
+        long applicationId = createApplication(owner, "cascade-" + UUID.randomUUID());
+        long otherApplicationId = createApplication(owner, "other-" + UUID.randomUUID());
+        CreateApiKeyResponse active = apiKeyService.createMyApiKey(owner.userId(),
+                new CreateApiKeyRequest("active", applicationId));
+        CreateApiKeyResponse previouslyDeleted = apiKeyService.createMyApiKey(owner.userId(),
+                new CreateApiKeyRequest("previously-deleted", applicationId));
+        CreateApiKeyResponse unrelated = apiKeyService.createMyApiKey(owner.userId(),
+                new CreateApiKeyRequest("unrelated", otherApplicationId));
+        apiKeyService.deleteMyApiKey(owner.userId(),
+                new DeleteApiKeyRequest(applicationId, previouslyDeleted.id()));
+        LocalDateTime previousDeletionTime = apiKeyMapper.selectById(previouslyDeleted.id()).getDeletedAt();
+
+        mockMvc.perform(delete("/api/application/{id}", applicationId)
+                        .header("Authorization", "Bearer " + owner.accessToken()))
+                .andExpect(status().isOk());
+
+        Application deletedApplication = applicationMapper.selectById(applicationId);
+        ApiKey deletedActiveKey = apiKeyMapper.selectById(active.id());
+        ApiKey alreadyDeletedKey = apiKeyMapper.selectById(previouslyDeleted.id());
+        ApiKey otherKey = apiKeyMapper.selectById(unrelated.id());
+        assertEquals(1, deletedApplication.getIsDeleted());
+        assertEquals(1, deletedActiveKey.getIsDeleted());
+        assertEquals(deletedApplication.getDeletedAt(), deletedActiveKey.getDeletedAt());
+        assertEquals(previousDeletionTime, alreadyDeletedKey.getDeletedAt());
+        assertEquals(0, otherKey.getIsDeleted());
+        assertNull(otherKey.getDeletedAt());
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void concurrentKeyCreationCannotSurviveApplicationDeletion() throws Exception {
+        AuthenticatedUser owner = loginAsNewUser();
+        long applicationId = createApplication(owner, "concurrent-" + UUID.randomUUID());
+        CountDownLatch deletedButUncommitted = new CountDownLatch(1);
+        CountDownLatch releaseDeletion = new CountDownLatch(1);
+        CountDownLatch creationStarted = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
+
+        try {
+            Future<?> deletion = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
+                applicationService.deleteMyApplication(owner.userId(), applicationId);
+                deletedButUncommitted.countDown();
+                try {
+                    if (!releaseDeletion.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("timed out waiting to commit deletion");
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(exception);
+                }
+            }));
+            assertTrue(deletedButUncommitted.await(10, TimeUnit.SECONDS));
+
+            Future<?> creation = executor.submit(() -> {
+                creationStarted.countDown();
+                apiKeyService.createMyApiKey(owner.userId(),
+                        new CreateApiKeyRequest("racing-key", applicationId));
+            });
+            assertTrue(creationStarted.await(10, TimeUnit.SECONDS));
+            assertThrows(TimeoutException.class, () -> creation.get(200, TimeUnit.MILLISECONDS));
+
+            releaseDeletion.countDown();
+            deletion.get(10, TimeUnit.SECONDS);
+            ExecutionException failure = assertThrows(ExecutionException.class,
+                    () -> creation.get(10, TimeUnit.SECONDS));
+            assertInstanceOf(ApplicationNotFoundException.class, failure.getCause());
+            assertEquals(0L, apiKeyMapper.selectCount(Wrappers.<ApiKey>lambdaQuery()
+                    .eq(ApiKey::getApplicationId, applicationId)
+                    .eq(ApiKey::getIsDeleted, 0)));
+        } finally {
+            releaseDeletion.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+            apiKeyMapper.delete(Wrappers.<ApiKey>lambdaQuery()
+                    .eq(ApiKey::getApplicationId, applicationId));
+            applicationMapper.deleteById(applicationId);
+            userMapper.deleteById(owner.userId());
+        }
     }
 
     @Test

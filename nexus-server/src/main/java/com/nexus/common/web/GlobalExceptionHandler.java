@@ -1,14 +1,27 @@
 package com.nexus.common.web;
 
 import com.nexus.application.exception.ApplicationNameAlreadyExistsException;
+import com.nexus.application.exception.ApplicationDisabledException;
 import com.nexus.application.exception.ApplicationNotFoundException;
 import com.nexus.application.exception.InvalidApplicationIdException;
 import com.nexus.application.exception.InvalidApplicationUpdateException;
+import com.nexus.apikey.exception.ApiKeyNameAlreadyExistsException;
+import com.nexus.apikey.exception.ApiKeyNotFoundException;
+import com.nexus.apikey.exception.InvalidApiKeyDeleteException;
+import com.nexus.apikey.exception.InvalidApiKeyUpdateException;
 import com.nexus.auth.exception.AccountForbiddenException;
 import com.nexus.auth.exception.EmailAlreadyRegisteredException;
 import com.nexus.auth.exception.InvalidAccessTokenException;
 import com.nexus.auth.exception.InvalidCredentialsException;
+import com.nexus.auth.exception.InvalidApiKeyCredentialException;
+import com.nexus.auth.exception.ApiKeyForbiddenException;
+import com.nexus.openapi.exception.HashAlgorithmRequiredException;
+import com.nexus.openapi.exception.HashContentRequiredException;
+import com.nexus.openapi.exception.HashInputTooLargeException;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -20,6 +33,44 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler{
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ApiResponse<Void> handleUnreadableRequestBody(HttpMessageNotReadableException exception) {
+        // JSON 转换发生在 Controller 与 Bean Validation 之前，不向客户端回显原始输入或底层异常。
+        return new ApiResponse<>("INVALID_REQUEST_BODY", "请求体格式错误或字段值无效", null);
+    }
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ExceptionHandler(HashContentRequiredException.class)
+    public ApiResponse<Void> handleHashContentRequired(HashContentRequiredException exception) {
+        return new ApiResponse<>("HASH_CONTENT_REQUIRED", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ExceptionHandler(HashAlgorithmRequiredException.class)
+    public ApiResponse<Void> handleHashAlgorithmRequired(HashAlgorithmRequiredException exception) {
+        return new ApiResponse<>("HASH_ALGORITHM_REQUIRED", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ExceptionHandler(HashInputTooLargeException.class)
+    public ApiResponse<Void> handleHashInputTooLarge(HashInputTooLargeException exception) {
+        return new ApiResponse<>("HASH_INPUT_TOO_LARGE", exception.getMessage(), null);
+    }
+
+    @ExceptionHandler(InvalidApiKeyCredentialException.class)
+    public ResponseEntity<ApiResponse<Void>> handleInvalidApiKeyCredential(InvalidApiKeyCredentialException exception) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .header(HttpHeaders.WWW_AUTHENTICATE, "ApiKey realm=\"nexus-openapi\"")
+                .body(new ApiResponse<>("INVALID_API_KEY_CREDENTIAL", exception.getMessage(), null));
+    }
+
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    @ExceptionHandler(ApiKeyForbiddenException.class)
+    public ApiResponse<Void> handleApiKeyForbidden(ApiKeyForbiddenException exception) {
+        return new ApiResponse<>("API_KEY_FORBIDDEN", exception.getMessage(), null);
+    }
 
     @ResponseStatus(HttpStatus.CONFLICT)
     @ExceptionHandler(EmailAlreadyRegisteredException.class)
@@ -106,6 +157,26 @@ public class GlobalExceptionHandler{
         );
     }
 
+    @ResponseStatus(HttpStatus.CONFLICT)
+    @ExceptionHandler(ApplicationDisabledException.class)
+    public ApiResponse<Void> handleApplicationDisabledException(ApplicationDisabledException exception) {
+        return new ApiResponse<>(
+                "APPLICATION_DISABLED",
+                exception.getMessage(),
+                null
+        );
+    }
+
+    @ResponseStatus(HttpStatus.CONFLICT)
+    @ExceptionHandler(ApiKeyNameAlreadyExistsException.class)
+    public ApiResponse<Void> handleApiKeyNameAlreadyExistsException(ApiKeyNameAlreadyExistsException exception) {
+        return new ApiResponse<>(
+                "API_KEY_NAME_ALREADY_EXISTS",
+                exception.getMessage(),
+                null
+        );
+    }
+
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     @ExceptionHandler(InvalidApplicationUpdateException.class)
     public ApiResponse<Void> handleInvalidApplicationUpdateException(InvalidApplicationUpdateException exception) {
@@ -114,6 +185,24 @@ public class GlobalExceptionHandler{
                 exception.getMessage(),
                 null
         );
+    }
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ExceptionHandler(InvalidApiKeyDeleteException.class)
+    public ApiResponse<Void> handleInvalidApiKeyDeleteException(InvalidApiKeyDeleteException exception) {
+        return new ApiResponse<>("INVALID_API_KEY_DELETE", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ExceptionHandler(InvalidApiKeyUpdateException.class)
+    public ApiResponse<Void> handleInvalidApiKeyUpdateException(InvalidApiKeyUpdateException exception) {
+        return new ApiResponse<>("INVALID_API_KEY_UPDATE", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    @ExceptionHandler(ApiKeyNotFoundException.class)
+    public ApiResponse<Void> handleApiKeyNotFoundException(ApiKeyNotFoundException exception) {
+        return new ApiResponse<>("API_KEY_NOT_FOUND", exception.getMessage(), null);
     }
 
     @ResponseStatus(HttpStatus.BAD_REQUEST)

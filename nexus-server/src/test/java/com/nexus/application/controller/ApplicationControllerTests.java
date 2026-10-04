@@ -8,7 +8,7 @@ import com.nexus.application.exception.ApplicationNameAlreadyExistsException;
 import com.nexus.application.exception.ApplicationNotFoundException;
 import com.nexus.application.exception.InvalidApplicationIdException;
 import com.nexus.application.exception.InvalidApplicationUpdateException;
-import com.nexus.application.service.ApplicationServiceImpl;
+import com.nexus.application.service.ApplicationService;
 import com.nexus.auth.exception.InvalidAccessTokenException;
 import com.nexus.auth.web.BearerUserIdResolver;
 import org.junit.jupiter.api.Test;
@@ -45,7 +45,7 @@ class ApplicationControllerTests {
     private ObjectMapper objectMapper;
 
     @MockitoBean
-    private ApplicationServiceImpl applicationService;
+    private ApplicationService applicationService;
 
     @MockitoBean
     private BearerUserIdResolver bearerUserIdResolver;

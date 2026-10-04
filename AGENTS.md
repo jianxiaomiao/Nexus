@@ -374,11 +374,14 @@ JWT issuance and the Login application flow are implemented:
 
 The Login verification set—JWT property binding, Controller, Service, deterministic JWT, and full-flow integration tests—passed 16/16. The request flow and the boundaries between configuration, signing, MVC tests, unit tests, and integration tests have been reviewed.
 
-The Application management checkpoint is complete. V3 allows deleted names to be reused. Authenticated creation, listing, update, and soft deletion are verified through real JWT, HTTP, and MySQL, including cross-user list isolation and non-deleted filtering. The complete test suite passed 86/86 with a temporary test-only JWT secret.
+The Application management checkpoint is complete. V3 allows deleted names to be reused. Authenticated creation, listing, update, and soft deletion are verified through real JWT, HTTP, and MySQL, including cross-user list isolation and non-deleted filtering.
+
+The API Key management checkpoint is implemented: V4, credential generation, Entity/Mapper, Service, and Controller for create/list/update/soft-delete. Parent Application soft deletion bulk soft-deletes active child keys in one transaction. The Controller uses `/api/apiKey`: POST `/create`, GET `/{applicationId}`, PUT and DELETE at the base path. Create/update/delete IDs are supplied in request bodies; the list ID is a path variable. Real MySQL tests cover the management HTTP flow, ownership, key secrecy, cascading deletion, rollback, and a concurrent creation attempt during deletion. The standalone `ApiKeyAuthenticator` returns machine identity with only API Key and Application IDs. Invalid/deleted credentials return 401; a verified Secret with a disabled key, parent, or owner returns 403. Machine endpoints `GET /v1/utils/uuid` and `POST /v1/utils/hash` run behind a Filter registered only for `/v1/*`. It receives `Authorization: ApiKey <fullKey>`, passes identity through a request attribute, and preserves Bearer JWT for `/api/*` management calls. Hash accepts SHA-256/SHA-512 and at most 4096 UTF-8 input bytes; its HTTP contract is in `docs/OPEN_API.md`. Both machine and management authentication read the current User row, so ban and soft deletion immediately affect existing credentials without copying owner state to children. The complete test suite passed 145/145 with a temporary test-only JWT secret. `docs/ACCOUNT_STATUS_POLICY.md` records the state and exception rules.
 
 Current priorities:
 
-1. design the API Key lifecycle and schema: effective use checks both key and parent state; parent soft deletion will also soft-delete child keys when that module exists;
-2. revisit Application list pagination and update API semantics only when a concrete requirement calls for them.
+1. review the Filter → authenticator → request attribute → Controller flow and the owner account-state decision with the developer as a learning checkpoint;
+2. build the first Vue Developer Console path: login, Application management, and one-time API Key display; review Hash request conversion, Bean Validation, and byte-limit errors as a learning checkpoint;
+3. revisit Application list pagination, update API semantics, scopes, quotas, and infrastructure only when a concrete requirement calls for them.
 
 Do not rewrite working code solely for practice. Use focused experiments or isolated implementations when repetition improves understanding. Do not introduce full Spring Security web authentication, Redis, RabbitMQ, observability infrastructure, or later-stage systems until a concrete requirement calls for them.

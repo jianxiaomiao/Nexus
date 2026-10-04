@@ -1,6 +1,9 @@
 package com.nexus.auth.web;
 
 import com.nexus.auth.exception.InvalidAccessTokenException;
+import com.nexus.auth.exception.AccountForbiddenException;
+import com.nexus.user.entity.User;
+import com.nexus.user.mapper.UserMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -21,6 +24,8 @@ class BearerUserIdResolverTests {
 
     @Mock
     private JwtDecoder jwtDecoder;
+    @Mock
+    private UserMapper userMapper;
 
     @Mock
     private Jwt jwt;
@@ -29,13 +34,14 @@ class BearerUserIdResolverTests {
 
     @BeforeEach
     void setUp() {
-        resolver = new BearerUserIdResolver(jwtDecoder);
+        resolver = new BearerUserIdResolver(jwtDecoder, userMapper);
     }
 
     @Test
     void validBearerTokenShouldReturnVerifiedSubjectAsUserId() {
         when(jwtDecoder.decode("valid-token")).thenReturn(jwt);
         when(jwt.getSubject()).thenReturn("42");
+        when(userMapper.selectById(42L)).thenReturn(activeUser());
 
         assertEquals(42L, resolver.resolve("Bearer valid-token"));
         verify(jwtDecoder).decode("valid-token");
@@ -50,7 +56,7 @@ class BearerUserIdResolverTests {
                     () -> resolver.resolve(authorization));
         }
 
-        verifyNoInteractions(jwtDecoder);
+        verifyNoInteractions(jwtDecoder, userMapper);
     }
 
     @Test
@@ -75,5 +81,42 @@ class BearerUserIdResolverTests {
             assertThrows(InvalidAccessTokenException.class,
                     () -> resolver.resolve("Bearer valid-token"));
         }
+    }
+
+    @Test
+    void missingOrDeletedAccountInvalidatesPreviouslyIssuedJwt() {
+        when(jwtDecoder.decode("valid-token")).thenReturn(jwt);
+        when(jwt.getSubject()).thenReturn("42");
+        when(userMapper.selectById(42L)).thenReturn(null);
+        assertThrows(InvalidAccessTokenException.class,
+                () -> resolver.resolve("Bearer valid-token"));
+
+        User deleted = activeUser();
+        deleted.setIsDeleted(1);
+        when(userMapper.selectById(42L)).thenReturn(deleted);
+        assertThrows(InvalidAccessTokenException.class,
+                () -> resolver.resolve("Bearer valid-token"));
+    }
+
+    @Test
+    void banningAndUnbanningAccountAffectsExistingJwtImmediately() {
+        when(jwtDecoder.decode("valid-token")).thenReturn(jwt);
+        when(jwt.getSubject()).thenReturn("42");
+        User user = activeUser();
+        user.setStatus(1);
+        when(userMapper.selectById(42L)).thenReturn(user);
+
+        assertThrows(AccountForbiddenException.class,
+                () -> resolver.resolve("Bearer valid-token"));
+        user.setStatus(0);
+        assertEquals(42L, resolver.resolve("Bearer valid-token"));
+    }
+
+    private User activeUser() {
+        User user = new User();
+        user.setId(42L);
+        user.setStatus(0);
+        user.setIsDeleted(0);
+        return user;
     }
 }

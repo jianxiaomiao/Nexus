@@ -1,5 +1,7 @@
 package com.nexus.application.service;
 
+import com.nexus.apikey.entity.ApiKey;
+import com.nexus.apikey.mapper.ApiKeyMapper;
 import com.nexus.application.dto.CreateApplicationRequest;
 import com.nexus.application.dto.CreateApplicationResponse;
 import com.nexus.application.dto.ApplicationResponse;
@@ -19,6 +21,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DuplicateKeyException;
@@ -46,7 +49,10 @@ class ApplicationServiceImplTests {
     @Mock
     private ApplicationMapper applicationMapper;
 
-    private ApplicationServiceImpl applicationService;
+    @Mock
+    private ApiKeyMapper apiKeyMapper;
+
+    private ApplicationService applicationService;
 
     @BeforeAll
     static void initializeApplicationTableInfo() {
@@ -54,11 +60,16 @@ class ApplicationServiceImplTests {
                 new MybatisConfiguration(), ApplicationMapper.class.getName());
         assistant.setCurrentNamespace(ApplicationMapper.class.getName());
         TableInfoHelper.initTableInfo(assistant, Application.class);
+
+        MapperBuilderAssistant keyAssistant = new MapperBuilderAssistant(
+                new MybatisConfiguration(), ApiKeyMapper.class.getName());
+        keyAssistant.setCurrentNamespace(ApiKeyMapper.class.getName());
+        TableInfoHelper.initTableInfo(keyAssistant, ApiKey.class);
     }
 
     @BeforeEach
     void setUp() {
-        applicationService = new ApplicationServiceImpl(applicationMapper);
+        applicationService = new ApplicationService(applicationMapper, apiKeyMapper);
     }
 
     @Test
@@ -286,30 +297,40 @@ class ApplicationServiceImplTests {
     }
 
     @Test
-    void deleteShouldSoftDeleteOnlyActiveApplicationOwnedByUser() {
+    void deleteShouldSoftDeleteApplicationAndItsActiveKeys() {
         when(applicationMapper.update(isNull(), any(LambdaUpdateWrapper.class))).thenReturn(1);
 
         assertDoesNotThrow(() -> applicationService.deleteMyApplication(42L, 100L));
 
-        verify(applicationMapper).update(isNull(), argThat(wrapper -> {
-            if (!(wrapper instanceof LambdaUpdateWrapper<?> update)) {
-                return false;
-            }
-            String where = update.getExpression().getSqlSegment();
-            String set = update.getSqlSet();
-            return where.contains("id")
-                    && where.contains("owner_user_id")
-                    && where.contains("is_deleted")
-                    && set.contains("is_deleted")
-                    && set.contains("deleted_at")
-                    && update.getParamNameValuePairs().containsValue(100L)
-                    && update.getParamNameValuePairs().containsValue(42L)
-                    && update.getParamNameValuePairs().containsValue(0)
-                    && update.getParamNameValuePairs().containsValue(1)
-                    && update.getParamNameValuePairs().values().stream()
-                            .anyMatch(LocalDateTime.class::isInstance);
-        }));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<LambdaUpdateWrapper<Application>> appCaptor =
+                ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(applicationMapper).update(isNull(), appCaptor.capture());
+        LambdaUpdateWrapper<Application> appUpdate = appCaptor.getValue();
+        assertTrue(appUpdate.getExpression().getSqlSegment().contains("owner_user_id"));
+        assertTrue(appUpdate.getExpression().getSqlSegment().contains("is_deleted"));
+        assertTrue(appUpdate.getParamNameValuePairs().containsValue(100L));
+        assertTrue(appUpdate.getParamNameValuePairs().containsValue(42L));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<LambdaUpdateWrapper<ApiKey>> keyCaptor =
+                ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(apiKeyMapper).update(isNull(), keyCaptor.capture());
+        LambdaUpdateWrapper<ApiKey> keyUpdate = keyCaptor.getValue();
+        assertTrue(keyUpdate.getExpression().getSqlSegment().contains("application_id"));
+        assertTrue(keyUpdate.getExpression().getSqlSegment().contains("is_deleted"));
+        assertTrue(keyUpdate.getSqlSet().contains("deleted_at"));
+        assertTrue(keyUpdate.getParamNameValuePairs().containsValue(100L));
+        assertTrue(keyUpdate.getParamNameValuePairs().containsValue(0));
+        assertTrue(keyUpdate.getParamNameValuePairs().containsValue(1));
+
+        LocalDateTime appDeletedAt = appUpdate.getParamNameValuePairs().values().stream()
+                .filter(LocalDateTime.class::isInstance)
+                .map(LocalDateTime.class::cast)
+                .findFirst().orElseThrow();
+        assertTrue(keyUpdate.getParamNameValuePairs().containsValue(appDeletedAt));
         verifyNoMoreInteractions(applicationMapper);
+        verifyNoMoreInteractions(apiKeyMapper);
     }
 
     @Test
@@ -321,6 +342,7 @@ class ApplicationServiceImplTests {
 
         verify(applicationMapper).update(isNull(), any(LambdaUpdateWrapper.class));
         verifyNoMoreInteractions(applicationMapper);
+        verifyNoInteractions(apiKeyMapper);
     }
 
     @Test
@@ -330,5 +352,6 @@ class ApplicationServiceImplTests {
                     () -> applicationService.deleteMyApplication(42L, appId));
         }
         verifyNoInteractions(applicationMapper);
+        verifyNoInteractions(apiKeyMapper);
     }
 }

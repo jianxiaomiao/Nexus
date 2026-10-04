@@ -1,0 +1,75 @@
+# Nexus 下一阶段学习路线
+
+本清单按仓库当前实现编排。最初的《Nexus Developer API Platform 开发计划》提供功能地图，但其中的版本、接口路径、认证请求头和技术顺序是早期设想；实现与测试是当前事实来源。
+
+## 当前检查点
+
+- [x] 注册、登录和 JWT 签发；管理接口使用 Bearer JWT。
+- [x] Application 创建、列表、更新、软删除及归属校验。
+- [x] API Key 创建、列表、更新、软删除；完整密钥仅创建时返回。
+- [x] `/v1/*` 的 API Key Filter、机器身份传递和 `GET /v1/utils/uuid`。
+- [x] 认证器、管理流程及真实 HTTP 测试；最近一次完整测试为 145/145（使用临时测试 JWT 密钥）。
+- [ ] 开发者能独立解释 Filter、认证器、请求属性、Controller 以及 401/403 的边界。
+
+机器认证沿 Key → Application → User 检查当前状态。管理接口在 JWT 验签后也查询 User，因此账号禁用和删除会影响已签发凭证。具体规则见 [账号状态策略](ACCOUNT_STATUS_POLICY.md)。
+
+## A. 先完成认证与账号生命周期决策
+
+**要解决的问题：** 账号被禁用或软删除后，已有 JWT 和其 Application 下的 Key 是否立刻失效？规则已确定并实现。
+
+- [x] 写出状态表：账号正常、禁用、删除时，已有 JWT 和 API Key 各返回什么；说明 401/403 的理由。
+- [x] 选择立即失效：每次请求读取 User；无效或已删除身份优先于禁用状态。
+- [x] 修改两条认证边界，加入状态转换与真实 HTTP 测试。
+- [ ] 开发者能不用代码解释上述状态表、查询代价和失败顺序。
+
+**学习检查：** 能解释“认证、授权、账号状态”各在哪一步判断，以及为什么某种状态返回 401 或 403。
+
+## B. 第二个 Open API：Hash
+
+**要解决的问题：** UUID 没有请求体，尚未练到机器接口的输入边界与参数验证。旧计划下一项是 `POST /v1/utils/hash`。
+
+- [x] 契约已定：`SHA256` / `SHA512`、UTF-8 最多 4096 字节、小写十六进制结果和统一错误响应。
+- [x] 真实 HTTP 测试覆盖两种算法、空输入、缺失字段、非法算法与输入字节边界；测试由 Agent 编写，开发者仍需能解释这些场景对应的规则。
+- [x] DTO、校验、Hash 逻辑与 HTTP 接口已实现；不记录原始输入或完整密钥。
+- [x] `docs/OPEN_API.md` 已补请求、响应、长度和错误示例；完整测试 145/145 通过。
+
+**学习检查：** 能从 HTTP 请求追踪到 Bean Validation、业务计算和响应，并解释输入限制的目的。
+
+## C. Vue Developer Console 最小闭环
+
+**要解决的问题：** 后端已有管理接口和两个机器 Open API，但开发者还没有网页入口来完成 Application 与 API Key 的日常管理。
+
+- [x] 在同一仓库创建 `nexus-console/`，使用 Vue、TypeScript、Router、Linter 和 Prettier 脚手架。
+- [x] 前端依赖已安装、锁文件已生成；开发服务器可启动，`npm run build` 通过。
+- [ ] 实现登录、Application 列表与创建、API Key 列表与创建；创建时仅展示一次完整 Key。
+- [ ] 用真实后端走通“登录 → 创建 Application → 创建 Key → 调用 UUID/Hash → 禁用后拒绝调用”。
+
+**学习检查：** 能解释浏览器请求如何到达管理 API，JWT 与 API Key 分别由谁持有，以及创建响应为何不能长期保存在浏览器。
+
+## D. 让测试可重复运行
+
+**要解决的问题：** 当前完整测试依赖本地 MySQL 和测试 JWT 密钥；换一台机器后运行条件需要明确。
+
+- [ ] 记录最短的本地启动与测试步骤，明确测试数据库和临时密钥从哪里来。
+- [ ] 在需要团队或远程持续验证时，增加最小 CI：启动 MySQL、注入测试密钥、运行 Maven 测试；不上传真实凭证。
+
+**学习检查：** 能说明单元测试、Spring 集成测试和真实 HTTP 测试分别证明了什么。
+
+## E. 第一个有持久化业务数据的 Open API：短链接
+
+在前述检查点稳定后，再开始短链接。先用 MySQL 实现最小闭环：Key 创建短链、公开地址跳转、归属检查、禁用/删除/到期规则与短码冲突处理。
+
+- [ ] 需求、状态表和 API 契约由开发者先提出；重点考虑短链属于哪个 Application，公开跳转是否需要 Key。
+- [ ] 先定数据模型与 Flyway migration，再写 Entity/Mapper/Service/Controller。
+- [ ] 覆盖跨 Application 越权、重复短码、过期和状态转换测试。
+- [ ] 当 UUID/Hash 与短链写入确实需要不同权限时，再设计最小 Scope（如 `utils:read`、`shortlink:write`）。
+
+**学习检查：** 能解释机器身份如何绑定资源，以及为什么客户端传入的 ID 不能单独证明资源归属。[OWASP 的对象级授权说明](https://api-security.owasp.org/editions/2023/en/0xa1-broken-object-level-authorization/)可作复习材料。
+
+## 后续按具体问题引入
+
+- Usage：先明确要记录什么及准确性要求，再选同步持久化或异步事件。
+- Redis：短链查询有实际延迟或吞吐瓶颈并测量后再加缓存；限流需求明确后再设计限流器。
+- RabbitMQ、异步截图、Webhook、监控、部署：各自需要明确业务问题、失败规则与验证办法。公开部署前需提供 HTTPS；API Key 不应通过明文传输。[OWASP REST 安全建议](https://cheatsheetseries.owasp.org/cheatsheets/REST_Security_Cheat_Sheet.html)
+
+每完成一个学习单元，检查两件事：行为及相关测试是否正确；开发者是否能说明调用链、失败路径与当前选择的代价。只更新当前完成项与最近下一项，不把整份功能地图当作必须按顺序堆技术的工期表。
