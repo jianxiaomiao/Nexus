@@ -1,35 +1,41 @@
 @import './base.css';
 
+:root {
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  color: var(--nexus-ink);
+  background: var(--nexus-paper);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+
+  --nexus-paper: #faf9f4;
+  --nexus-sage: #eef2e8;
+  --nexus-surface: #fffefb;
+  --nexus-ink: #203b37;
+  --nexus-muted: #667a72;
+  --nexus-teal: #247b70;
+  --nexus-gold: #e7bd58;
+  --nexus-line: #dfe7dd;
+  --nexus-card-shadow: 0 10px 28px rgba(32, 59, 55, 0.055);
+  --nexus-success-ink: #26764d;
+  --nexus-success-surface: #e6f4e9;
+  --nexus-warning-ink: #9a641f;
+  --nexus-warning-surface: #fff0d9;
+
+  --el-color-primary: #247b70;
+  --el-color-primary-light-3: #549c92;
+  --el-color-primary-light-5: #80b7af;
+  --el-color-primary-light-7: #b0d3ce;
+  --el-color-primary-light-9: #e6f2f0;
+  --el-color-primary-dark-2: #1b625a;
+}
+
 #app {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  font-weight: normal;
+  min-height: 100vh;
 }
 
-a,
-.green {
-  text-decoration: none;
-  color: hsla(160, 100%, 37%, 1);
-  transition: 0.4s;
-  padding: 3px;
-}
-
-@media (hover: hover) {
-  a:hover {
-    background-color: hsla(160, 100%, 37%, 0.2);
-  }
-}
-
-@media (min-width: 1024px) {
-  body {
-    display: flex;
-    place-items: center;
-  }
-
-  #app {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    padding: 0 2rem;
-  }
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--nexus-teal);
+  outline-offset: 3px;
 }

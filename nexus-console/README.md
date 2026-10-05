@@ -46,3 +46,18 @@ npm run build
 ```sh
 npm run lint
 ```
+
+## Browser tests (Playwright)
+
+From `nexus-console`, install dependencies and the Chromium browser once:
+
+```sh
+npm install
+npx playwright install chromium
+```
+
+Run the browser test with `npm run test:e2e`. For an interactive, step-by-step view, run `npm run test:e2e:ui`; use `npm run test:e2e -- --headed` to watch the browser. The test runner starts its own Vite server on `127.0.0.1:4173` and closes it afterward. If that port is occupied, stop the other server first.
+
+The example in `e2e/login.spec.ts` intercepts every `/api` request and supplies fake responses. It checks the login form, navigation, Application card, and Bearer header without starting Spring Boot or writing to MySQL. A passing mocked-browser test does **not** prove backend integration. Keep real frontend-to-backend acceptance separate, with a dedicated test database/account and explicit cleanup.
+
+If a test fails, Playwright saves a screenshot and trace under `test-results/`. Open a trace with `npx playwright show-trace <path-to-trace.zip>`; test artifacts are ignored by Git.
