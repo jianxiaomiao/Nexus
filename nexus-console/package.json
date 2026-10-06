@@ -11,6 +11,7 @@
     "type-check": "vue-tsc --build",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
+    "type-check:e2e": "tsc --noEmit -p tsconfig.e2e.json",
     "lint": "run-s \"lint:*\"",
     "lint:oxlint": "oxlint . --fix",
     "lint:eslint": "eslint . --fix --cache",
