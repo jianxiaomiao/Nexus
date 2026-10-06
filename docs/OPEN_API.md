@@ -96,3 +96,28 @@ Hash 请求体错误均返回 HTTP 400，使用同样的 `code`、`message`、`d
 
 禁用父 Application 不会修改子 Key 自身的禁用状态；重新启用父 Application 后，原本仍启用且未删除的 Key 可以继续使用。
 账号禁用也不会修改子表；恢复账号后，原本仍启用且未删除的 Application 和 Key 可以继续使用。详见 [账号状态规则](ACCOUNT_STATUS_POLICY.md)。
+
+## 短链接
+
+机器端使用 `Authorization: ApiKey <完整密钥>`，仅能管理这把 Key 创建的短链。创建请求不接收 `apiKeyId`；服务端从已认证的 Key 身份确定归属。
+
+| 方法与路径 | 用途 |
+| --- | --- |
+| `POST /v1/short-links` | 创建短链 |
+| `GET /v1/short-links` | 列出当前 Key 未删除的短链 |
+| `PUT /v1/short-links` | 按请求体中的 `id` 修改名称或状态 |
+| `DELETE /v1/short-links/{id}` | 软删除当前 Key 的短链 |
+
+创建请求示例：
+
+```json
+{"name":"演示链接","originalUrl":"https://www.douyin.com/video/1","expiresAt":"2030-01-01T16:00:00+08:00"}
+```
+
+`expiresAt` 必须是带时区的未来绝对时刻；当前时间到达该时刻即失效。`originalUrl` 创建后不能修改，最多 2048 个字符。第一版只接受 HTTPS、无 URL 用户名、无非标准端口，且主机名精确匹配 `www.douyin.com`、`v.douyin.com`、`www.xiaohongshu.com`、`weibo.com` 或 `m.weibo.cn`；不自动允许子域名。该检查不保证目标内容安全。
+
+创建、列表和更新的 `data` 返回短链 `id`、`apiKeyId`、`name`、`originalUrl`、`shortCode`、`status`、`expiresAt`、`createdAt`、`updatedAt`。短码由服务端生成，删除后不复用。更新请求体为 `{"id":123,"name":"新名称","status":1}`；`name` 和 `status` 至少提供一个，状态 `0` 为启用、`1` 为禁用。
+
+管理端使用 `Authorization: Bearer <JWT>`：`GET /api/short-links?apiKeyId=123`、`PUT /api/short-links` 和 `DELETE /api/short-links/{id}`。管理端只可操作自己 Application 下的 Key 所属短链；不能通过提交其他用户的 ID 获得访问权。
+
+访问者无需凭证即可请求 `GET /s/{shortCode}`。有效短链返回 HTTP 302、`Location` 为原始 URL，并设置 `Cache-Control: no-store`。短链或上层 Key、Application、所有者已禁用或删除时返回 404；仅在仍可用但已到期时返回 410。公开跳转不经过 `/v1/*` 的 API Key Filter。

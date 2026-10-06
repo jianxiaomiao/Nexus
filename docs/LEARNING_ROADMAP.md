@@ -8,7 +8,7 @@
 - [x] Application 创建、列表、更新、软删除及归属校验。
 - [x] API Key 创建、列表、更新、软删除；完整密钥仅创建时返回。
 - [x] `/v1/*` 的 API Key Filter、机器身份传递和 `GET /v1/utils/uuid`。
-- [x] 认证器、管理流程及真实 HTTP 测试；最近一次完整测试为 145/145（使用临时测试 JWT 密钥）。
+- [x] 认证器、管理流程及真实 HTTP 测试；最近一次完整测试为 154/154（使用新的临时测试 JWT 密钥）。
 - [ ] 开发者能独立解释 Filter、认证器、请求属性、Controller 以及 401/403 的边界。
 
 机器认证沿 Key → Application → User 检查当前状态。管理接口在 JWT 验签后也查询 User，因此账号禁用和删除会影响已签发凭证。具体规则见 [账号状态策略](ACCOUNT_STATUS_POLICY.md)。
@@ -41,8 +41,10 @@
 
 - [x] 在同一仓库创建 `nexus-console/`，使用 Vue、TypeScript、Router、Linter 和 Prettier 脚手架。
 - [x] 前端依赖已安装、锁文件已生成；开发服务器可启动，`npm run build` 通过。
-- [ ] 实现登录、Application 列表与创建、API Key 列表与创建；创建时仅展示一次完整 Key。
+- [x] 实现登录、Application 列表与创建、API Key 列表与创建；创建时仅展示一次完整 Key。另有开发文档和 UUID/Hash 调试台。
 - [ ] 用真实后端走通“登录 → 创建 Application → 创建 Key → 调用 UUID/Hash → 禁用后拒绝调用”。
+
+2026-10-06：开发者已确认 UUID 与 Hash 的真实调用成功；完整生命周期中的禁用后拒绝调用仍需单独确认。前端构建、类型检查与模拟浏览器回归测试通过 35/35。
 
 **学习检查：** 能解释浏览器请求如何到达管理 API，JWT 与 API Key 分别由谁持有，以及创建响应为何不能长期保存在浏览器。
 
@@ -57,11 +59,12 @@
 
 ## E. 第一个有持久化业务数据的 Open API：短链接
 
-在前述检查点稳定后，再开始短链接。先用 MySQL 实现最小闭环：Key 创建短链、公开地址跳转、归属检查、禁用/删除/到期规则与短码冲突处理。
+短链接后端的最小闭环已实现：Key 创建短链、公开地址跳转、归属检查、禁用/删除/到期规则与短码冲突处理。下一步接入 Vue 控制台并用真实后端验收。
 
-- [ ] 需求、状态表和 API 契约由开发者先提出；重点考虑短链属于哪个 Application，公开跳转是否需要 Key。
-- [ ] 先定数据模型与 Flyway migration，再写 Entity/Mapper/Service/Controller。
-- [ ] 覆盖跨 Application 越权、重复短码、过期和状态转换测试。
+- [x] 明确 Key 归属、JWT 管理、公开跳转、状态、过期、短码冲突和目标 URL 主机白名单；HTTP 契约见 `docs/OPEN_API.md`。
+- [x] 先定数据模型与 V5 Flyway migration，再实现 Entity/Mapper/Service/Controller。
+- [x] 测试覆盖跨 Key/用户越权、短码冲突、过期、状态转换和公开跳转；后端完整测试 154/154 通过。
+- [ ] Vue 控制台接入短链创建、列表、改名、禁用/启用和删除；再验证真实前后端流程。
 - [ ] 当 UUID/Hash 与短链写入确实需要不同权限时，再设计最小 Scope（如 `utils:read`、`shortlink:write`）。
 
 **学习检查：** 能解释机器身份如何绑定资源，以及为什么客户端传入的 ID 不能单独证明资源归属。[OWASP 的对象级授权说明](https://api-security.owasp.org/editions/2023/en/0xa1-broken-object-level-authorization/)可作复习材料。

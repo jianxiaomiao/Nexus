@@ -22,6 +22,8 @@ import com.nexus.application.entity.Application;
 import com.nexus.application.exception.ApplicationDisabledException;
 import com.nexus.application.exception.ApplicationNotFoundException;
 import com.nexus.application.mapper.ApplicationMapper;
+import com.nexus.shortlink.entity.ShortLink;
+import com.nexus.shortlink.mapper.ShortLinkMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -53,6 +55,9 @@ class ApiKeyServiceTests {
     private ApplicationMapper applicationMapper;
 
     @Mock
+    private ShortLinkMapper shortLinkMapper;
+
+    @Mock
     private ApiKeyCredentialGenerator credentialGenerator;
 
     @InjectMocks
@@ -69,6 +74,11 @@ class ApiKeyServiceTests {
                 new MybatisConfiguration(), ApiKeyMapper.class.getName());
         keyAssistant.setCurrentNamespace(ApiKeyMapper.class.getName());
         TableInfoHelper.initTableInfo(keyAssistant, ApiKey.class);
+
+        MapperBuilderAssistant linkAssistant = new MapperBuilderAssistant(
+                new MybatisConfiguration(), ShortLinkMapper.class.getName());
+        linkAssistant.setCurrentNamespace(ShortLinkMapper.class.getName());
+        TableInfoHelper.initTableInfo(linkAssistant, ShortLink.class);
     }
 
     @Test
@@ -286,6 +296,7 @@ class ApiKeyServiceTests {
         assertTrue(update.getParamNameValuePairs().containsValue(9L));
         assertTrue(update.getSqlSet().contains("deleted_at"));
         assertTrue(update.getParamNameValuePairs().containsValue(1));
+        verify(shortLinkMapper).update(any(), any(LambdaUpdateWrapper.class));
     }
 
     @Test

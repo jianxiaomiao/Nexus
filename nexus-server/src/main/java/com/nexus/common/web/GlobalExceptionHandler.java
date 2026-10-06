@@ -18,6 +18,10 @@ import com.nexus.auth.exception.ApiKeyForbiddenException;
 import com.nexus.openapi.exception.HashAlgorithmRequiredException;
 import com.nexus.openapi.exception.HashContentRequiredException;
 import com.nexus.openapi.exception.HashInputTooLargeException;
+import com.nexus.shortlink.exception.InvalidShortLinkRequestException;
+import com.nexus.shortlink.exception.ShortCodeExhaustedException;
+import com.nexus.shortlink.exception.ShortLinkExpiredException;
+import com.nexus.shortlink.exception.ShortLinkNotFoundException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpStatus;
@@ -33,6 +37,30 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler{
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ExceptionHandler(InvalidShortLinkRequestException.class)
+    public ApiResponse<Void> handleInvalidShortLinkRequest(InvalidShortLinkRequestException exception) {
+        return new ApiResponse<>("INVALID_SHORT_LINK_REQUEST", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    @ExceptionHandler(ShortLinkNotFoundException.class)
+    public ApiResponse<Void> handleShortLinkNotFound(ShortLinkNotFoundException exception) {
+        return new ApiResponse<>("SHORT_LINK_NOT_FOUND", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.GONE)
+    @ExceptionHandler(ShortLinkExpiredException.class)
+    public ApiResponse<Void> handleShortLinkExpired(ShortLinkExpiredException exception) {
+        return new ApiResponse<>("SHORT_LINK_EXPIRED", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
+    @ExceptionHandler(ShortCodeExhaustedException.class)
+    public ApiResponse<Void> handleShortCodeExhausted(ShortCodeExhaustedException exception) {
+        return new ApiResponse<>("SHORT_CODE_UNAVAILABLE", exception.getMessage(), null);
+    }
 
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     @ExceptionHandler(HttpMessageNotReadableException.class)

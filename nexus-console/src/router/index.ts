@@ -25,6 +25,20 @@ const router = createRouter({
           name: 'api-key-detail',
           component: () => import('../views/ApiKeyDetailView.vue'),
         },
+        {
+          path: 'playground',
+          name: 'playground',
+          component: () => import('../views/ApiPlaygroundView.vue'),
+        },
+      ],
+    },
+    {
+      path: '/docs',
+      component: () => import('../views/DocsLayout.vue'),
+      meta: { requiresAuth: true },
+      children: [
+        { path: '', name: 'docs-home', component: () => import('../views/DocsHomeView.vue') },
+        { path: ':slug', name: 'docs-article', component: () => import('../views/DocsArticleView.vue') },
       ],
     },
     {

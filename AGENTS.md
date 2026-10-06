@@ -380,10 +380,16 @@ The API Key management checkpoint is implemented: V4, credential generation, Ent
 
 The Vue Developer Console now has login/registration, the Application list and detail, the Application detail `API Keys` tab, a Key list with one-time full-credential display after creation, and a single-Key detail page with edit/disable/delete operations. The frontend build and mock-response browser checks pass, including narrow screens and the one-time display guard. Real frontend-to-backend acceptance of these new Key screens remains to be done; no new single-Key GET endpoint exists, so the detail view resolves a Key from the authenticated Application-scoped list.
 
+The Developer Docs UI now has an authenticated `/docs` homepage and five Markdown-backed articles under `/docs/:slug`, with a separate reading layout, responsive directory, table/code rendering, copyable examples, and an in-page table of contents. Its request examples follow `docs/OPEN_API.md`; the frontend build and focused browser tests pass. Public access to docs has not been decided.
+
+The lightweight Open API playground is implemented at authenticated `/playground`. It switches between UUID and Hash, uses a separate `/v1/*` browser client with a manually entered API Key (never the management Bearer JWT), displays real HTTP/JSON results, enforces the 4096 UTF-8 byte limit for Hash input, and provides static curl/PowerShell examples without inserting the entered credential. Console and docs link to it; the Vite development proxy forwards `/v1/*`. The developer reported successful real-backend UUID and Hash calls on 2026-10-06. The complete create/use/disable/re-enable or delete lifecycle has not been explicitly confirmed.
+
+The first short-link backend checkpoint is implemented: V5, Key-owned links, machine `/v1/short-links` creation and management, human JWT `/api/short-links` management, and public `GET /s/{shortCode}` with temporary redirect and `no-store`. Creation accepts HTTPS targets on the exact host allowlist; a link expires at its absolute expiry instant. Redirect checks the link and its current Key/Application state. Parent deletion cascades soft deletion; short codes remain globally unique and collision retries are bounded. Real HTTP/MySQL tests cover ownership isolation, lifecycle, expiry, and redirect behavior. On 2026-10-06 the full backend suite passed 154/154 with a fresh temporary test JWT secret; frontend build, type check, and mocked browser suite passed 35/35. Short-link console screens and real frontend-to-backend acceptance are next.
+
 Current priorities:
 
-1. verify the new API Key console screens against the running backend with a test account, especially one-time credential display, refresh/deep-link behavior, state changes, and ownership errors;
-2. review the Filter → authenticator → request attribute → Controller flow and owner account-state decision, plus Hash request conversion, Bean Validation, and byte-limit errors, as learning checkpoints;
-3. revisit Application list pagination, update API semantics, scopes, quotas, and infrastructure only when a concrete requirement calls for them.
+1. add short-link creation/list/management to the Vue console, then verify the complete flow against the real backend, including public redirect and state changes;
+2. finish the real create/use/disable/re-enable or delete Key lifecycle check and decide whether Developer Docs should be public before changing the current authentication boundary;
+3. document repeatable local tests; revisit pagination, scopes, quotas, and infrastructure only when a concrete requirement calls for them.
 
 Do not rewrite working code solely for practice. Use focused experiments or isolated implementations when repetition improves understanding. Do not introduce full Spring Security web authentication, Redis, RabbitMQ, observability infrastructure, or later-stage systems until a concrete requirement calls for them.

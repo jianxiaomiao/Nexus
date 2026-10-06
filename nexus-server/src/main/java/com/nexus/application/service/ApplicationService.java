@@ -11,6 +11,8 @@ import com.nexus.application.exception.ApplicationNotFoundException;
 import com.nexus.application.exception.InvalidApplicationIdException;
 import com.nexus.application.exception.InvalidApplicationUpdateException;
 import com.nexus.application.mapper.ApplicationMapper;
+import com.nexus.shortlink.entity.ShortLink;
+import com.nexus.shortlink.mapper.ShortLinkMapper;
 import lombok.AllArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -26,6 +28,7 @@ public class ApplicationService {
     private final ApplicationMapper applicationMapper;
 
     private final ApiKeyMapper apiKeyMapper;
+    private final ShortLinkMapper shortLinkMapper;
 
     public CreateApplicationResponse createApplication(Long userId, CreateApplicationRequest createApplicationRequest){
         //获取用户id
@@ -127,11 +130,23 @@ public class ApplicationService {
             throw new ApplicationNotFoundException();
         }
 
+        List<Long> keyIds = apiKeyMapper.selectList(Wrappers.<ApiKey>lambdaQuery()
+                        .eq(ApiKey::getApplicationId, appId))
+                .stream().map(ApiKey::getId).toList();
+
         apiKeyMapper.update(null, Wrappers.<ApiKey>lambdaUpdate()
                 .eq(ApiKey::getApplicationId, appId)
                 .eq(ApiKey::getIsDeleted, 0)
                 .set(ApiKey::getIsDeleted, 1)
                 .set(ApiKey::getDeletedAt, deletedAt));
+        if (!keyIds.isEmpty()) {
+            shortLinkMapper.update(null, Wrappers.<ShortLink>lambdaUpdate()
+                    .in(ShortLink::getApiKeyId, keyIds)
+                    .eq(ShortLink::getIsDeleted, 0)
+                    .set(ShortLink::getIsDeleted, 1)
+                    .set(ShortLink::getDeletedAt, deletedAt)
+                    .set(ShortLink::getUpdatedAt, deletedAt));
+        }
     }
 
 

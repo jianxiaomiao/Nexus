@@ -2,7 +2,7 @@
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/userStore'
-import { Close, Expand, Fold, Grid, SwitchButton } from '@element-plus/icons-vue'
+import { Close, Document, Expand, Fold, Grid, Monitor, SwitchButton } from '@element-plus/icons-vue'
 import brandSpark from '@/assets/icons/brand-spark.svg'
 
 const route = useRoute()
@@ -51,6 +51,14 @@ function logout() {
           <el-icon class="nav-icon" :size="20" aria-hidden="true"><Grid /></el-icon>
           <span>Applications</span>
         </RouterLink>
+        <RouterLink class="nav-item" :to="{ name: 'docs-home' }" aria-label="开发文档" @click="mobileMenuOpen = false">
+          <el-icon class="nav-icon" :size="20" aria-hidden="true"><Document /></el-icon>
+          <span>开发文档</span>
+        </RouterLink>
+        <RouterLink class="nav-item" :to="{ name: 'playground' }" aria-label="API 调试台" @click="mobileMenuOpen = false">
+          <el-icon class="nav-icon" :size="20" aria-hidden="true"><Monitor /></el-icon>
+          <span>API 调试台</span>
+        </RouterLink>
       </nav>
 
       <div class="sidebar-bottom">
@@ -69,6 +77,7 @@ function logout() {
           <span class="header-caption">Nexus / 开发者控制台</span>
           <div class="header-breadcrumb">
             <RouterLink v-if="route.name === 'application-detail' || route.name === 'api-key-detail'" :to="{ name: 'applications' }">Applications</RouterLink>
+            <strong v-else-if="route.name === 'playground'" aria-current="page">API 调试台</strong>
             <strong v-else>Applications</strong>
             <span v-if="route.name === 'application-detail'" aria-current="page">/ 应用详情</span>
             <template v-else-if="route.name === 'api-key-detail'">

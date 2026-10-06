@@ -15,6 +15,8 @@ import com.nexus.application.entity.Application;
 import com.nexus.application.exception.ApplicationDisabledException;
 import com.nexus.application.exception.ApplicationNotFoundException;
 import com.nexus.application.mapper.ApplicationMapper;
+import com.nexus.shortlink.entity.ShortLink;
+import com.nexus.shortlink.mapper.ShortLinkMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -28,6 +30,7 @@ import java.util.List;
 public class ApiKeyService {
     private final ApiKeyMapper apiKeyMapper;
     private final ApplicationMapper applicationMapper;
+    private final ShortLinkMapper shortLinkMapper;
     private final ApiKeyCredentialGenerator credentialGenerator;
 
     @Transactional
@@ -198,15 +201,22 @@ public class ApiKeyService {
         if (application == null) {
             throw new ApplicationNotFoundException();
         }
+        LocalDateTime deletedAt = LocalDateTime.now();
         LambdaUpdateWrapper<ApiKey> lambdaUpdateWrapper = Wrappers.lambdaUpdate();
         lambdaUpdateWrapper
                 .eq(ApiKey::getId, deleteApiKeyRequest.apiKeyId())
                 .eq(ApiKey::getApplicationId, deleteApiKeyRequest.applicationId())
                 .eq(ApiKey::getIsDeleted, 0)
                 .set(ApiKey::getIsDeleted, 1)
-                .set(ApiKey::getDeletedAt, LocalDateTime.now());
+                .set(ApiKey::getDeletedAt, deletedAt);
         affectedRows = apiKeyMapper.update(null, lambdaUpdateWrapper);
         if(affectedRows > 0){
+            shortLinkMapper.update(null, Wrappers.<ShortLink>lambdaUpdate()
+                    .eq(ShortLink::getApiKeyId, deleteApiKeyRequest.apiKeyId())
+                    .eq(ShortLink::getIsDeleted, 0)
+                    .set(ShortLink::getIsDeleted, 1)
+                    .set(ShortLink::getDeletedAt, deletedAt)
+                    .set(ShortLink::getUpdatedAt, deletedAt));
             return ;
         }else {
             throw new ApiKeyNotFoundException();

@@ -12,6 +12,8 @@ import com.nexus.application.exception.ApplicationNotFoundException;
 import com.nexus.application.exception.InvalidApplicationIdException;
 import com.nexus.application.exception.InvalidApplicationUpdateException;
 import com.nexus.application.mapper.ApplicationMapper;
+import com.nexus.shortlink.entity.ShortLink;
+import com.nexus.shortlink.mapper.ShortLinkMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
@@ -52,6 +54,9 @@ class ApplicationServiceImplTests {
     @Mock
     private ApiKeyMapper apiKeyMapper;
 
+    @Mock
+    private ShortLinkMapper shortLinkMapper;
+
     private ApplicationService applicationService;
 
     @BeforeAll
@@ -65,11 +70,16 @@ class ApplicationServiceImplTests {
                 new MybatisConfiguration(), ApiKeyMapper.class.getName());
         keyAssistant.setCurrentNamespace(ApiKeyMapper.class.getName());
         TableInfoHelper.initTableInfo(keyAssistant, ApiKey.class);
+
+        MapperBuilderAssistant linkAssistant = new MapperBuilderAssistant(
+                new MybatisConfiguration(), ShortLinkMapper.class.getName());
+        linkAssistant.setCurrentNamespace(ShortLinkMapper.class.getName());
+        TableInfoHelper.initTableInfo(linkAssistant, ShortLink.class);
     }
 
     @BeforeEach
     void setUp() {
-        applicationService = new ApplicationService(applicationMapper, apiKeyMapper);
+        applicationService = new ApplicationService(applicationMapper, apiKeyMapper, shortLinkMapper);
     }
 
     @Test
@@ -299,6 +309,9 @@ class ApplicationServiceImplTests {
     @Test
     void deleteShouldSoftDeleteApplicationAndItsActiveKeys() {
         when(applicationMapper.update(isNull(), any(LambdaUpdateWrapper.class))).thenReturn(1);
+        ApiKey key = new ApiKey();
+        key.setId(9L);
+        when(apiKeyMapper.selectList(any())).thenReturn(List.of(key));
 
         assertDoesNotThrow(() -> applicationService.deleteMyApplication(42L, 100L));
 
@@ -330,7 +343,9 @@ class ApplicationServiceImplTests {
                 .findFirst().orElseThrow();
         assertTrue(keyUpdate.getParamNameValuePairs().containsValue(appDeletedAt));
         verifyNoMoreInteractions(applicationMapper);
-        verifyNoMoreInteractions(apiKeyMapper);
+        verify(apiKeyMapper).selectList(any());
+        verify(shortLinkMapper).update(isNull(), any(LambdaUpdateWrapper.class));
+        verifyNoMoreInteractions(apiKeyMapper, shortLinkMapper);
     }
 
     @Test
