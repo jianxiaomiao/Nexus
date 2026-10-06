@@ -2,9 +2,10 @@ import quickStart from './content/quick-start.md?raw'
 import authentication from './content/authentication.md?raw'
 import uuid from './content/uuid.md?raw'
 import hash from './content/hash.md?raw'
+import shortlink from './content/shortlink.md?raw'
 import errors from './content/errors.md?raw'
 
-export type DocSlug = 'quick-start' | 'authentication' | 'uuid' | 'hash' | 'errors'
+export type DocSlug = 'quick-start' | 'authentication' | 'uuid' | 'hash' | 'shortlink' | 'errors'
 
 export interface DocPage {
   slug: DocSlug
@@ -21,6 +22,7 @@ export const docs: DocPage[] = [
   { slug: 'authentication', title: 'API Key 与认证', group: '开始使用', summary: '理解管理端 JWT 与机器端 API Key 的边界。', markdown: authentication },
   { slug: 'uuid', title: '生成 UUID', group: 'API 参考', summary: '获取一个新生成的 UUID。', method: 'GET', path: '/v1/utils/uuid', markdown: uuid },
   { slug: 'hash', title: '计算 Hash', group: 'API 参考', summary: '计算文本的 SHA-256 或 SHA-512 摘要。', method: 'POST', path: '/v1/utils/hash', markdown: hash },
+  { slug: 'shortlink', title: '短链接', group: 'API 参考', summary: '创建、管理并公开访问有期限的短链接。', method: 'POST', path: '/v1/short-links', markdown: shortlink },
   { slug: 'errors', title: '错误码与排查', group: '帮助', summary: '区分认证、禁用和请求参数错误。', markdown: errors },
 ]
 

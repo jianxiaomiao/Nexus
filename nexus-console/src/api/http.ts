@@ -13,7 +13,7 @@ export const http = axios.create({
 })
 
 // 人类用户的 Bearer token 只用于管理接口，不发送给登录/注册或机器 API。
-const managementPaths = ['/application', '/apiKey']
+const managementPaths = ['/application', '/apiKey', '/short-links']
 
 function isManagementRequest(config: AxiosRequestConfig): boolean {
   if (config.baseURL !== '/api' || !config.url) return false

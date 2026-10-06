@@ -10,7 +10,7 @@ Nexus 的开放 API 响应使用统一外层结构：`code` 是稳定的业务�
 }
 ```
 
-这篇文档只覆盖 `/v1/*` 开放接口。控制台管理接口 `/api/*` 使用 Bearer JWT，有另外的登录错误码。
+这篇文档主要覆盖 `/v1/*` 开放接口，末尾也列出公开短地址 `/s/*` 的状态。控制台管理接口 `/api/*` 使用 Bearer JWT，有另外的登录错误码。
 
 ## 认证错误：401 与 403
 
@@ -51,12 +51,18 @@ WWW-Authenticate: ApiKey realm="nexus-openapi"
 
 `value` 缺失时对应提示为 `"value": "输入内容为空"`。若算法写成 `MD5`，服务器只返回通用的 `INVALID_REQUEST_BODY`，不会回显原始输入。
 
+## 短链接错误
+
+创建时若目标 URL 不符合 HTTPS 与精确主机名白名单、到期时刻已过去，或更新请求没有可修改字段，返回 400 `INVALID_SHORT_LINK_REQUEST`。字段缺失可能返回 400 `VALIDATION_ERROR`；短码多次冲突无法生成时返回 503 `SHORT_CODE_UNAVAILABLE`。
+
+机器端查询、修改或删除其他 Key 的短链，按不存在处理，返回 404 `SHORT_LINK_NOT_FOUND`。公开 `/s/{shortCode}` 遇到禁用或删除的短链及其上层资源也返回 404；仍可用但已到期时返回 410 `SHORT_LINK_EXPIRED`。具体归属、白名单和状态规则见 **短链接** 文档。
+
 ## 没有 HTTP 响应怎么办
 
 “无法连接”“连接被拒绝”或请求超时不是上表中的业务错误，因为请求可能根本没到 Nexus。按顺序检查：
 
 1. 后端是否启动；本地示例是否真的监听 `8080` 端口。
-2. 请求地址和路径是否正确：`/v1/utils/uuid` 或 `/v1/utils/hash`。
+2. 请求地址和路径是否正确：`/v1/utils/uuid`、`/v1/utils/hash`、`/v1/short-links` 或公开 `/s/{shortCode}`。
 3. 如果从手机、容器或另一台电脑请求，`localhost` 指的是**那台设备自己**；请使用它能访问的服务端地址。
 4. 若从浏览器前端直接请求，不要把完整 API Key 嵌入前端。让受信任的服务端发起机器调用。
 

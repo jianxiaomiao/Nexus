@@ -19,6 +19,18 @@ export type ApiKey = {
   updatedAt: string
 }
 
+export type ShortLink = {
+  id: number
+  apiKeyId: number
+  name: string
+  originalUrl: string
+  shortCode: string
+  status: 0 | 1
+  expiresAt: string
+  createdAt: string
+  updatedAt: string
+}
+
 type Failure = { status: number; code: string; message: string }
 type RecordedRequest = { method: string; path: string; body: Record<string, unknown> }
 
@@ -31,9 +43,10 @@ export const sampleKey: ApiKey = {
 // 故意不是可用凭证；只用于检查创建后的一次性展示。
 export const oneTimeKey = 'PLAYWRIGHT_FAKE_KEY_NOT_VALID'
 
-export async function installMockApi(page: Page, initial?: { applications?: Application[]; keys?: ApiKey[] }) {
+export async function installMockApi(page: Page, initial?: { applications?: Application[]; keys?: ApiKey[]; shortLinks?: ShortLink[] }) {
   const applications = structuredClone(initial?.applications ?? [sampleApplication])
   const keys = structuredClone(initial?.keys ?? [sampleKey])
+  const shortLinks = structuredClone(initial?.shortLinks ?? [])
   const calls: RecordedRequest[] = []
   const failures = new Map<string, Failure>()
   let nextApplicationId = 100
@@ -105,13 +118,28 @@ export async function installMockApi(page: Page, initial?: { applications?: Appl
       if (index < 0) { await respond(null, 404, 'API_KEY_NOT_FOUND'); return }
       keys.splice(index, 1)
       await respond(null)
+    } else if (path === '/api/short-links' && method === 'GET') {
+      const apiKeyId = Number(new URL(request.url()).searchParams.get('apiKeyId'))
+      await respond(shortLinks.filter((item) => item.apiKeyId === apiKeyId))
+    } else if (path === '/api/short-links' && method === 'PUT') {
+      const target = shortLinks.find((item) => item.id === Number(body.id))
+      if (!target) { await respond(null, 404, 'SHORT_LINK_NOT_FOUND'); return }
+      if (typeof body.name === 'string') target.name = body.name
+      if (body.status === 0 || body.status === 1) target.status = body.status
+      target.updatedAt = timestamp
+      await respond(target)
+    } else if (/^\/api\/short-links\/\d+$/.test(path) && method === 'DELETE') {
+      const index = shortLinks.findIndex((item) => item.id === Number(path.split('/').at(-1)))
+      if (index < 0) { await respond(null, 404, 'SHORT_LINK_NOT_FOUND'); return }
+      shortLinks.splice(index, 1)
+      await respond(null)
     } else {
       await route.abort()
       throw new Error(`未模拟的 API 请求：${method} ${path}`)
     }
   })
 
-  return { applications, keys, calls, failures }
+  return { applications, keys, shortLinks, calls, failures }
 }
 
 export async function signIn(page: Page) {

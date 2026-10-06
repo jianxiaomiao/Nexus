@@ -194,6 +194,10 @@ watch([() => route.params.applicationId, () => route.params.keyId], () => { void
         </dl>
         <div class="secret-notice" role="note">完整 API Key 仅在创建时显示，之后无法再次查看。</div>
       </div>
+      <div class="detail-card short-links-entry">
+        <div><h2>短链接</h2><p>查看和管理这枚 Key 创建的短链。创建新短链需要使用保存的完整 API Key。</p></div>
+        <RouterLink :to="{ name: 'short-links', query: { applicationId: application.id, apiKeyId: apiKey.id } }">查看短链接 →</RouterLink>
+      </div>
     </template>
   </section>
 </template>
@@ -230,5 +234,11 @@ code { font-family: 'Consolas', 'SFMono-Regular', monospace; font-size: 13px; }
 .secret-notice { margin-top: 20px; padding: 16px 18px; border: 1px solid #d6e5e5; border-radius: 9px; background: #f2f8f8; color: #476775; font-size: 13px; }
 .error-card { color: #8a3c33; }
 .error-card p { margin: 12px 0 22px; }
+.short-links-entry { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 18px; }
+.short-links-entry h2 { margin: 0 0 6px; }
+.short-links-entry p { margin: 0; color: var(--nexus-muted); font-size: 13px; }
+.short-links-entry a { flex: none; color: var(--nexus-teal); font-size: 14px; font-weight: 650; text-decoration: none; }
+.short-links-entry a:hover { text-decoration: underline; }
 @media (max-width: 650px) { .detail-heading { align-items: flex-start; flex-direction: column; } dl > div { grid-template-columns: 1fr; gap: 6px; } }
+@media (max-width: 650px) { .short-links-entry { align-items: flex-start; flex-direction: column; } }
 </style>

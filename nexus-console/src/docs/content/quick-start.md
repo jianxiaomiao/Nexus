@@ -59,4 +59,4 @@ Invoke-RestMethod -Uri 'http://localhost:8080/v1/utils/uuid' `
 | HTTP 401 | 是否用了完整 Key，以及 `Authorization: ApiKey <完整密钥>` 格式是否正确 |
 | HTTP 403 | Key、所属 Application 或账号是否处于禁用状态 |
 
-接着可以阅读左侧的 **API Key 与认证**、**生成 UUID** 和 **计算 Hash**。开放 API 的具体错误码也收录在 **错误码与排查**。
+接着可以阅读左侧的 **API Key 与认证**、**生成 UUID**、**计算 Hash** 和 **短链接**。开放 API 的具体错误码也收录在 **错误码与排查**。

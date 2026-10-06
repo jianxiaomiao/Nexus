@@ -30,6 +30,11 @@ const router = createRouter({
           name: 'playground',
           component: () => import('../views/ApiPlaygroundView.vue'),
         },
+        {
+          path: 'short-links',
+          name: 'short-links',
+          component: () => import('../views/ShortLinksView.vue'),
+        },
       ],
     },
     {

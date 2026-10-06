@@ -8,8 +8,8 @@ test('文档入口、首页卡片与 Markdown 文章可阅读', async ({ page })
   await expect(page).toHaveURL(/\/docs$/)
   await expect(page.getByRole('heading', { name: '从第一条 API 调用开始' })).toBeVisible()
   await expect(page.locator('.docs-hero-image')).toBeVisible()
-  await expect(page.locator('.docs-card')).toHaveCount(5)
-  await expect(page.locator('.docs-card-icon svg')).toHaveCount(5)
+  await expect(page.locator('.docs-card')).toHaveCount(6)
+  await expect(page.locator('.docs-card-icon svg')).toHaveCount(6)
 
   await page.locator('.docs-card').filter({ hasText: '计算 Hash' }).click()
   await expect(page).toHaveURL(/\/docs\/hash$/)
@@ -26,7 +26,7 @@ test('文档入口、首页卡片与 Markdown 文章可阅读', async ({ page })
   await expect(page).toHaveURL(/\/applications$/)
 })
 
-test('五篇文档都呈现与当前接口一致的关键内容', async ({ page }) => {
+test('六篇文档都呈现与当前接口一致的关键内容', async ({ page }) => {
   await installMockApi(page)
   await signIn(page)
   await page.getByRole('link', { name: '开发文档' }).click()
@@ -36,6 +36,7 @@ test('五篇文档都呈现与当前接口一致的关键内容', async ({ page 
     { title: 'API Key 与认证', expected: '程序调用身份' },
     { title: '生成 UUID', expected: 'GET /v1/utils/uuid' },
     { title: '计算 Hash', expected: '恰好 4096 字节有效' },
+    { title: '短链接', expected: 'POST /v1/short-links' },
     { title: '错误码与排查', expected: 'INVALID_API_KEY_CREDENTIAL' },
   ]
 

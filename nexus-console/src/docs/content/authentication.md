@@ -3,7 +3,7 @@
 | 请求范围 | 凭证 | 代表谁 | 典型操作 |
 | --- | --- | --- | --- |
 | 管理接口 `/api/*` | `Authorization: Bearer <JWT>` | 登录的 Nexus 用户 | 创建、查看、禁用 Application 或 API Key |
-| 开放接口 `/v1/*` | `Authorization: ApiKey <完整密钥>` | 某个 Application 下的机器 Key | 调用 UUID 或 Hash |
+| 开放接口 `/v1/*` | `Authorization: ApiKey <完整密钥>` | 某个 Application 下的机器 Key | 调用 UUID、Hash 或创建短链 |
 
 管理端 JWT 不能用于 `/v1/*`，API Key 也不能用于 `/api/*`。这不是两种写法的区别，而是**人类管理身份**与**程序调用身份**的边界。
 

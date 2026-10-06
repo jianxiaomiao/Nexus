@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
 import { RouterLink } from 'vue-router'
-import { ArrowRight, DataAnalysis, DocumentCopy, HomeFilled, Key, Promotion, Right, Warning } from '@element-plus/icons-vue'
+import { ArrowRight, DataAnalysis, DocumentCopy, HomeFilled, Key, Link, Promotion, Right, Warning } from '@element-plus/icons-vue'
 import heroIllustration from '@/assets/docs-hero.png'
 import { docs, type DocSlug } from '@/docs/catalog'
 
@@ -10,6 +10,7 @@ const cardIcons: Record<DocSlug, Component> = {
   authentication: Key,
   uuid: DocumentCopy,
   hash: DataAnalysis,
+  shortlink: Link,
   errors: Warning,
 }
 </script>
@@ -21,7 +22,7 @@ const cardIcons: Record<DocSlug, Component> = {
       <div class="docs-hero-content">
         <p class="docs-eyebrow">NEXUS · DEVELOPER GUIDES</p>
         <h1 id="docs-hero-title">从第一条 API 调用开始</h1>
-        <p class="docs-hero-subtitle">用 Nexus API Key 调用 UUID 与 Hash 两项开放能力。</p>
+        <p class="docs-hero-subtitle">用 Nexus API Key 调用 UUID、Hash 与短链接开放能力。</p>
         <RouterLink :to="{ name: 'docs-article', params: { slug: 'quick-start' } }" class="docs-primary-action">
           阅读快速开始 <el-icon aria-hidden="true"><ArrowRight /></el-icon>
         </RouterLink>
@@ -38,7 +39,7 @@ const cardIcons: Record<DocSlug, Component> = {
     <section class="docs-library" aria-labelledby="docs-library-title">
       <div class="docs-section-heading">
         <h2 id="docs-library-title">按任务查阅</h2>
-        <p>从以下文档开始，快速了解和使用 Nexus 的两项开放能力。</p>
+        <p>从以下文档开始，了解和使用 Nexus 当前提供的开放能力。</p>
       </div>
       <div class="docs-card-grid">
         <RouterLink v-for="doc in docs" :key="doc.slug" :to="{ name: 'docs-article', params: { slug: doc.slug } }" class="docs-card">
