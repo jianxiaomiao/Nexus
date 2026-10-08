@@ -10,12 +10,15 @@ import com.nexus.application.mapper.ApplicationMapper;
 import com.nexus.auth.token.JwtTokenService;
 import com.nexus.openapi.dto.HashAlgorithm;
 import com.nexus.openapi.dto.HashRequest;
+import com.nexus.usage.UsageTestCleanup;
+import com.nexus.usage.mapper.UsageEventMapper;
 import com.nexus.user.entity.User;
 import com.nexus.user.mapper.UserMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -26,10 +29,11 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -40,8 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class OpenApiHttpIntegrationTests {
     private static final String UUID_PATH = "/v1/utils/uuid";
     private static final String HASH_PATH = "/v1/utils/hash";
-    private static final String TEST_JWT_SECRET = Base64.getEncoder().encodeToString(
-            "0123456789abcdef0123456789abcdef".getBytes(StandardCharsets.UTF_8));
+    private static final String TEST_JWT_SECRET = Base64.getEncoder().encodeToString(SecureRandom.getSeed(32));
 
     @DynamicPropertySource
     static void jwtProperties(DynamicPropertyRegistry registry) {
@@ -56,6 +59,8 @@ class OpenApiHttpIntegrationTests {
     @Autowired private UserMapper userMapper;
     @Autowired private ApplicationMapper applicationMapper;
     @Autowired private ApiKeyMapper apiKeyMapper;
+    @Autowired private UsageEventMapper usageEventMapper;
+    @Autowired @Qualifier("usageExecutor") private Executor usageExecutor;
     @Autowired private ObjectMapper objectMapper;
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
@@ -88,8 +93,11 @@ class OpenApiHttpIntegrationTests {
     }
 
     @AfterEach
-    void removeCredential() {
-        if (key != null && key.getId() != null) apiKeyMapper.deleteById(key.getId());
+    void removeCredential() throws InterruptedException {
+        if (key != null && key.getId() != null) {
+            UsageTestCleanup.deleteEventsAfterPendingWrites(usageExecutor, usageEventMapper, key.getId());
+            apiKeyMapper.deleteById(key.getId());
+        }
         if (application != null && application.getId() != null) applicationMapper.deleteById(application.getId());
         if (owner != null && owner.getId() != null) userMapper.deleteById(owner.getId());
     }

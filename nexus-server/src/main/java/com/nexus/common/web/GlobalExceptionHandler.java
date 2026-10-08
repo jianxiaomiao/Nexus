@@ -22,6 +22,7 @@ import com.nexus.shortlink.exception.InvalidShortLinkRequestException;
 import com.nexus.shortlink.exception.ShortCodeExhaustedException;
 import com.nexus.shortlink.exception.ShortLinkExpiredException;
 import com.nexus.shortlink.exception.ShortLinkNotFoundException;
+import com.nexus.usage.exception.InvalidUsageTimeRangeException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpStatus;
@@ -37,6 +38,12 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler{
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ExceptionHandler(InvalidUsageTimeRangeException.class)
+    public ApiResponse<Void> handleInvalidUsageTimeRange(InvalidUsageTimeRangeException exception) {
+        return new ApiResponse<>("INVALID_USAGE_TIME_RANGE", exception.getMessage(), null);
+    }
 
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     @ExceptionHandler(InvalidShortLinkRequestException.class)

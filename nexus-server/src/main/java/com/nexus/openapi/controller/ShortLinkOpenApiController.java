@@ -7,6 +7,8 @@ import com.nexus.openapi.web.MachineIdentityResolver;
 import com.nexus.shortlink.dto.CreateShortLinkRequest;
 import com.nexus.shortlink.dto.ShortLinkResponse;
 import com.nexus.shortlink.dto.UpdateShortLinkRequest;
+import com.nexus.usage.ApiCode;
+import com.nexus.usage.web.UsageApi;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +30,7 @@ public class ShortLinkOpenApiController {
     private final MachineIdentityResolver identityResolver;
     private final ShortLinkOpenApiService shortLinkService;
 
+    @UsageApi(ApiCode.SHORTLINK_CREATE)
     @PostMapping
     public ApiResponse<ShortLinkResponse> create(
             HttpServletRequest request, @Valid @RequestBody CreateShortLinkRequest body) {
@@ -35,12 +38,14 @@ public class ShortLinkOpenApiController {
         return new ApiResponse<>("SUCCESS", "短链接创建成功", shortLinkService.create(identity, body));
     }
 
+    @UsageApi(ApiCode.SHORTLINK_LIST)
     @GetMapping
     public ApiResponse<List<ShortLinkResponse>> list(HttpServletRequest request) {
         ApiKeyIdentity identity = identityResolver.require(request);
         return new ApiResponse<>("SUCCESS", "查询成功", shortLinkService.list(identity));
     }
 
+    @UsageApi(ApiCode.SHORTLINK_UPDATE)
     @PutMapping
     public ApiResponse<ShortLinkResponse> update(
             HttpServletRequest request, @Valid @RequestBody UpdateShortLinkRequest body) {
@@ -48,6 +53,7 @@ public class ShortLinkOpenApiController {
         return new ApiResponse<>("SUCCESS", "更新成功", shortLinkService.update(identity, body));
     }
 
+    @UsageApi(ApiCode.SHORTLINK_DELETE)
     @DeleteMapping("/{id}")
     public ApiResponse<Void> delete(HttpServletRequest request, @PathVariable Long id) {
         ApiKeyIdentity identity = identityResolver.require(request);

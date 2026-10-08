@@ -5,6 +5,8 @@ import com.nexus.openapi.dto.HashRequest;
 import com.nexus.openapi.dto.HashResponse;
 import com.nexus.openapi.service.HashService;
 import com.nexus.openapi.web.MachineIdentityResolver;
+import com.nexus.usage.ApiCode;
+import com.nexus.usage.web.UsageApi;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
@@ -17,6 +19,7 @@ public class HashOpenApiController {
     private final MachineIdentityResolver machineIdentityResolver;
     private final HashService hashService;
 
+    @UsageApi(ApiCode.UTILS_HASH)
     @PostMapping("/hash")
     public ApiResponse<HashResponse> generateHash(HttpServletRequest request, @Valid @RequestBody HashRequest hashRequest) {
         // 显式要求机器身份，避免绕过 Filter 配置时误执行接口。

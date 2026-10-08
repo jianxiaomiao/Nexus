@@ -11,12 +11,15 @@ import com.nexus.shortlink.dto.CreateShortLinkRequest;
 import com.nexus.shortlink.dto.UpdateShortLinkRequest;
 import com.nexus.shortlink.entity.ShortLink;
 import com.nexus.shortlink.mapper.ShortLinkMapper;
+import com.nexus.usage.UsageTestCleanup;
+import com.nexus.usage.mapper.UsageEventMapper;
 import com.nexus.user.entity.User;
 import com.nexus.user.mapper.UserMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -33,6 +36,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -61,6 +65,8 @@ class ShortLinkHttpIntegrationTests {
     @Autowired ApplicationMapper applicationMapper;
     @Autowired ApiKeyMapper apiKeyMapper;
     @Autowired ShortLinkMapper shortLinkMapper;
+    @Autowired UsageEventMapper usageEventMapper;
+    @Autowired @Qualifier("usageExecutor") Executor usageExecutor;
     @Autowired ObjectMapper objectMapper;
 
     private final HttpClient client = HttpClient.newBuilder()
@@ -95,9 +101,12 @@ class ShortLinkHttpIntegrationTests {
     }
 
     @AfterEach
-    void removeRows() {
+    void removeRows() throws InterruptedException {
         if (shortLinkId != null) shortLinkMapper.deleteById(shortLinkId);
-        if (key != null && key.getId() != null) apiKeyMapper.deleteById(key.getId());
+        if (key != null && key.getId() != null) {
+            UsageTestCleanup.deleteEventsAfterPendingWrites(usageExecutor, usageEventMapper, key.getId());
+            apiKeyMapper.deleteById(key.getId());
+        }
         if (app != null && app.getId() != null) applicationMapper.deleteById(app.getId());
         if (owner != null && owner.getId() != null) userMapper.deleteById(owner.getId());
     }
@@ -190,6 +199,7 @@ class ShortLinkHttpIntegrationTests {
             assertEquals(404, send("GET", "/api/short-links?apiKeyId=" + key.getId(),
                     otherUserHeader, null).statusCode());
         } finally {
+            UsageTestCleanup.deleteEventsAfterPendingWrites(usageExecutor, usageEventMapper, otherKey.getId());
             apiKeyMapper.deleteById(otherKey.getId());
             userMapper.deleteById(otherUser.getId());
         }

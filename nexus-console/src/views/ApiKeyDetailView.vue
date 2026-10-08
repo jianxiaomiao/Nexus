@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, CircleCheck, CircleClose, Delete, EditPen } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -8,6 +8,7 @@ import { listApplications } from '@/api/applications'
 import { deleteApiKey, listApiKeys, updateApiKey, type ApiKey } from '@/api/apiKeys'
 import { apiKeyErrorMessage } from '@/api/apiKeyErrors'
 import { applicationErrorMessage } from '@/api/applicationErrors'
+import ApiKeyUsagePanel from './ApiKeyUsagePanel.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -16,6 +17,7 @@ const apiKey = ref<ApiKey | null>(null)
 const loading = ref(false)
 const errorMessage = ref('')
 const actionBusy = ref(false)
+const activeTab = computed(() => route.query.tab === 'short-links' || route.query.tab === 'usage' ? route.query.tab : 'info')
 let loadVersion = 0
 
 async function load() {
@@ -170,7 +172,7 @@ watch([() => route.params.applicationId, () => route.params.keyId], () => { void
             <h1 id="key-title">{{ apiKey.name }}</h1>
             <span class="status-pill" :class="apiKey.status === 0 ? 'is-active' : 'is-disabled'"><span class="status-dot" aria-hidden="true" />{{ apiKey.status === 0 ? '运行中' : '已禁用' }}</span>
           </div>
-          <p>管理这枚密钥的基本信息与状态。</p>
+          <p>管理这枚密钥的信息、短链接与调用统计。</p>
         </div>
         <div class="heading-actions" role="group" aria-label="API Key 操作">
           <el-tooltip content="编辑名称" placement="top"><el-button class="icon-action" :disabled="actionBusy" aria-label="编辑 Key 名称" @click="rename"><el-icon :size="18" aria-hidden="true"><EditPen /></el-icon></el-button></el-tooltip>
@@ -181,7 +183,13 @@ watch([() => route.params.applicationId, () => route.params.keyId], () => { void
 
       <el-alert v-if="application.status !== 0" class="disabled-alert" type="warning" :closable="false" title="所属应用已禁用；即使此 Key 处于运行中，也无法调用开放 API。" />
 
-      <div class="detail-card">
+      <nav class="detail-tabs" aria-label="API Key 详情分区">
+        <RouterLink :to="{ name: 'api-key-detail', params: { applicationId: application.id, keyId: apiKey.id } }" :class="{ 'is-current': activeTab === 'info' }" :aria-current="activeTab === 'info' ? 'page' : undefined">密钥信息</RouterLink>
+        <RouterLink :to="{ name: 'api-key-detail', params: { applicationId: application.id, keyId: apiKey.id }, query: { tab: 'short-links' } }" :class="{ 'is-current': activeTab === 'short-links' }" :aria-current="activeTab === 'short-links' ? 'page' : undefined">短链接</RouterLink>
+        <RouterLink :to="{ name: 'api-key-detail', params: { applicationId: application.id, keyId: apiKey.id }, query: { tab: 'usage' } }" :class="{ 'is-current': activeTab === 'usage' }" :aria-current="activeTab === 'usage' ? 'page' : undefined">调用统计</RouterLink>
+      </nav>
+
+      <div v-if="activeTab === 'info'" class="detail-card">
         <h2>密钥信息</h2>
         <dl>
           <div><dt>名称</dt><dd>{{ apiKey.name }}</dd></div>
@@ -194,10 +202,11 @@ watch([() => route.params.applicationId, () => route.params.keyId], () => { void
         </dl>
         <div class="secret-notice" role="note">完整 API Key 仅在创建时显示，之后无法再次查看。</div>
       </div>
-      <div class="detail-card short-links-entry">
+      <div v-else-if="activeTab === 'short-links'" class="detail-card short-links-entry">
         <div><h2>短链接</h2><p>查看和管理这枚 Key 创建的短链。创建新短链需要使用保存的完整 API Key。</p></div>
         <RouterLink :to="{ name: 'short-links', query: { applicationId: application.id, apiKeyId: apiKey.id } }">查看短链接 →</RouterLink>
       </div>
+      <ApiKeyUsagePanel v-else :application-id="application.id" :api-key-id="apiKey.id" />
     </template>
   </section>
 </template>
@@ -222,6 +231,10 @@ h1 { overflow-wrap: anywhere; margin: 0; color: var(--nexus-ink); font-size: cla
 .status-pill.is-disabled { background: var(--nexus-warning-surface); color: var(--nexus-warning-ink); }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 .disabled-alert { margin-bottom: 20px; }
+.detail-tabs { display: flex; gap: 8px; margin-bottom: 30px; overflow-x: auto; border-bottom: 1px solid var(--nexus-line); }
+.detail-tabs a { flex: none; padding: 0 18px 14px; border-bottom: 2px solid transparent; color: var(--nexus-muted); font-size: 15px; font-weight: 600; text-decoration: none; }
+.detail-tabs a:hover, .detail-tabs a.is-current { color: var(--nexus-teal); }
+.detail-tabs a.is-current { border-bottom-color: var(--nexus-teal); }
 .detail-card { padding: clamp(24px, 4vw, 40px); border: 1px solid var(--nexus-line); border-radius: 16px; background: var(--nexus-surface); box-shadow: var(--nexus-card-shadow); }
 h2 { margin: 0 0 24px; font-size: 20px; }
 dl { margin: 0; }
@@ -234,7 +247,7 @@ code { font-family: 'Consolas', 'SFMono-Regular', monospace; font-size: 13px; }
 .secret-notice { margin-top: 20px; padding: 16px 18px; border: 1px solid #d6e5e5; border-radius: 9px; background: #f2f8f8; color: #476775; font-size: 13px; }
 .error-card { color: #8a3c33; }
 .error-card p { margin: 12px 0 22px; }
-.short-links-entry { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 18px; }
+.short-links-entry { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .short-links-entry h2 { margin: 0 0 6px; }
 .short-links-entry p { margin: 0; color: var(--nexus-muted); font-size: 13px; }
 .short-links-entry a { flex: none; color: var(--nexus-teal); font-size: 14px; font-weight: 650; text-decoration: none; }

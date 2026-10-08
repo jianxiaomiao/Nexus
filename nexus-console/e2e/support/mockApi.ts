@@ -1,5 +1,15 @@
 import { expect, type Page } from '@playwright/test'
 
+type UsageSummary = {
+  allTimeCount: number
+  periodCount: number
+  timeZone: string
+  periodStart: string
+  periodEndExclusive: string
+  dailyCounts: { date: string; count: number }[]
+  apiCounts: { apiCode: string; apiName: string; count: number }[]
+}
+
 export type Application = {
   id: number
   name: string
@@ -32,7 +42,7 @@ export type ShortLink = {
 }
 
 type Failure = { status: number; code: string; message: string }
-type RecordedRequest = { method: string; path: string; body: Record<string, unknown> }
+type RecordedRequest = { method: string; path: string; body: Record<string, unknown>; query: Record<string, string> }
 
 const timestamp = '2026-10-05T10:00:00'
 export const sampleApplication: Application = { id: 1, name: '示例应用', status: 0, createdAt: timestamp, updatedAt: timestamp }
@@ -42,11 +52,29 @@ export const sampleKey: ApiKey = {
 }
 // 故意不是可用凭证；只用于检查创建后的一次性展示。
 export const oneTimeKey = 'PLAYWRIGHT_FAKE_KEY_NOT_VALID'
+export const sampleUsage: UsageSummary = {
+  allTimeCount: 15,
+  periodCount: 3,
+  timeZone: 'Asia/Shanghai',
+  periodStart: '2026-10-02T00:00:00+08:00',
+  periodEndExclusive: '2026-10-09T00:00:00+08:00',
+  dailyCounts: [
+    { date: '2026-10-02', count: 1 }, { date: '2026-10-03', count: 0 },
+    { date: '2026-10-04', count: 0 }, { date: '2026-10-05', count: 0 },
+    { date: '2026-10-06', count: 2 }, { date: '2026-10-07', count: 0 },
+    { date: '2026-10-08', count: 0 },
+  ],
+  apiCounts: [
+    { apiCode: 'uuid.generate', apiName: '生成UUID', count: 2 },
+    { apiCode: 'utils.hash', apiName: '哈希计算工具', count: 1 },
+  ],
+}
 
-export async function installMockApi(page: Page, initial?: { applications?: Application[]; keys?: ApiKey[]; shortLinks?: ShortLink[] }) {
+export async function installMockApi(page: Page, initial?: { applications?: Application[]; keys?: ApiKey[]; shortLinks?: ShortLink[]; usage?: UsageSummary }) {
   const applications = structuredClone(initial?.applications ?? [sampleApplication])
   const keys = structuredClone(initial?.keys ?? [sampleKey])
   const shortLinks = structuredClone(initial?.shortLinks ?? [])
+  const usage = structuredClone(initial?.usage ?? sampleUsage)
   const calls: RecordedRequest[] = []
   const failures = new Map<string, Failure>()
   let nextApplicationId = 100
@@ -57,7 +85,7 @@ export async function installMockApi(page: Page, initial?: { applications?: Appl
     const method = request.method()
     const path = new URL(request.url()).pathname
     const body = request.postData() ? request.postDataJSON() as Record<string, unknown> : {}
-    calls.push({ method, path, body })
+    calls.push({ method, path, body, query: Object.fromEntries(new URL(request.url()).searchParams) })
 
     const respond = async (data: unknown, status = 200, code = 'SUCCESS', message = '成功') => {
       await route.fulfill({ status, json: { code, message, data } })
@@ -118,6 +146,8 @@ export async function installMockApi(page: Page, initial?: { applications?: Appl
       if (index < 0) { await respond(null, 404, 'API_KEY_NOT_FOUND'); return }
       keys.splice(index, 1)
       await respond(null)
+    } else if (path === '/api/usage' && method === 'GET') {
+      await respond(usage)
     } else if (path === '/api/short-links' && method === 'GET') {
       const apiKeyId = Number(new URL(request.url()).searchParams.get('apiKeyId'))
       await respond(shortLinks.filter((item) => item.apiKeyId === apiKeyId))

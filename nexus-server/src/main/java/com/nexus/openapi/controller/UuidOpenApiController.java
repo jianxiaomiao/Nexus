@@ -3,6 +3,8 @@ package com.nexus.openapi.controller;
 import com.nexus.common.web.ApiResponse;
 import com.nexus.openapi.dto.UuidResponse;
 import com.nexus.openapi.web.MachineIdentityResolver;
+import com.nexus.usage.ApiCode;
+import com.nexus.usage.web.UsageApi;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -19,6 +21,7 @@ public class UuidOpenApiController {
         this.machineIdentityResolver = machineIdentityResolver;
     }
 
+    @UsageApi(ApiCode.UUID_GENERATE)
     @GetMapping("/uuid")
     public ApiResponse<UuidResponse> generateUuid(HttpServletRequest request) {
         // 显式要求机器身份，避免绕过 Filter 配置时误执行接口。

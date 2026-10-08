@@ -72,7 +72,7 @@
 
 ## 后续按具体问题引入
 
-- Usage：先明确要记录什么及准确性要求，再选同步持久化或异步事件。
+- Usage：异步持久化、事件 UUID 去重和 200/400 入库已验证。Key 用量查询已实现归属校验、北京时间日界、每日/API-code 聚合与禁用后历史查看；管理端 GET 使用查询参数，真实 JWT/HTTP/MySQL 测试通过。API Key 详情页现有密钥信息、短链接、调用统计三个标签；完整后端测试 165/165、前端构建和 44 个模拟浏览器测试通过。下一步用真实账号与后端联调页面。
 - Redis：短链查询有实际延迟或吞吐瓶颈并测量后再加缓存；限流需求明确后再设计限流器。
 - RabbitMQ、异步截图、Webhook、监控、部署：各自需要明确业务问题、失败规则与验证办法。公开部署前需提供 HTTPS；API Key 不应通过明文传输。[OWASP REST 安全建议](https://cheatsheetseries.owasp.org/cheatsheets/REST_Security_Cheat_Sheet.html)
 
