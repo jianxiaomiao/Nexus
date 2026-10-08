@@ -21,7 +21,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   <div class="docs-shell">
     <header class="docs-topbar">
       <div class="docs-topbar-brand">
-        <RouterLink :to="{ name: 'docs-home' }" class="docs-brand" aria-label="Nexus 文档首页">
+        <RouterLink :to="{ name: 'applications' }" class="docs-brand" aria-label="Nexus 文档首页">
           <img :src="brandSpark" alt="" aria-hidden="true" />
           <span>Nexus</span>
         </RouterLink>
