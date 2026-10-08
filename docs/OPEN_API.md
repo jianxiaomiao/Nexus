@@ -6,6 +6,8 @@
 
 管理端使用 `Authorization: Bearer <JWT>`；机器 Open API 使用 `Authorization: ApiKey <完整密钥>`。两种凭证不可互换。部署后只通过 HTTPS 发送完整密钥。
 
+当前一枚有效 API Key 可以调用全部 `/v1/*` 机器接口，包括工具和短链接口，不按 Scope 分权。这样客户端只需管理一种机器凭证；代价是无法把某枚 Key 限制为“只用工具”或“只管短链”。不同 Key 仍分别拥有自己的短链，持有一枚 Key 不代表可以操作另一枚 Key 的资源；每枚 Key 也可以单独禁用或删除。
+
 ## 生成 UUID
 
 ```http
