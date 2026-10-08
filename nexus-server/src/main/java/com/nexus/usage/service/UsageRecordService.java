@@ -49,16 +49,17 @@ public class UsageRecordService {
                     return;
                 }
             } catch (Exception lookupFailure) {
-                log.error("用量事件去重查询失败. eventId={}", eventId, lookupFailure);
+                // 同一次事件只记一条终态错误日志，同时保留去重查询的失败堆栈。
+                exception.addSuppressed(lookupFailure);
             }
-            log.error("用量记录入库失败（重复键且未确认事件已写入）. apiCode={}, apiKeyId={}, appId={}, httpStatus={}, occurredAt={}, eventId={}",
+            log.error("用量记录入库失败（重复键且未确认事件已写入）. apiCode={}, apiKeyId={}, appId={}, httpStatus={}, durationMs={}, occurredAt={}, eventId={}",
                     usageEvent.getApiCode(), usageEvent.getApiKeyId(), usageEvent.getApplicationId(),
-                    usageEvent.getHttpStatusCode(), usageEvent.getOccurredAt(), usageEvent.getEventId(), exception);
+                    usageEvent.getHttpStatusCode(), usageEvent.getDurationMs(), usageEvent.getOccurredAt(), usageEvent.getEventId(), exception);
         } catch (Exception exception) {
             // 这里只记录内部 ID，不记录完整 API Key 或请求内容。
-            log.error("用量记录入库失败. apiCode={}, apiKeyId={}, appId={}, httpStatus={}, occurredAt={}, eventId={}",
+            log.error("用量记录入库失败. apiCode={}, apiKeyId={}, appId={}, httpStatus={}, durationMs={}, occurredAt={}, eventId={}",
                     usageEvent.getApiCode(), usageEvent.getApiKeyId(), usageEvent.getApplicationId(),
-                    usageEvent.getHttpStatusCode(), usageEvent.getOccurredAt(), usageEvent.getEventId(),exception);
+                    usageEvent.getHttpStatusCode(), usageEvent.getDurationMs(), usageEvent.getOccurredAt(), usageEvent.getEventId(), exception);
         }
     }
 }

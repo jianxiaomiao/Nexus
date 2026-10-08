@@ -91,12 +91,13 @@ public class UsageInterceptor implements HandlerInterceptor {
             return;
         }
 
+        String eventId = UUID.randomUUID().toString();
         try {
-            usageRecordService.record(apiCode, identity, httpStatus, costNs, startUtc, UUID.randomUUID().toString());
+            usageRecordService.record(apiCode, identity, httpStatus, costNs, startUtc, eventId);
         } catch (TaskRejectedException rejected) {
             // 有界队列已满时，只放弃这条统计事件，不改变原本的 API 响应。
-            log.warn("用量记录队列已满，事件未提交：apiCode={}, apiKeyId={}, appId={}, reason={}",
-                    apiCode.getCode(), identity.apiKeyId(), identity.applicationId(), rejected.getMessage());
+            log.warn("用量记录队列已满，事件未提交：apiCode={}, apiKeyId={}, appId={}, eventId={}",
+                    apiCode.getCode(), identity.apiKeyId(), identity.applicationId(), eventId, rejected);
         }
     }
 }

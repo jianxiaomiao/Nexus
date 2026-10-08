@@ -8,3 +8,14 @@ spring:
     locations: classpath:db/migration
     validate-on-migrate: true
     clean-disabled: true
+
+# 本地从 nexus-server 目录启动时，../logger 即仓库根目录的 logger/。
+# 其他工作目录/部署环境可用 NEXUS_LOG_DIR 指定绝对目录。
+logging:
+  file:
+    name: ${NEXUS_LOG_DIR:../logger}/nexus.log
+  logback:
+    rollingpolicy:
+      file-name-pattern: ${NEXUS_LOG_DIR:../logger}/nexus.%d{yyyy-MM-dd}.%i.log.gz
+      max-file-size: 10MB
+      max-history: 30

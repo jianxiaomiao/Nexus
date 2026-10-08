@@ -111,4 +111,4 @@ node scripts/accept-usage-real.mjs
 
 2026-10-08：Application、API Key、短链接管理列表的现有查询已分页。可运行 `mvn -q -Dtest=ManagementListPaginationIntegrationTests test` 验证三个列表各 11 条跨页、自定义条数和权限隔离；运行 `npm run test:e2e -- e2e/listPagination.spec.ts` 验证页面翻页与页外详情。完整后端套件在限制本次测试连接池后通过 167/167，模拟浏览器回归 48/48。接口说明见 `docs/MANAGEMENT_PAGINATION.md`。
 
-2026-10-08：Element Plus 组件与滚动条改造后，前端构建、E2E 类型检查和模拟浏览器回归 56/56 通过。提交前尝试重新运行后端全套时，从 Flyway 日志发现当前本地配置连接 `nexus` 而不是文档建议的独立 `nexus_test`，已中止运行；这次不能记作通过，也不保证中止前没有测试写入。未手工清理数据库。再次运行前先核实专用测试库及连接配置，再使用新生成的临时 JWT 密钥。
+2026-10-08：Element Plus 组件与滚动条改造后，前端构建、E2E 类型检查和模拟浏览器回归 56/56 通过。提交前尝试重新运行后端全套时，从 Flyway 日志发现当前本地配置连接 `nexus` 而不是文档建议的独立 `nexus_test`，已中止运行；这次不能记作通过，也不保证中止前没有测试写入。后续只对核实属于 Usage 验收的三名 `usage-accept` 用户及其关联数据执行了定向清理，不能据此断言其他测试写入均已清除。再次运行前先核实专用测试库及连接配置，再使用新生成的临时 JWT 密钥。

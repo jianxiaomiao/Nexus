@@ -82,7 +82,7 @@ class UsageRecordingTests {
     }
 
     @Test
-    void rejectedUsageTaskDoesNotChangeApiResponse() throws Exception {
+    void rejectedUsageTaskDoesNotChangeApiResponse(CapturedOutput output) throws Exception {
         UsageRecordService recordService = mock(UsageRecordService.class);
         doThrow(new TaskRejectedException("queue full")).when(recordService)
                 .record(any(), any(), anyInt(), anyLong(), any(), any());
@@ -100,6 +100,8 @@ class UsageRecordingTests {
         assertDoesNotThrow(() -> interceptor.afterCompletion(request, response, handler, null));
         assertEquals(200, response.getStatus());
         verify(recordService).record(any(), any(), anyInt(), anyLong(), any(), any());
+        assertTrue(output.getOut().contains("eventId="));
+        assertTrue(output.getOut().contains("用量记录队列已满"));
     }
 
     @Test
@@ -152,7 +154,7 @@ class UsageRecordingTests {
                 new ApiKeyIdentity(7L, 8L), 200, 2_000_000L,
                 LocalDateTime.of(2026, 10, 8, 0, 0), eventId));
 
-        assertTrue(output.getOut().contains("用量事件去重查询失败"));
-        assertTrue(output.getOut().contains("重复键且未确认事件已写入"));
+        assertEquals(1, output.getOut().split("重复键且未确认事件已写入", -1).length - 1);
+        assertTrue(output.getOut().contains("lookup unavailable"));
     }
 }

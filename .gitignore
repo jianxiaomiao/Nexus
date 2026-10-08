@@ -1,3 +1,4 @@
 /.idea/
 /.m2repo/
+/logger/
 /nexus-server/config/application-local.yml

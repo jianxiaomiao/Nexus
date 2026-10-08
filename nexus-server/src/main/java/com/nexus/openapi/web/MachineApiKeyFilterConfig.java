@@ -14,6 +14,7 @@ public class MachineApiKeyFilterConfig {
         FilterRegistrationBean<MachineApiKeyFilter> registration = new FilterRegistrationBean<>();
         registration.setFilter(new MachineApiKeyFilter(authenticator, objectMapper));
         registration.addUrlPatterns("/v1/*"); // 只覆盖机器 Open API；管理端 /api/* 不经过此 Filter。
+        registration.setOrder(20);
         // 不要再给 MachineApiKeyFilter 加 @Component，否则可能被自动注册到所有路径。
         return registration;
     }
