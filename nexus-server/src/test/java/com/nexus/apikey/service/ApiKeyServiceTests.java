@@ -10,7 +10,6 @@ import com.nexus.apikey.dto.ApiKeyResponse;
 import com.nexus.apikey.dto.CreateApiKeyRequest;
 import com.nexus.apikey.dto.CreateApiKeyResponse;
 import com.nexus.apikey.dto.DeleteApiKeyRequest;
-import com.nexus.apikey.dto.QueryApiKeyResponse;
 import com.nexus.apikey.dto.UpdateApiKeyRequest;
 import com.nexus.apikey.entity.ApiKey;
 import com.nexus.apikey.exception.ApiKeyNameAlreadyExistsException;
@@ -186,12 +185,12 @@ class ApiKeyServiceTests {
         Application application = new Application();
         application.setStatus(1);
         when(applicationMapper.selectOne(any())).thenReturn(application);
-        when(apiKeyMapper.selectList(any())).thenReturn(List.of());
+        when(apiKeyMapper.selectPage(any(), any())).thenReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<ApiKey>(1, 10));
 
-        QueryApiKeyResponse response = service.listMyApiKeys(42L, 7L);
+        var response = service.listMyApiKeys(42L, 7L, 1, 10, null);
 
-        assertTrue(response.apiKeyResponseList().isEmpty());
-        verify(apiKeyMapper).selectList(any());
+        assertTrue(response.records().isEmpty());
+        verify(apiKeyMapper).selectPage(any(), any());
     }
 
     @Test

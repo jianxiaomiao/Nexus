@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { queryUsage, usageErrorMessage, type UsageSummary, type UsageTimeRange } from '@/api/usage'
+import { queryUsage, queryUsageEvents, usageErrorMessage, type UsageEventPage, type UsageSummary, type UsageTimeRange } from '@/api/usage'
 
 const props = defineProps<{ applicationId: number; apiKeyId: number }>()
 
@@ -22,6 +22,13 @@ const loading = ref(false)
 const errorMessage = ref('')
 const requestFailed = ref(false)
 let loadVersion = 0
+const eventPage = ref<UsageEventPage | null>(null)
+const eventCurrent = ref(1)
+const eventSize = ref(10)
+const eventLoading = ref(false)
+const eventError = ref('')
+let eventLoadVersion = 0
+const eventPages = computed(() => Math.ceil((eventPage.value?.total ?? 0) / eventSize.value))
 
 const selectedRangeLabel = computed(() => rangeOptions.find((option) => option.value === timeRange.value)?.label ?? '所选时段')
 const maxDailyCount = computed(() => Math.max(0, ...(summary.value?.dailyCounts.map((day) => day.count) ?? [])))
@@ -64,7 +71,7 @@ function barHeight(count: number): string {
 
 function validateCustomRange(): string {
   if (!customStartTime.value || !customEndTime.value) return '请选择开始和结束时间'
-  // datetime-local 是无时区的北京时间墙上时间；用 UTC 解析只为比较两个本地时间值。
+  // 日期组件输出无时区的北京时间墙上时间；用 UTC 解析只为比较两个本地时间值。
   const start = Date.parse(`${customStartTime.value}Z`)
   const end = Date.parse(`${customEndTime.value}Z`)
   if (!Number.isFinite(start) || !Number.isFinite(end)) return '时间格式无效，请重新选择'
@@ -121,8 +128,46 @@ function changeRange() {
   }
 }
 
-onMounted(() => { void loadUsage() })
-onUnmounted(() => { ++loadVersion })
+async function loadEvents() {
+  const version = ++eventLoadVersion
+  eventLoading.value = true
+  eventError.value = ''
+  try {
+    const data = await queryUsageEvents({ applicationId: props.applicationId, apiKeyId: props.apiKeyId,
+      current: eventCurrent.value, size: eventSize.value })
+    if (version === eventLoadVersion) eventPage.value = data
+  } catch (error) {
+    if (version === eventLoadVersion) {
+      eventPage.value = null
+      eventError.value = usageErrorMessage(error)
+    }
+  } finally {
+    if (version === eventLoadVersion) eventLoading.value = false
+  }
+}
+
+function changeEventSize(value: number | undefined) {
+  if (value === undefined) return
+  if (!Number.isInteger(value) || value < 1 || value > 100) return
+  eventCurrent.value = 1
+  void loadEvents()
+}
+
+function changeEventPage(value: number) {
+  if (value < 1 || value > eventPages.value) return
+  eventCurrent.value = value
+  void loadEvents()
+}
+
+function formatEventTime(value: string): string {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai', dateStyle: 'short', timeStyle: 'medium', hourCycle: 'h23',
+  }).format(date)
+}
+
+onMounted(() => { void loadUsage(); void loadEvents() })
+onUnmounted(() => { ++loadVersion; ++eventLoadVersion })
 </script>
 
 <template>
@@ -141,11 +186,11 @@ onUnmounted(() => { ++loadVersion })
       </div>
     </div>
 
-    <form v-if="timeRange === 'CUSTOM'" class="custom-range" @submit.prevent="loadUsage">
-      <label>开始时间（北京时间）<input v-model="customStartTime" type="datetime-local" required /></label>
-      <label>结束时间（北京时间，不含）<input v-model="customEndTime" type="datetime-local" required /></label>
+    <el-form v-if="timeRange === 'CUSTOM'" class="custom-range" @submit.prevent="loadUsage">
+      <label for="usage-custom-start">开始时间（北京时间）<el-date-picker id="usage-custom-start" v-model="customStartTime" type="datetime" format="YYYY-MM-DD HH:mm" value-format="YYYY-MM-DDTHH:mm" placeholder="选择开始时间" popper-class="nexus-datetime-popper" /></label>
+      <label for="usage-custom-end">结束时间（北京时间，不含）<el-date-picker id="usage-custom-end" v-model="customEndTime" type="datetime" format="YYYY-MM-DD HH:mm" value-format="YYYY-MM-DDTHH:mm" placeholder="选择结束时间" popper-class="nexus-datetime-popper" /></label>
       <el-button native-type="submit" type="primary" :loading="loading">查询</el-button>
-    </form>
+    </el-form>
 
     <div v-if="loading" class="usage-loading" aria-busy="true"><el-skeleton :rows="7" animated /></div>
     <div v-else-if="errorMessage" class="usage-notice is-error" role="alert">
@@ -162,7 +207,7 @@ onUnmounted(() => { ++loadVersion })
       <section class="usage-card" aria-labelledby="daily-title">
         <h3 id="daily-title">每日调用次数</h3>
         <div v-if="summary.periodCount === 0" class="usage-empty">该时段暂无调用记录</div>
-        <div v-else class="chart-scroll">
+        <el-scrollbar v-else class="chart-scroll">
           <div class="daily-chart" :style="{ minWidth: `${Math.max(350, summary.dailyCounts.length * 36 + 42)}px` }">
             <div class="chart-axis" aria-hidden="true"><span>{{ formatCount(chartMaximum) }}</span><span>{{ formatCount(chartMaximum / 2) }}</span><span>0</span></div>
             <div class="chart-plot" role="list" aria-label="每日调用次数">
@@ -172,7 +217,7 @@ onUnmounted(() => { ++loadVersion })
               </div>
             </div>
           </div>
-        </div>
+        </el-scrollbar>
       </section>
 
       <section class="usage-card" aria-labelledby="api-title">
@@ -188,6 +233,30 @@ onUnmounted(() => { ++loadVersion })
       </section>
     </template>
     <p v-else class="usage-notice">选择开始和结束时间后查询。</p>
+
+    <section class="usage-card" aria-labelledby="events-title">
+      <div class="events-head">
+        <div><h3 id="events-title">调用记录</h3><p>全部历史按时间倒序；与上方统计时间范围独立。</p></div>
+        <label class="event-size">每页条数
+          <el-input-number v-model="eventSize" :min="1" :max="100" :step="1" :precision="0" aria-label="每页条数" @change="changeEventSize" />
+        </label>
+      </div>
+      <div v-if="eventLoading" class="usage-loading" aria-busy="true"><el-skeleton :rows="3" animated /></div>
+      <div v-else-if="eventError" class="usage-notice is-error" role="alert"><p>{{ eventError }}</p><el-button @click="loadEvents">重试</el-button></div>
+      <div v-else-if="!eventPage?.records.length" class="usage-empty">暂无调用记录</div>
+      <template v-else>
+        <el-scrollbar class="events-scroll"><table class="events-table">
+          <thead><tr><th scope="col">接口代码</th><th scope="col">HTTP 状态</th><th scope="col">耗时（ms）</th><th scope="col">调用时间（北京时间）</th></tr></thead>
+          <tbody><tr v-for="(event, index) in eventPage.records" :key="`${event.occurredAt}-${index}`">
+            <td><code>{{ event.apiCode }}</code></td><td>{{ event.httpStatusCode }}</td><td>{{ event.durationMs }}</td><td>{{ formatEventTime(event.occurredAt) }}</td>
+          </tr></tbody>
+        </table></el-scrollbar>
+        <div class="events-pagination"><span>共 {{ formatCount(eventPage.total) }} 条 · 第 {{ eventCurrent }} / {{ eventPages }} 页</span>
+          <el-button :disabled="eventCurrent <= 1" @click="changeEventPage(eventCurrent - 1)">上一页</el-button>
+          <el-button :disabled="eventCurrent >= eventPages" @click="changeEventPage(eventCurrent + 1)">下一页</el-button>
+        </div>
+      </template>
+    </section>
   </section>
 </template>
 
@@ -203,8 +272,7 @@ onUnmounted(() => { ++loadVersion })
 .period-note { margin: 18px 0 0; }
 .custom-range { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-top: 20px; }
 .custom-range label { display: grid; gap: 6px; color: var(--nexus-muted); font-size: 13px; }
-.custom-range input { min-height: 40px; padding: 8px 10px; border: 1px solid var(--nexus-line); border-radius: 8px; background: var(--nexus-surface); color: var(--nexus-ink); font: inherit; }
-.custom-range input:focus-visible { outline: 2px solid var(--nexus-teal); outline-offset: 2px; }
+.custom-range :deep(.el-date-editor) { width: min(100%, 230px); min-height: 40px; }
 .usage-loading, .usage-notice { margin-top: 24px; padding: 24px; border: 1px solid var(--nexus-line); border-radius: 12px; }
 .usage-notice { color: var(--nexus-muted); }
 .usage-notice p { margin: 0 0 14px; }
@@ -217,7 +285,7 @@ onUnmounted(() => { ++loadVersion })
 .usage-card { margin-top: 16px; padding: 20px 22px; border: 1px solid var(--nexus-line); border-radius: 12px; }
 .usage-card h3 { margin: 0; font-size: 16px; }
 .usage-empty { padding: 44px 16px; color: var(--nexus-muted); text-align: center; font-size: 14px; }
-.chart-scroll { overflow-x: auto; padding-top: 18px; }
+.chart-scroll { padding-top: 18px; }
 .daily-chart { display: flex; width: 100%; height: 230px; }
 .chart-axis { display: flex; width: 42px; flex: none; flex-direction: column; justify-content: space-between; padding: 0 8px 25px 0; color: var(--nexus-muted); text-align: right; font-size: 11px; }
 .chart-plot { display: flex; flex: 1; align-items: stretch; justify-content: space-around; gap: 5px; border-bottom: 1px solid var(--nexus-line); background: repeating-linear-gradient(to bottom, var(--nexus-line) 0 1px, transparent 1px 50%); }
@@ -239,6 +307,15 @@ onUnmounted(() => { ++loadVersion })
 .api-count { display: grid; gap: 3px; text-align: right; font-variant-numeric: tabular-nums; }
 .api-count strong { font-size: 13px; }
 .api-count span { color: var(--nexus-muted); font-size: 11px; }
+.events-head, .events-pagination { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.events-head p { margin: 6px 0 0; color: var(--nexus-muted); font-size: 12px; }
+.event-size { display: flex; align-items: center; gap: 8px; color: var(--nexus-muted); font-size: 12px; }
+.event-size :deep(.el-input-number) { width: 110px; }
+.events-scroll { margin-top: 14px; }
+.events-table { width: 100%; min-width: 510px; border-collapse: collapse; font-size: 13px; }
+.events-table th, .events-table td { padding: 10px 8px; border-bottom: 1px solid var(--nexus-line); text-align: left; white-space: nowrap; }
+.events-table th { color: var(--nexus-muted); font-weight: 500; }
+.events-pagination { justify-content: flex-end; margin-top: 14px; color: var(--nexus-muted); font-size: 12px; }
 @media (max-width: 650px) {
   .usage-head { flex-direction: column; }
   .usage-filters { width: 100%; }

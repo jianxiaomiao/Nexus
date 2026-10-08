@@ -21,7 +21,7 @@ test('Key 详情三个标签保留密钥信息和短链接入口，统计只发 
   await tabs.getByRole('link', { name: '调用统计' }).click()
 
   await expect(page.getByText('累计调用')).toBeVisible()
-  await expect(page.getByText('15', { exact: true })).toBeVisible()
+  await expect(page.locator('.metric-card').first().locator('strong')).toHaveText('15')
   await expect(page.getByText('近7天调用')).toBeVisible()
   await expect(page.getByRole('heading', { name: '每日调用次数' })).toBeVisible()
   await expect(page.getByRole('listitem', { name: '2026-10-06，2 次调用' })).toBeVisible()
@@ -53,7 +53,7 @@ test('自定义时间以北京时间墙上时间发送，错误区间阻止请�
   await page.getByLabel('开始时间（北京时间）').fill('2026-10-08T00:00')
   await page.getByLabel('结束时间（北京时间，不含）').fill('2026-10-09T00:00')
   await page.getByRole('button', { name: '查询' }).click()
-  await expect(page.getByText('15', { exact: true })).toBeVisible()
+  await expect(page.locator('.metric-card').first().locator('strong')).toHaveText('15')
   expect(api.calls.filter((call) => call.path === '/api/usage').at(-1)?.query).toEqual({
     applicationId: '1', apiKeyId: '11', timeRange: 'CUSTOM',
     customStartTime: '2026-10-08T00:00:00', customEndTime: '2026-10-09T00:00:00',
@@ -72,6 +72,25 @@ test('禁用的 Key 仍可查看历史；所选时段无记录有清楚空状态
   await expect(page.getByText('15', { exact: true })).toBeVisible()
   await expect(page.getByText('该时段暂无调用记录')).toBeVisible()
   await expect(page.getByText('该时段暂无接口调用')).toBeVisible()
+  await expect(page.locator('.events-table tbody tr')).toHaveCount(10)
+})
+
+test('调用记录默认10条，第二页可见第11条，也可自定义每页条数', async ({ page }) => {
+  const api = await installMockApi(page)
+  await openKeyDetail(page)
+  await page.getByRole('navigation', { name: 'API Key 详情分区' }).getByRole('link', { name: '调用统计' }).click()
+  await expect(page.locator('.events-table tbody tr')).toHaveCount(10)
+  await expect(page.locator('.events-table')).toContainText('utils.event1')
+  await expect(page.locator('.events-table')).not.toContainText('utils.event11')
+  await page.getByRole('button', { name: '下一页' }).click()
+  await expect(page.locator('.events-table tbody tr')).toHaveCount(1)
+  await expect(page.locator('.events-table')).toContainText('utils.event11')
+  expect(api.calls.filter((call) => call.path === '/api/usage/events').at(-1)?.query).toMatchObject({ current: '2', size: '10' })
+  await page.getByRole('spinbutton', { name: '每页条数' }).fill('5')
+  await page.getByRole('spinbutton', { name: '每页条数' }).blur()
+  await expect(page.locator('.events-table tbody tr')).toHaveCount(5)
+  expect(api.calls.filter((call) => call.path === '/api/usage/events').at(-1)?.query).toMatchObject({ current: '1', size: '5' })
+  await expect(page.locator('body')).not.toContainText(oneTimeKey)
 })
 
 test('统计加载失败可在原位重试', async ({ page }) => {
@@ -94,4 +113,21 @@ test('手机宽度下统计页不撑破页面，接口记录仍可阅读', async
   await expect(page.locator('.api-row').first()).toContainText('uuid.generate')
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
   expect(overflow).toBeLessThanOrEqual(1)
+})
+
+test('手机宽度下自定义日期弹层保持在视口内', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await installMockApi(page)
+  await openKeyDetail(page)
+  await page.getByRole('navigation', { name: 'API Key 详情分区' }).getByRole('link', { name: '调用统计' }).click()
+  await page.locator('.range-select').click()
+  await page.getByRole('option', { name: '自定义' }).click()
+  await page.getByLabel('开始时间（北京时间）').click()
+  const popper = page.locator('.nexus-datetime-popper:visible')
+  await expect(popper).toBeVisible()
+  const bounds = await popper.boundingBox()
+  expect(bounds).not.toBeNull()
+  expect(bounds!.x).toBeGreaterThanOrEqual(-1)
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(391)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
 })

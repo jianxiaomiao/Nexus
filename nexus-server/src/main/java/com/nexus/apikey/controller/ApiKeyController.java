@@ -4,6 +4,7 @@ import com.nexus.apikey.dto.*;
 import com.nexus.apikey.service.ApiKeyService;
 import com.nexus.auth.web.BearerUserIdResolver;
 import com.nexus.common.web.ApiResponse;
+import com.nexus.common.web.ListPage;
 import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -37,12 +38,15 @@ public class ApiKeyController {
     }
 
     @GetMapping("/{applicationId}")
-    public ApiResponse<QueryApiKeyResponse> listMine(
+    public ApiResponse<ListPage<ApiKeyResponse>> listMine(
             @RequestHeader(value = "Authorization", required = false) String authorization,
-            @PathVariable Long applicationId) {
+            @PathVariable Long applicationId,
+            @RequestParam(defaultValue = "1") long current,
+            @RequestParam(defaultValue = "10") long size,
+            @RequestParam(required = false) Long apiKeyId) {
         long userId = bearerUserIdResolver.resolve(authorization);
-        return new ApiResponse<QueryApiKeyResponse>("SUCCESS", "查询成功",
-                apiKeyService.listMyApiKeys(userId, applicationId));
+        return new ApiResponse<>("SUCCESS", "查询成功",
+                apiKeyService.listMyApiKeys(userId, applicationId, current, size, apiKeyId));
     }
 
     @PutMapping

@@ -4,12 +4,12 @@ import com.nexus.application.dto.*;
 import com.nexus.application.service.ApplicationService;
 import com.nexus.auth.web.BearerUserIdResolver;
 import com.nexus.common.web.ApiResponse;
+import com.nexus.common.web.ListPage;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 
 @RequiredArgsConstructor
 @RestController
@@ -38,11 +38,14 @@ public class ApplicationController {
     }
 
     @GetMapping
-    public ApiResponse<List<ApplicationResponse>> listMine(
-            @RequestHeader(value = "Authorization", required = false) String authorization) {
+    public ApiResponse<ListPage<ApplicationResponse>> listMine(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(defaultValue = "1") long current,
+            @RequestParam(defaultValue = "10") long size,
+            @RequestParam(required = false) Long applicationId) {
         long userId = bearerUserIdResolver.resolve(authorization);
         return new ApiResponse<>("SUCCESS", "查询成功",
-                applicationService.listMyApplications(userId));
+                applicationService.listMyApplications(userId, current, size, applicationId));
     }
 
     @PutMapping

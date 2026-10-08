@@ -32,7 +32,8 @@ test('Key 创建后可复制短地址，JWT 管理页可找回、改名、禁用
   await page.getByLabel('API Key', { exact: true }).fill(fakeKey)
   await page.getByLabel('短链名称').fill('秋季活动视频')
   await page.getByLabel('原始 HTTPS 地址').fill('https://www.douyin.com/video/123456')
-  await page.getByLabel('有效期').selectOption('1d')
+  await page.locator('.el-select').filter({ has: page.getByRole('combobox', { name: '有效期' }) }).click()
+  await page.getByRole('option', { name: '1 天' }).click()
   await page.getByRole('button', { name: '发送请求' }).click()
   await expect(page.getByRole('heading', { name: '短链接已创建' })).toBeVisible()
   await expect(page.locator('.playground-created-link code')).toContainText('/s/Ab7Kq2')
@@ -81,6 +82,32 @@ test('目标主机不在白名单时不发请求，短链文档可进入调试�
   expect(requestCount).toBe(0)
 })
 
+test('自定义到期时刻按浏览器本地时间转换为绝对时间', async ({ page }) => {
+  await installMockApi(page)
+  await signIn(page)
+  const expected = await page.evaluate(() => new Date('2030-01-01T08:30').toISOString())
+  let expiresAt = ''
+  await page.route('**/v1/short-links', async (route) => {
+    expiresAt = String(route.request().postDataJSON().expiresAt)
+    await route.fulfill({ status: 200, json: { code: 'SUCCESS', message: '短链接创建成功', data: {
+      id: 123, apiKeyId: sampleKey.id, name: '自定义到期', originalUrl: 'https://weibo.com/1',
+      shortCode: 'Custom1', status: 0, expiresAt,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    } } })
+  })
+  await page.getByRole('link', { name: 'API 调试台' }).click()
+  await page.getByRole('button', { name: '短链接', exact: true }).click()
+  await page.getByLabel('API Key', { exact: true }).fill(fakeKey)
+  await page.getByLabel('短链名称').fill('自定义到期')
+  await page.getByLabel('原始 HTTPS 地址').fill('https://weibo.com/1')
+  await page.locator('.el-select').filter({ has: page.getByRole('combobox', { name: '有效期' }) }).click()
+  await page.getByRole('option', { name: '自定义到期时刻' }).click()
+  await page.getByLabel('到期时刻（本地时间）').fill('2030-01-01T08:30')
+  await page.getByRole('button', { name: '发送请求' }).click()
+  await expect(page.getByRole('heading', { name: '短链接已创建' })).toBeVisible()
+  expect(expiresAt).toBe(expected)
+})
+
 test('调试台的查询、修改和删除都只携带机器 Key', async ({ page }) => {
   await installMockApi(page)
   await signIn(page)
@@ -118,7 +145,8 @@ test('调试台的查询、修改和删除都只携带机器 Key', async ({ page
   await page.getByRole('button', { name: '修改短链' }).click()
   await page.getByLabel('短链 ID').fill('123')
   await page.getByLabel('新名称（可选）').fill('新名称')
-  await page.getByLabel('新状态（可选）').selectOption('1')
+  await page.locator('.el-select').filter({ has: page.getByRole('combobox', { name: '新状态（可选）' }) }).click()
+  await page.getByRole('option', { name: '禁用' }).click()
   await page.getByRole('button', { name: '发送请求' }).click()
   await expect(page.locator('.playground-response .playground-code')).toContainText('新名称')
   await page.getByRole('button', { name: '删除短链' }).click()
@@ -145,7 +173,8 @@ test('手机管理页按 Key 隔离列表，禁用的上层资源显示独立状
   await expect(page.locator('.short-links-mobile-list')).toContainText('第一把 Key 的短链')
   await expect(page.locator('.short-links-mobile-list')).not.toContainText('第二把 Key 的短链')
   await expect(page.locator('.short-links-mobile-list')).toContainText('上层已禁用')
-  await page.getByLabel('API Key', { exact: true }).selectOption('12')
+  await page.locator('.el-select').filter({ has: page.getByRole('combobox', { name: 'API Key', exact: true }) }).click()
+  await page.getByRole('option', { name: '另一把 Key · nexus_••••9876' }).click()
   await expect(page.locator('.short-links-mobile-list')).toContainText('第二把 Key 的短链')
   await expect(page.locator('.short-links-mobile-list')).not.toContainText('第一把 Key 的短链')
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)

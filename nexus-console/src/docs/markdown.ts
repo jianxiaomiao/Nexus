@@ -6,24 +6,18 @@ export interface TocItem {
   level: number
 }
 
-const parser = new MarkdownIt({ html: false, linkify: false, typographer: true })
-const defaultFence = parser.renderer.rules.fence
-parser.renderer.rules.fence = (tokens, index, options, env, renderer) => {
-  const code = defaultFence?.(tokens, index, options, env, renderer) ?? ''
-  return `<div class="docs-code-block"><button class="docs-copy-button" type="button" aria-label="复制代码">复制代码</button>${code}</div>`
+export interface MarkdownPart {
+  kind: 'html' | 'table' | 'code'
+  html: string
 }
-const defaultTableOpen = parser.renderer.rules.table_open
-const defaultTableClose = parser.renderer.rules.table_close
-parser.renderer.rules.table_open = (tokens, index, options, env, renderer) =>
-  `<div class="docs-table-scroll">${defaultTableOpen?.(tokens, index, options, env, renderer) ?? '<table>'}`
-parser.renderer.rules.table_close = (tokens, index, options, env, renderer) =>
-  `${defaultTableClose?.(tokens, index, options, env, renderer) ?? '</table>'}</div>`
+
+const parser = new MarkdownIt({ html: false, linkify: false, typographer: true })
 
 function headingId(text: string): string {
   return text.toLowerCase().trim().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '') || 'section'
 }
 
-export function renderMarkdown(source: string): { html: string; toc: TocItem[] } {
+export function renderMarkdown(source: string): { parts: MarkdownPart[]; toc: TocItem[] } {
   const tokens = parser.parse(source, {})
   const toc: TocItem[] = []
   const ids = new Map<string, number>()
@@ -43,5 +37,25 @@ export function renderMarkdown(source: string): { html: string; toc: TocItem[] }
     if (level <= 3) toc.push({ id, text, level })
   }
 
-  return { html: parser.renderer.render(tokens, parser.options, {}), toc }
+  const parts: MarkdownPart[] = []
+  let start = 0
+  const appendHtml = (end: number) => {
+    if (end > start) parts.push({ kind: 'html', html: parser.renderer.render(tokens.slice(start, end), parser.options, {}) })
+  }
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index]
+    if (token?.type !== 'fence' && token?.type !== 'table_open') continue
+    appendHtml(index)
+    let end = index + 1
+    if (token.type === 'table_open') {
+      while (end < tokens.length && tokens[end]?.type !== 'table_close') end++
+      end++
+    }
+    parts.push({ kind: token.type === 'fence' ? 'code' : 'table',
+      html: parser.renderer.render(tokens.slice(index, end), parser.options, {}) })
+    start = end
+    index = end - 1
+  }
+  appendHtml(tokens.length)
+  return { parts, toc }
 }

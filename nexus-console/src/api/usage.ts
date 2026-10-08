@@ -28,6 +28,18 @@ export interface UsageSummary {
   apiCounts: { apiCode: string; apiName: string; count: number }[]
 }
 
+export interface UsageEventPage {
+  total: number
+  current: number
+  size: number
+  records: { apiCode: string; httpStatusCode: number; durationMs: number; occurredAt: string }[]
+}
+
+export async function queryUsageEvents(query: { applicationId: number; apiKeyId: number; current: number; size: number }): Promise<UsageEventPage> {
+  const response = await http.get<ApiResponse<UsageEventPage>>('/usage/events', { params: query })
+  return response.data.data
+}
+
 export async function queryUsage(query: UsageQuery): Promise<UsageSummary> {
   const response = await http.get<ApiResponse<UsageSummary>>('/usage', { params: query })
   return response.data.data
@@ -45,6 +57,7 @@ export function usageErrorMessage(error: unknown): string {
     case 'API_KEY_NOT_FOUND':
       return '这枚 API Key 不存在，或你没有访问权限'
     case 'INVALID_USAGE_TIME_RANGE':
+    case 'INVALID_USAGE_PAGINATION':
       return error.response.data.message || '时间范围无效，请重新选择'
     default:
       return '加载调用统计失败，请稍后重试'

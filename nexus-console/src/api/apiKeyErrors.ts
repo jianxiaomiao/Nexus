@@ -18,6 +18,8 @@ export function apiKeyErrorMessage(error: unknown, fallback: string): string {
       return '这个 Key 名称已被使用，请换一个名称'
     case 'API_KEY_NOT_FOUND':
       return '这个 API Key 不存在，或已被删除'
+    case 'INVALID_LIST_PAGE':
+      return error.response.data.message || '页码或每页条数无效'
     case 'VALIDATION_ERROR':
     case 'INVALID_API_KEY_UPDATE':
     case 'INVALID_API_KEY_DELETE':

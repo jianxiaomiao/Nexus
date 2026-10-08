@@ -13,8 +13,12 @@ import {
   type Application,
 } from '@/api/applications'
 import { applicationErrorMessage } from '@/api/applicationErrors'
+import ListPagination from '@/components/ListPagination.vue'
 
 const applications = ref<Application[]>([])
+const current = ref(1)
+const size = ref(10)
+const total = ref(0)
 const loading = ref(false)
 const loadError = ref('')
 const submitting = ref(false)
@@ -34,13 +38,23 @@ async function load() {
   loading.value = true
   loadError.value = ''
   try {
-    applications.value = await listApplications()
+    const page = await listApplications({ current: current.value, size: size.value })
+    if (current.value > 1 && page.records.length === 0 && page.total > 0) {
+      current.value = Math.ceil(page.total / size.value)
+      await load()
+      return
+    }
+    applications.value = page.records
+    total.value = page.total
   } catch (error) {
     loadError.value = applicationErrorMessage(error, '加载应用失败，请稍后重试')
   } finally {
     loading.value = false
   }
 }
+
+function changePage(value: number) { current.value = value; void load() }
+function changeSize(value: number) { size.value = value; current.value = 1; void load() }
 
 function openCreate() {
   editingId.value = null
@@ -198,6 +212,7 @@ onMounted(() => { void load() })
         </div>
       </article>
     </div>
+    <ListPagination v-if="!loadError && total > 0" :current="current" :size="size" :total="total" @page-change="changePage" @size-change="changeSize" />
 
     <el-dialog v-model="dialogOpen" :title="editingId === null ? '创建 Application' : '编辑 Application'" width="min(440px, 92vw)" destroy-on-close>
       <p class="dialog-hint">一个清晰的名称，方便你以后找到它。</p>

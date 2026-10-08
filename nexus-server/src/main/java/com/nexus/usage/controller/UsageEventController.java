@@ -5,6 +5,7 @@ import com.nexus.common.web.ApiResponse;
 import com.nexus.usage.dto.TimeRange;
 import com.nexus.usage.dto.UsageQueryRequest;
 import com.nexus.usage.dto.UsageQueryResponse;
+import com.nexus.usage.dto.UsageEventPageResponse;
 import com.nexus.usage.service.UsageQueryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -18,6 +19,18 @@ import java.time.LocalDateTime;
 public class UsageEventController {
     private final UsageQueryService usageQueryService;
     private final BearerUserIdResolver bearerUserIdResolver;
+
+    @GetMapping("/events")
+    public ApiResponse<UsageEventPageResponse> queryMyUsageEvents(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Long apiKeyId,
+            @RequestParam Long applicationId,
+            @RequestParam(defaultValue = "1") long current,
+            @RequestParam(defaultValue = "10") long size) {
+        Long userId = bearerUserIdResolver.resolve(authorization);
+        return new ApiResponse<>("SUCCESS", "查询调用记录成功",
+                usageQueryService.queryMyUsageEvents(userId, applicationId, apiKeyId, current, size));
+    }
 
     @GetMapping
     public ApiResponse<UsageQueryResponse> queryMyUsageEvent(

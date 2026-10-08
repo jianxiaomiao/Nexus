@@ -86,7 +86,7 @@ class ShortLinkFlowIntegrationTests {
             shortLinkId = created.id();
 
             assertEquals(key.getId(), created.apiKeyId());
-            assertEquals(1, shortLinkService.listMyShortLinks(owner.getId(), key.getId()).size());
+            assertEquals(1, shortLinkService.listMyShortLinks(owner.getId(), key.getId(), 1, 10).records().size());
             assertEquals(target, shortLinkRedirectService.resolveTarget(created.shortCode()).toString());
 
             shortLinkService.updateMyShortLink(owner.getId(), new UpdateShortLinkRequest(created.id(), "renamed", 1));

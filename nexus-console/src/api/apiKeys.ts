@@ -1,4 +1,5 @@
 import { http, type ApiResponse } from './http'
+import type { ListPage, ListPageQuery } from './listPage'
 
 export interface ApiKey {
   id: number
@@ -22,9 +23,9 @@ export interface UpdateApiKeyRequest {
   status?: 0 | 1
 }
 
-export async function listApiKeys(applicationId: number): Promise<ApiKey[]> {
-  const response = await http.get<ApiResponse<{ apiKeyResponseList: ApiKey[] }>>(`/apiKey/${applicationId}`)
-  return response.data.data.apiKeyResponseList
+export async function listApiKeys(applicationId: number, query: ListPageQuery & { apiKeyId?: number } = {}): Promise<ListPage<ApiKey>> {
+  const response = await http.get<ApiResponse<ListPage<ApiKey>>>(`/apiKey/${applicationId}`, { params: query })
+  return response.data.data
 }
 
 export async function createApiKey(applicationId: number, name: string): Promise<CreatedApiKey> {

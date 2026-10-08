@@ -14,6 +14,8 @@ export function applicationErrorMessage(error: unknown, fallback: string): strin
       return '这个应用名称已被使用，请换一个名称'
     case 'APPLICATION_NOT_FOUND':
       return '应用不存在或已被删除，请刷新列表'
+    case 'INVALID_LIST_PAGE':
+      return error.response.data.message || '页码或每页条数无效'
     case 'VALIDATION_ERROR':
     case 'INVALID_APPLICATION_UPDATE':
       return '请检查应用名称和状态后重试'

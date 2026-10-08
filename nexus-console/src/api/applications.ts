@@ -1,4 +1,5 @@
 import { http, type ApiResponse } from './http'
+import type { ListPage, ListPageQuery } from './listPage'
 
 export interface Application {
   id: number
@@ -23,8 +24,8 @@ export interface UpdateApplicationRequest {
   status?: 0 | 1
 }
 
-export async function listApplications(): Promise<Application[]> {
-  const response = await http.get<ApiResponse<Application[]>>('/application')
+export async function listApplications(query: ListPageQuery & { applicationId?: number } = {}): Promise<ListPage<Application>> {
+  const response = await http.get<ApiResponse<ListPage<Application>>>('/application', { params: query })
   return response.data.data
 }
 

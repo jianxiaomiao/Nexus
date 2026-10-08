@@ -86,17 +86,18 @@ class ApplicationListFlowIntegrationTests {
                         .header("Authorization", "Bearer " + firstOwner.accessToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
-                .andExpect(jsonPath("$.data.length()").value(1))
-                .andExpect(jsonPath("$.data[0].id").value(firstActiveId))
-                .andExpect(jsonPath("$.data[0].name").value(sharedName));
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.records.length()").value(1))
+                .andExpect(jsonPath("$.data.records[0].id").value(firstActiveId))
+                .andExpect(jsonPath("$.data.records[0].name").value(sharedName));
 
         mockMvc.perform(get("/api/application")
                         .header("Authorization", "Bearer " + secondOwner.accessToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
-                .andExpect(jsonPath("$.data.length()").value(1))
-                .andExpect(jsonPath("$.data[0].id").value(secondActiveId))
-                .andExpect(jsonPath("$.data[0].name").value(sharedName));
+                .andExpect(jsonPath("$.data.records.length()").value(1))
+                .andExpect(jsonPath("$.data.records[0].id").value(secondActiveId))
+                .andExpect(jsonPath("$.data.records[0].name").value(sharedName));
     }
 
     private AuthenticatedUser loginAsNewUser() throws Exception {

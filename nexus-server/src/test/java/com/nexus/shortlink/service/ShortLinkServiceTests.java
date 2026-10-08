@@ -46,7 +46,7 @@ class ShortLinkServiceTests {
         when(apiKeyMapper.selectById(7L)).thenReturn(key);
         when(applicationMapper.selectOne(any())).thenReturn(null);
 
-        assertThrows(ShortLinkNotFoundException.class, () -> service.listMyShortLinks(99L, 7L));
+        assertThrows(ShortLinkNotFoundException.class, () -> service.listMyShortLinks(99L, 7L, 1, 10));
         verifyNoInteractions(shortLinkMapper);
     }
 }

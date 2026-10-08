@@ -139,7 +139,7 @@ class ShortLinkHttpIntegrationTests {
         HttpResponse<String> managerList = send("GET", "/api/short-links?apiKeyId=" + key.getId(),
                 managerAuthorization, null);
         assertEquals(200, managerList.statusCode());
-        assertEquals(shortLinkId.longValue(), objectMapper.readTree(managerList.body()).at("/data/0/id").asLong());
+        assertEquals(shortLinkId.longValue(), objectMapper.readTree(managerList.body()).at("/data/records/0/id").asLong());
 
         String disableBody = objectMapper.writeValueAsString(new UpdateShortLinkRequest(shortLinkId, null, 1));
         assertEquals(200, send("PUT", "/api/short-links", managerAuthorization, disableBody).statusCode());

@@ -118,7 +118,7 @@ class ApplicationDeletionFlowIntegrationTests {
         mockMvc.perform(get("/api/application")
                         .header("Authorization", "Bearer " + owner.accessToken()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.length()").value(0));
+                .andExpect(jsonPath("$.data.records.length()").value(0));
     }
 
     @Test

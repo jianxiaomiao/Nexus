@@ -95,11 +95,11 @@ class ApiKeyManagementFlowIntegrationTests {
         mockMvc.perform(get(BASE_PATH + "/{applicationId}", applicationId)
                         .header("Authorization", bearer(owner)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.apiKeyResponseList.length()").value(1))
-                .andExpect(jsonPath("$.data.apiKeyResponseList[0].id").value(keyId))
-                .andExpect(jsonPath("$.data.apiKeyResponseList[0].keyPreview").isNotEmpty())
-                .andExpect(jsonPath("$.data.apiKeyResponseList[0].apiKey").doesNotExist())
-                .andExpect(jsonPath("$.data.apiKeyResponseList[0].secretHash").doesNotExist());
+                .andExpect(jsonPath("$.data.records.length()").value(1))
+                .andExpect(jsonPath("$.data.records[0].id").value(keyId))
+                .andExpect(jsonPath("$.data.records[0].keyPreview").isNotEmpty())
+                .andExpect(jsonPath("$.data.records[0].apiKey").doesNotExist())
+                .andExpect(jsonPath("$.data.records[0].secretHash").doesNotExist());
 
         mockMvc.perform(put(BASE_PATH)
                         .header("Authorization", bearer(owner))
@@ -125,7 +125,7 @@ class ApiKeyManagementFlowIntegrationTests {
         mockMvc.perform(get(BASE_PATH + "/{applicationId}", applicationId)
                         .header("Authorization", bearer(owner)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.apiKeyResponseList.length()").value(0));
+                .andExpect(jsonPath("$.data.records.length()").value(0));
     }
 
     @Test
@@ -224,7 +224,7 @@ class ApiKeyManagementFlowIntegrationTests {
         mockMvc.perform(get(BASE_PATH + "/{applicationId}", applicationId)
                         .header("Authorization", bearer(owner)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.apiKeyResponseList.length()").value(1));
+                .andExpect(jsonPath("$.data.records.length()").value(1));
         mockMvc.perform(put(BASE_PATH)
                         .header("Authorization", bearer(owner))
                         .contentType(MediaType.APPLICATION_JSON)

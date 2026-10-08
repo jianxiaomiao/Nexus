@@ -23,6 +23,7 @@ import com.nexus.shortlink.exception.ShortCodeExhaustedException;
 import com.nexus.shortlink.exception.ShortLinkExpiredException;
 import com.nexus.shortlink.exception.ShortLinkNotFoundException;
 import com.nexus.usage.exception.InvalidUsageTimeRangeException;
+import com.nexus.usage.exception.InvalidUsagePaginationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpStatus;
@@ -38,6 +39,18 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler{
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ExceptionHandler(InvalidListPageException.class)
+    public ApiResponse<Void> handleInvalidListPage(InvalidListPageException exception) {
+        return new ApiResponse<>("INVALID_LIST_PAGE", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ExceptionHandler(InvalidUsagePaginationException.class)
+    public ApiResponse<Void> handleInvalidUsagePagination(InvalidUsagePaginationException exception) {
+        return new ApiResponse<>("INVALID_USAGE_PAGINATION", exception.getMessage(), null);
+    }
 
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     @ExceptionHandler(InvalidUsageTimeRangeException.class)

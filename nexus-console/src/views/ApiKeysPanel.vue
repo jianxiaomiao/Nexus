@@ -6,10 +6,14 @@ import { ArrowRight, Plus } from '@element-plus/icons-vue'
 import type { Application } from '@/api/applications'
 import { createApiKey, listApiKeys, type ApiKey } from '@/api/apiKeys'
 import { apiKeyErrorMessage } from '@/api/apiKeyErrors'
+import ListPagination from '@/components/ListPagination.vue'
 
 const props = defineProps<{ application: Application }>()
 const router = useRouter()
 const keys = ref<ApiKey[]>([])
+const current = ref(1)
+const size = ref(10)
+const total = ref(0)
 const loading = ref(false)
 const loadError = ref('')
 const creating = ref(false)
@@ -41,13 +45,23 @@ async function load() {
   loading.value = true
   loadError.value = ''
   try {
-    keys.value = await listApiKeys(props.application.id)
+    const page = await listApiKeys(props.application.id, { current: current.value, size: size.value })
+    if (current.value > 1 && page.records.length === 0 && page.total > 0) {
+      current.value = Math.ceil(page.total / size.value)
+      await load()
+      return
+    }
+    keys.value = page.records
+    total.value = page.total
   } catch (error) {
     loadError.value = apiKeyErrorMessage(error, '加载 API Key 失败，请稍后重试')
   } finally {
     loading.value = false
   }
 }
+
+function changePage(value: number) { current.value = value; void load() }
+function changeSize(value: number) { size.value = value; current.value = 1; void load() }
 
 function openCreate() {
   if (props.application.status !== 0) return
@@ -163,6 +177,8 @@ onUnmounted(() => {
         </article>
       </div>
     </div>
+
+    <ListPagination v-if="!loadError && total > 0" :current="current" :size="size" :total="total" @page-change="changePage" @size-change="changeSize" />
 
     <el-dialog v-model="createDialogOpen" title="创建 API Key" width="min(440px, 92vw)" destroy-on-close>
       <p class="dialog-hint">用一个名称区分这枚 Key 的用途。</p>

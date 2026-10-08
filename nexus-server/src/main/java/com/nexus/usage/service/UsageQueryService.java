@@ -1,6 +1,7 @@
 package com.nexus.usage.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.nexus.apikey.entity.ApiKey;
 import com.nexus.apikey.exception.ApiKeyNotFoundException;
 import com.nexus.apikey.mapper.ApiKeyMapper;
@@ -11,8 +12,10 @@ import com.nexus.usage.ApiCode;
 import com.nexus.usage.dto.TimeRange;
 import com.nexus.usage.dto.UsageQueryRequest;
 import com.nexus.usage.dto.UsageQueryResponse;
+import com.nexus.usage.dto.UsageEventPageResponse;
 import com.nexus.usage.entity.UsageEvent;
 import com.nexus.usage.exception.InvalidUsageTimeRangeException;
+import com.nexus.usage.exception.InvalidUsagePaginationException;
 import com.nexus.usage.mapper.UsageApiCountRow;
 import com.nexus.usage.mapper.UsageDailyCountRow;
 import com.nexus.usage.mapper.UsageEventMapper;
@@ -41,27 +44,27 @@ public class UsageQueryService {
     private final ApiKeyMapper apiKeyMapper;
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public UsageEventPageResponse queryMyUsageEvents(Long userId, Long applicationId, Long apiKeyId,
+                                                      long current, long size) {
+        if (current < 1 || size < 1 || size > 100) {
+            throw new InvalidUsagePaginationException();
+        }
+        assertOwnedKey(userId, applicationId, apiKeyId);
+        Page<UsageEvent> page = usageEventMapper.selectPage(new Page<>(current, size),
+                Wrappers.<UsageEvent>lambdaQuery()
+                        .eq(UsageEvent::getApiKeyId, apiKeyId)
+                        .eq(UsageEvent::getApplicationId, applicationId)
+                        .orderByDesc(UsageEvent::getOccurredAt, UsageEvent::getId));
+        return new UsageEventPageResponse(page.getTotal(), current, size, page.getRecords().stream()
+                .map(event -> new UsageEventPageResponse.Event(event.getApiCode(), event.getHttpStatusCode(),
+                        event.getDurationMs(), event.getOccurredAt().atOffset(ZoneOffset.UTC)
+                        .atZoneSameInstant(DISPLAY_ZONE).toOffsetDateTime()))
+                .toList());
+    }
+
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public UsageQueryResponse queryMyUsageEvent(Long userId, UsageQueryRequest usageQueryRequest) {
-        //校验application
-        Application application = applicationMapper.selectOne(
-                Wrappers.<Application>lambdaQuery()
-                        .eq(Application::getId, usageQueryRequest.applicationId())
-                        .eq(Application::getOwnerUserId, userId)
-                        .eq(Application::getIsDeleted, 0)
-        );
-        if (application == null) {
-            throw new ApplicationNotFoundException();
-        }
-        //校验apiKey
-        ApiKey apiKey = apiKeyMapper.selectOne(
-                Wrappers.<ApiKey>lambdaQuery()
-                        .eq(ApiKey::getId, usageQueryRequest.apiKeyId())
-                        .eq(ApiKey::getApplicationId, application.getId())
-                        .eq(ApiKey::getIsDeleted, 0)
-        );
-        if (apiKey == null) {
-            throw new ApiKeyNotFoundException();
-        }
+        assertOwnedKey(userId, usageQueryRequest.applicationId(), usageQueryRequest.apiKeyId());
         // 禁用只阻止机器调用，不影响所属用户查看历史用量。
         LocalDateTime startLocal;
         LocalDateTime endLocal;
@@ -97,13 +100,13 @@ public class UsageQueryService {
 
         long allTimeCount = usageEventMapper.selectCount(
                 Wrappers.<UsageEvent>lambdaQuery()
-                        .eq(UsageEvent::getApiKeyId, apiKey.getId())
-                        .eq(UsageEvent::getApplicationId, application.getId())
+                        .eq(UsageEvent::getApiKeyId, usageQueryRequest.apiKeyId())
+                        .eq(UsageEvent::getApplicationId, usageQueryRequest.applicationId())
         );
         List<UsageDailyCountRow> dailyRows = usageEventMapper.selectDailyCounts(
-                apiKey.getId(), application.getId(), startUtc, endUtc);
+                usageQueryRequest.apiKeyId(), usageQueryRequest.applicationId(), startUtc, endUtc);
         List<UsageApiCountRow> apiRows = usageEventMapper.selectApiCounts(
-                apiKey.getId(), application.getId(), startUtc, endUtc);
+                usageQueryRequest.apiKeyId(), usageQueryRequest.applicationId(), startUtc, endUtc);
 
         Map<LocalDate, Long> countsByDate = dailyRows.stream().collect(Collectors.toMap(
                 UsageDailyCountRow::getDate, UsageDailyCountRow::getCallCount));
@@ -128,6 +131,29 @@ public class UsageQueryService {
                 dailyCounts,
                 apiCounts
         );
+    }
+
+    private void assertOwnedKey(Long userId, Long applicationId, Long apiKeyId) {
+        //校验application
+        Application application = applicationMapper.selectOne(
+                Wrappers.<Application>lambdaQuery()
+                        .eq(Application::getId, applicationId)
+                        .eq(Application::getOwnerUserId, userId)
+                        .eq(Application::getIsDeleted, 0)
+        );
+        if (application == null) {
+            throw new ApplicationNotFoundException();
+        }
+        //校验apiKey
+        ApiKey apiKey = apiKeyMapper.selectOne(
+                Wrappers.<ApiKey>lambdaQuery()
+                        .eq(ApiKey::getId, apiKeyId)
+                        .eq(ApiKey::getApplicationId, application.getId())
+                        .eq(ApiKey::getIsDeleted, 0)
+        );
+        if (apiKey == null) {
+            throw new ApiKeyNotFoundException();
+        }
     }
 
     private String apiName(String code) {

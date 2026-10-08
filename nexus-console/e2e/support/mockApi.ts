@@ -9,6 +9,7 @@ type UsageSummary = {
   dailyCounts: { date: string; count: number }[]
   apiCounts: { apiCode: string; apiName: string; count: number }[]
 }
+type UsageEvent = { apiCode: string; httpStatusCode: number; durationMs: number; occurredAt: string }
 
 export type Application = {
   id: number
@@ -69,12 +70,17 @@ export const sampleUsage: UsageSummary = {
     { apiCode: 'utils.hash', apiName: '哈希计算工具', count: 1 },
   ],
 }
+export const sampleUsageEvents: UsageEvent[] = Array.from({ length: 11 }, (_, index) => ({
+  apiCode: `utils.event${index + 1}`, httpStatusCode: index === 10 ? 400 : 200,
+  durationMs: index + 1, occurredAt: `2026-10-08T${String(22 - index).padStart(2, '0')}:00:00+08:00`,
+}))
 
-export async function installMockApi(page: Page, initial?: { applications?: Application[]; keys?: ApiKey[]; shortLinks?: ShortLink[]; usage?: UsageSummary }) {
+export async function installMockApi(page: Page, initial?: { applications?: Application[]; keys?: ApiKey[]; shortLinks?: ShortLink[]; usage?: UsageSummary; usageEvents?: UsageEvent[] }) {
   const applications = structuredClone(initial?.applications ?? [sampleApplication])
   const keys = structuredClone(initial?.keys ?? [sampleKey])
   const shortLinks = structuredClone(initial?.shortLinks ?? [])
   const usage = structuredClone(initial?.usage ?? sampleUsage)
+  const usageEvents = structuredClone(initial?.usageEvents ?? sampleUsageEvents)
   const calls: RecordedRequest[] = []
   const failures = new Map<string, Failure>()
   let nextApplicationId = 100
@@ -85,7 +91,14 @@ export async function installMockApi(page: Page, initial?: { applications?: Appl
     const method = request.method()
     const path = new URL(request.url()).pathname
     const body = request.postData() ? request.postDataJSON() as Record<string, unknown> : {}
-    calls.push({ method, path, body, query: Object.fromEntries(new URL(request.url()).searchParams) })
+    const params = new URL(request.url()).searchParams
+    calls.push({ method, path, body, query: Object.fromEntries(params) })
+
+    const paginate = <T>(items: T[]) => {
+      const current = Number(params.get('current') ?? 1)
+      const size = Number(params.get('size') ?? 10)
+      return { total: items.length, current, size, records: items.slice((current - 1) * size, current * size) }
+    }
 
     const respond = async (data: unknown, status = 200, code = 'SUCCESS', message = '成功') => {
       await route.fulfill({ status, json: { code, message, data } })
@@ -108,7 +121,7 @@ export async function installMockApi(page: Page, initial?: { applications?: Appl
     // 每个管理请求都必须带人类账号的 Bearer 凭证。
     expect(request.headers().authorization).toBe('Bearer playwright-only-token')
     if (path === '/api/application' && method === 'GET') {
-      await respond(applications)
+      await respond(paginate(applications.filter((item) => !params.has('applicationId') || item.id === Number(params.get('applicationId')))))
     } else if (path === '/api/application/create' && method === 'POST') {
       const created: Application = { id: nextApplicationId++, name: String(body.name), status: 0, createdAt: timestamp, updatedAt: timestamp }
       applications.push(created)
@@ -126,7 +139,7 @@ export async function installMockApi(page: Page, initial?: { applications?: Appl
       await respond(null)
     } else if (/^\/api\/apiKey\/\d+$/.test(path) && method === 'GET') {
       const applicationId = Number(path.split('/').at(-1))
-      await respond({ apiKeyResponseList: keys.filter((item) => item.applicationId === applicationId) })
+      await respond(paginate(keys.filter((item) => item.applicationId === applicationId && (!params.has('apiKeyId') || item.id === Number(params.get('apiKeyId'))))))
     } else if (path === '/api/apiKey/create' && method === 'POST') {
       const created: ApiKey = {
         id: nextKeyId++, applicationId: Number(body.applicationId), name: String(body.name),
@@ -148,9 +161,14 @@ export async function installMockApi(page: Page, initial?: { applications?: Appl
       await respond(null)
     } else if (path === '/api/usage' && method === 'GET') {
       await respond(usage)
+    } else if (path === '/api/usage/events' && method === 'GET') {
+      const params = new URL(request.url()).searchParams
+      const current = Number(params.get('current') ?? 1)
+      const size = Number(params.get('size') ?? 10)
+      await respond({ total: usageEvents.length, current, size, records: usageEvents.slice((current - 1) * size, current * size) })
     } else if (path === '/api/short-links' && method === 'GET') {
-      const apiKeyId = Number(new URL(request.url()).searchParams.get('apiKeyId'))
-      await respond(shortLinks.filter((item) => item.apiKeyId === apiKeyId))
+      const apiKeyId = Number(params.get('apiKeyId'))
+      await respond(paginate(shortLinks.filter((item) => item.apiKeyId === apiKeyId)))
     } else if (path === '/api/short-links' && method === 'PUT') {
       const target = shortLinks.find((item) => item.id === Number(body.id))
       if (!target) { await respond(null, 404, 'SHORT_LINK_NOT_FOUND'); return }

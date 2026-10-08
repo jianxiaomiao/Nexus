@@ -1,5 +1,6 @@
 import { isAxiosError } from 'axios'
 import { http, type ApiResponse } from './http'
+import type { ListPage, ListPageQuery } from './listPage'
 
 export interface ShortLink {
   id: number
@@ -61,8 +62,8 @@ export async function callShortLinkOpenApi(
   return { status: response.status, body: await response.json() as ShortLinkOpenApiResult['body'] }
 }
 
-export async function listManagedShortLinks(apiKeyId: number): Promise<ShortLink[]> {
-  const response = await http.get<ApiResponse<ShortLink[]>>('/short-links', { params: { apiKeyId } })
+export async function listManagedShortLinks(apiKeyId: number, query: ListPageQuery = {}): Promise<ListPage<ShortLink>> {
+  const response = await http.get<ApiResponse<ListPage<ShortLink>>>('/short-links', { params: { apiKeyId, ...query } })
   return response.data.data
 }
 
@@ -82,6 +83,7 @@ export function shortLinkManagementError(error: unknown, fallback: string): stri
     case 'INVALID_ACCESS_TOKEN': return '登录已过期，请重新登录'
     case 'AUTH_ACCOUNT_FORBIDDEN': return '账号已被禁用，无法管理短链接'
     case 'SHORT_LINK_NOT_FOUND': return '短链接或所属 API Key 不存在，或你没有访问权限'
+    case 'INVALID_LIST_PAGE': return error.response.data.message || '页码或每页条数无效'
     case 'INVALID_SHORT_LINK_REQUEST':
     case 'VALIDATION_ERROR': return error.response.data.message || '请检查提交的信息'
     default: return fallback

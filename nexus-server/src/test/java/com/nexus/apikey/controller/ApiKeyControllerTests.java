@@ -4,7 +4,6 @@ import com.nexus.apikey.dto.ApiKeyResponse;
 import com.nexus.apikey.dto.CreateApiKeyRequest;
 import com.nexus.apikey.dto.CreateApiKeyResponse;
 import com.nexus.apikey.dto.DeleteApiKeyRequest;
-import com.nexus.apikey.dto.QueryApiKeyResponse;
 import com.nexus.apikey.dto.UpdateApiKeyRequest;
 import com.nexus.apikey.exception.ApiKeyNameAlreadyExistsException;
 import com.nexus.apikey.exception.ApiKeyNotFoundException;
@@ -75,19 +74,19 @@ class ApiKeyControllerTests {
     @Test
     void listReturnsOnlySafeKeyFields() throws Exception {
         when(bearerUserIdResolver.resolve("Bearer valid-token")).thenReturn(42L);
-        when(apiKeyService.listMyApiKeys(42L, 7L)).thenReturn(new QueryApiKeyResponse(List.of(
+        when(apiKeyService.listMyApiKeys(42L, 7L, 1, 10, null)).thenReturn(new com.nexus.common.web.ListPage<>(1, 1, 10, List.of(
                 new ApiKeyResponse(9L, 7L, "key", "public-id", "masked-preview", 0,
                         LocalDateTime.of(2026, 10, 4, 12, 0), LocalDateTime.of(2026, 10, 4, 12, 0)))));
 
         mockMvc.perform(get(BASE_PATH + "/7")
                         .header("Authorization", "Bearer valid-token"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.apiKeyResponseList[0].id").value(9))
-                .andExpect(jsonPath("$.data.apiKeyResponseList[0].keyPreview").value("masked-preview"))
-                .andExpect(jsonPath("$.data.apiKeyResponseList[0].apiKey").doesNotExist())
-                .andExpect(jsonPath("$.data.apiKeyResponseList[0].secretHash").doesNotExist());
+                .andExpect(jsonPath("$.data.records[0].id").value(9))
+                .andExpect(jsonPath("$.data.records[0].keyPreview").value("masked-preview"))
+                .andExpect(jsonPath("$.data.records[0].apiKey").doesNotExist())
+                .andExpect(jsonPath("$.data.records[0].secretHash").doesNotExist());
 
-        verify(apiKeyService).listMyApiKeys(42L, 7L);
+        verify(apiKeyService).listMyApiKeys(42L, 7L, 1, 10, null);
     }
 
     @Test
@@ -166,7 +165,7 @@ class ApiKeyControllerTests {
         CreateApiKeyRequest createRequest = new CreateApiKeyRequest("key", 7L);
         when(apiKeyService.createMyApiKey(42L, createRequest))
                 .thenThrow(new ApiKeyNameAlreadyExistsException(new IllegalStateException("duplicate")));
-        when(apiKeyService.listMyApiKeys(42L, 7L)).thenThrow(new ApplicationNotFoundException());
+        when(apiKeyService.listMyApiKeys(42L, 7L, 1, 10, null)).thenThrow(new ApplicationNotFoundException());
         DeleteApiKeyRequest deleteRequest = new DeleteApiKeyRequest(7L, 9L);
         doThrow(new ApiKeyNotFoundException()).when(apiKeyService).deleteMyApiKey(42L, deleteRequest);
 

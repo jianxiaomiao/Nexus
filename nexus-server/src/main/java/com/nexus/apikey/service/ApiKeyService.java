@@ -2,6 +2,7 @@ package com.nexus.apikey.service;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.nexus.apikey.credential.ApiKeyCredentialGenerator;
 import com.nexus.apikey.credential.GeneratedApiKey;
 import com.nexus.apikey.dto.*;
@@ -17,13 +18,14 @@ import com.nexus.application.exception.ApplicationNotFoundException;
 import com.nexus.application.mapper.ApplicationMapper;
 import com.nexus.shortlink.entity.ShortLink;
 import com.nexus.shortlink.mapper.ShortLinkMapper;
+import com.nexus.common.web.ListPage;
+import com.nexus.common.web.ListPageParameters;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -82,7 +84,9 @@ public class ApiKeyService {
         );
     }
 
-    public QueryApiKeyResponse listMyApiKeys(Long userId ,Long applicationId){
+    public ListPage<ApiKeyResponse> listMyApiKeys(Long userId, Long applicationId, long current, long size,
+                                                  Long apiKeyId){
+        ListPageParameters.validate(current, size);
         //校验application
         Application application = applicationMapper.selectOne(
                 Wrappers.<Application>lambdaQuery()
@@ -93,16 +97,16 @@ public class ApiKeyService {
         if (application == null) {
             throw new ApplicationNotFoundException();
         }
-        List<ApiKey> keys = apiKeyMapper.selectList(
+        Page<ApiKey> keys = apiKeyMapper.selectPage(new Page<>(current, size),
                 Wrappers.<ApiKey>lambdaQuery()
                         .eq(ApiKey::getApplicationId, applicationId)
                         .eq(ApiKey::getIsDeleted, 0)
+                        .eq(apiKeyId != null, ApiKey::getId, apiKeyId)
                         .orderByDesc(ApiKey::getCreatedAt)
                         .orderByDesc(ApiKey::getId)
         );
 
-        List<ApiKeyResponse> items = keys.stream()
-                .map(key -> new ApiKeyResponse(
+        return ListPage.map(keys, key -> new ApiKeyResponse(
                         key.getId(),
                         key.getApplicationId(),
                         key.getName(),
@@ -111,10 +115,7 @@ public class ApiKeyService {
                         key.getStatus(),
                         key.getCreatedAt(),
                         key.getUpdatedAt()
-                ))
-                .toList();
-
-        return new QueryApiKeyResponse(items);
+                ));
     }
 
     @Transactional

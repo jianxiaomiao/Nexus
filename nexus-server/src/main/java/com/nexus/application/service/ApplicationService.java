@@ -2,6 +2,7 @@ package com.nexus.application.service;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.nexus.apikey.entity.ApiKey;
 import com.nexus.apikey.mapper.ApiKeyMapper;
 import com.nexus.application.dto.*;
@@ -13,6 +14,8 @@ import com.nexus.application.exception.InvalidApplicationUpdateException;
 import com.nexus.application.mapper.ApplicationMapper;
 import com.nexus.shortlink.entity.ShortLink;
 import com.nexus.shortlink.mapper.ShortLinkMapper;
+import com.nexus.common.web.ListPage;
+import com.nexus.common.web.ListPageParameters;
 import lombok.AllArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -45,22 +48,22 @@ public class ApplicationService {
         return new CreateApplicationResponse(application.getId(),application.getName());
     }
 
-    public List<ApplicationResponse> listMyApplications(Long userId){
-        List<Application> applications = applicationMapper.selectList(
+    public ListPage<ApplicationResponse> listMyApplications(Long userId, long current, long size, Long applicationId){
+        ListPageParameters.validate(current, size);
+        Page<Application> applications = applicationMapper.selectPage(new Page<>(current, size),
                 Wrappers.<Application>lambdaQuery()
                         .eq(Application::getOwnerUserId, userId)
                         .eq(Application::getIsDeleted, 0)
+                        .eq(applicationId != null, Application::getId, applicationId)
                         .orderByDesc(Application::getCreatedAt)
                         .orderByDesc(Application::getId)
         );
-        return applications.stream()
-                .map(app -> new ApplicationResponse(
+        return ListPage.map(applications, app -> new ApplicationResponse(
                         app.getId(),
                         app.getName(),
                         app.getStatus(),
                         app.getCreatedAt(),
-                        app.getUpdatedAt()))
-                .toList();
+                        app.getUpdatedAt()));
     }
 
     public ApplicationResponse updateMyApplication(Long userId, UpdateApplicationRequest updateApplicationRequest){

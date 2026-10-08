@@ -118,41 +118,42 @@ class ApplicationControllerTests {
         LocalDateTime createdAt = LocalDateTime.of(2026, 9, 26, 10, 30);
         LocalDateTime updatedAt = LocalDateTime.of(2026, 9, 26, 11, 0);
         when(bearerUserIdResolver.resolve("Bearer valid-token")).thenReturn(42L);
-        when(applicationService.listMyApplications(42L)).thenReturn(List.of(
+        when(applicationService.listMyApplications(42L, 1, 10, null)).thenReturn(new com.nexus.common.web.ListPage<>(2, 1, 10, List.of(
                 new ApplicationResponse(100L, "appA", 0, createdAt, updatedAt),
-                new ApplicationResponse(101L, "appB", 1, createdAt, updatedAt)));
+                new ApplicationResponse(101L, "appB", 1, createdAt, updatedAt))));
 
         mockMvc.perform(get("/api/application")
                         .header("Authorization", "Bearer valid-token"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.message").value("查询成功"))
-                .andExpect(jsonPath("$.data.length()").value(2))
-                .andExpect(jsonPath("$.data[0].id").value(100))
-                .andExpect(jsonPath("$.data[0].name").value("appA"))
-                .andExpect(jsonPath("$.data[0].status").value(0))
-                .andExpect(jsonPath("$.data[0].createdAt").value("2026-09-26T10:30:00"))
-                .andExpect(jsonPath("$.data[0].updatedAt").value("2026-09-26T11:00:00"))
-                .andExpect(jsonPath("$.data[1].id").value(101))
-                .andExpect(jsonPath("$.data[1].name").value("appB"))
-                .andExpect(jsonPath("$.data[1].status").value(1));
+                .andExpect(jsonPath("$.data.total").value(2))
+                .andExpect(jsonPath("$.data.records.length()").value(2))
+                .andExpect(jsonPath("$.data.records[0].id").value(100))
+                .andExpect(jsonPath("$.data.records[0].name").value("appA"))
+                .andExpect(jsonPath("$.data.records[0].status").value(0))
+                .andExpect(jsonPath("$.data.records[0].createdAt").value("2026-09-26T10:30:00"))
+                .andExpect(jsonPath("$.data.records[0].updatedAt").value("2026-09-26T11:00:00"))
+                .andExpect(jsonPath("$.data.records[1].id").value(101))
+                .andExpect(jsonPath("$.data.records[1].name").value("appB"))
+                .andExpect(jsonPath("$.data.records[1].status").value(1));
 
         verify(bearerUserIdResolver).resolve("Bearer valid-token");
-        verify(applicationService).listMyApplications(42L);
+        verify(applicationService).listMyApplications(42L, 1, 10, null);
     }
 
     @Test
     void noApplicationsShouldReturnEmptyList() throws Exception {
         when(bearerUserIdResolver.resolve("Bearer valid-token")).thenReturn(42L);
-        when(applicationService.listMyApplications(42L)).thenReturn(List.of());
+        when(applicationService.listMyApplications(42L, 1, 10, null)).thenReturn(new com.nexus.common.web.ListPage<>(0, 1, 10, List.of()));
 
         mockMvc.perform(get("/api/application")
                         .header("Authorization", "Bearer valid-token"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
-                .andExpect(jsonPath("$.data.length()").value(0));
+                .andExpect(jsonPath("$.data.records.length()").value(0));
 
-        verify(applicationService).listMyApplications(42L);
+        verify(applicationService).listMyApplications(42L, 1, 10, null);
     }
 
     @Test

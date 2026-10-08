@@ -35,16 +35,16 @@ async function load() {
   loading.value = true
   errorMessage.value = ''
   try {
-    const applications = await listApplications()
+    const applications = await listApplications({ applicationId })
     if (version !== loadVersion) return
-    application.value = applications.find((item) => item.id === applicationId) ?? null
+    application.value = applications.records[0] ?? null
     if (!application.value) {
       errorMessage.value = '所属应用不存在，或你没有访问权限'
       return
     }
-    const keys = await listApiKeys(applicationId)
+    const keys = await listApiKeys(applicationId, { apiKeyId: keyId })
     if (version !== loadVersion) return
-    apiKey.value = keys.find((item) => item.id === keyId) ?? null
+    apiKey.value = keys.records[0] ?? null
     if (!apiKey.value) errorMessage.value = '这个 API Key 不存在，或你没有访问权限'
   } catch (error) {
     if (version === loadVersion) {
@@ -183,11 +183,11 @@ watch([() => route.params.applicationId, () => route.params.keyId], () => { void
 
       <el-alert v-if="application.status !== 0" class="disabled-alert" type="warning" :closable="false" title="所属应用已禁用；即使此 Key 处于运行中，也无法调用开放 API。" />
 
-      <nav class="detail-tabs" aria-label="API Key 详情分区">
+      <el-scrollbar class="detail-tabs"><nav class="detail-tabs-inner" aria-label="API Key 详情分区">
         <RouterLink :to="{ name: 'api-key-detail', params: { applicationId: application.id, keyId: apiKey.id } }" :class="{ 'is-current': activeTab === 'info' }" :aria-current="activeTab === 'info' ? 'page' : undefined">密钥信息</RouterLink>
         <RouterLink :to="{ name: 'api-key-detail', params: { applicationId: application.id, keyId: apiKey.id }, query: { tab: 'short-links' } }" :class="{ 'is-current': activeTab === 'short-links' }" :aria-current="activeTab === 'short-links' ? 'page' : undefined">短链接</RouterLink>
         <RouterLink :to="{ name: 'api-key-detail', params: { applicationId: application.id, keyId: apiKey.id }, query: { tab: 'usage' } }" :class="{ 'is-current': activeTab === 'usage' }" :aria-current="activeTab === 'usage' ? 'page' : undefined">调用统计</RouterLink>
-      </nav>
+      </nav></el-scrollbar>
 
       <div v-if="activeTab === 'info'" class="detail-card">
         <h2>密钥信息</h2>
@@ -231,7 +231,8 @@ h1 { overflow-wrap: anywhere; margin: 0; color: var(--nexus-ink); font-size: cla
 .status-pill.is-disabled { background: var(--nexus-warning-surface); color: var(--nexus-warning-ink); }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 .disabled-alert { margin-bottom: 20px; }
-.detail-tabs { display: flex; gap: 8px; margin-bottom: 30px; overflow-x: auto; border-bottom: 1px solid var(--nexus-line); }
+.detail-tabs { margin-bottom: 30px; border-bottom: 1px solid var(--nexus-line); }
+.detail-tabs-inner { display: flex; gap: 8px; min-width: max-content; }
 .detail-tabs a { flex: none; padding: 0 18px 14px; border-bottom: 2px solid transparent; color: var(--nexus-muted); font-size: 15px; font-weight: 600; text-decoration: none; }
 .detail-tabs a:hover, .detail-tabs a.is-current { color: var(--nexus-teal); }
 .detail-tabs a.is-current { border-bottom-color: var(--nexus-teal); }

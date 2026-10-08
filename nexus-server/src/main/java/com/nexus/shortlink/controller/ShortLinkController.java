@@ -2,6 +2,7 @@ package com.nexus.shortlink.controller;
 
 import com.nexus.auth.web.BearerUserIdResolver;
 import com.nexus.common.web.ApiResponse;
+import com.nexus.common.web.ListPage;
 import com.nexus.shortlink.dto.ShortLinkResponse;
 import com.nexus.shortlink.dto.UpdateShortLinkRequest;
 import com.nexus.shortlink.service.ShortLinkService;
@@ -17,7 +18,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
 
 @RestController
 @RequiredArgsConstructor
@@ -27,12 +27,14 @@ public class ShortLinkController {
     private final ShortLinkService shortLinkService;
 
     @GetMapping
-    public ApiResponse<List<ShortLinkResponse>> listMine(
+    public ApiResponse<ListPage<ShortLinkResponse>> listMine(
             @RequestHeader(value = "Authorization", required = false) String authorization,
-            @RequestParam Long apiKeyId) {
+            @RequestParam Long apiKeyId,
+            @RequestParam(defaultValue = "1") long current,
+            @RequestParam(defaultValue = "10") long size) {
         long userId = userIdResolver.resolve(authorization);
         return new ApiResponse<>("SUCCESS", "查询成功",
-                shortLinkService.listMyShortLinks(userId, apiKeyId));
+                shortLinkService.listMyShortLinks(userId, apiKeyId, current, size));
     }
 
     @PutMapping

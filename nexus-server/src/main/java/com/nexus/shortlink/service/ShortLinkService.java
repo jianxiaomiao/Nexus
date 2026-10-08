@@ -1,6 +1,7 @@
 package com.nexus.shortlink.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.nexus.apikey.entity.ApiKey;
 import com.nexus.apikey.mapper.ApiKeyMapper;
 import com.nexus.application.entity.Application;
@@ -11,6 +12,8 @@ import com.nexus.shortlink.entity.ShortLink;
 import com.nexus.shortlink.exception.InvalidShortLinkRequestException;
 import com.nexus.shortlink.exception.ShortLinkNotFoundException;
 import com.nexus.shortlink.mapper.ShortLinkMapper;
+import com.nexus.common.web.ListPage;
+import com.nexus.common.web.ListPageParameters;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,7 +22,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.util.List;
 
 /** JWT 管理端：只接受已由 BearerUserIdResolver 验证的用户 ID。 */
 @Service
@@ -30,14 +32,15 @@ public class ShortLinkService {
     private final ApplicationMapper applicationMapper;
     private final Clock clock;
 
-    public List<ShortLinkResponse> listMyShortLinks(Long userId, Long apiKeyId) {
+    public ListPage<ShortLinkResponse> listMyShortLinks(Long userId, Long apiKeyId, long current, long size) {
+        ListPageParameters.validate(current, size);
         requireOwnedKey(userId, apiKeyId);
-        return shortLinkMapper.selectList(Wrappers.<ShortLink>lambdaQuery()
+        Page<ShortLink> links = shortLinkMapper.selectPage(new Page<>(current, size), Wrappers.<ShortLink>lambdaQuery()
                         .eq(ShortLink::getApiKeyId, apiKeyId)
                         .eq(ShortLink::getIsDeleted, 0)
                         .orderByDesc(ShortLink::getCreatedAt)
-                        .orderByDesc(ShortLink::getId))
-                .stream().map(ShortLinkService::toResponse).toList();
+                        .orderByDesc(ShortLink::getId));
+        return ListPage.map(links, ShortLinkService::toResponse);
     }
 
     @Transactional

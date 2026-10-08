@@ -215,6 +215,58 @@ class UsageHttpIntegrationTests {
                 () -> usageQueryService.queryMyUsageEvent(owner.getId(), tooLong));
     }
 
+    @Test
+    void pagesElevenEventsAndKeepsDisabledHistoryPrivate() throws Exception {
+        LocalDateTime sameInstant = LocalDateTime.of(2026, 10, 8, 12, 0);
+        for (int index = 1; index <= 11; index++) {
+            insertUsage(sameInstant, "event." + index);
+        }
+        key.setStatus(1);
+        apiKeyMapper.updateById(key);
+
+        String url = "http://localhost:" + port + "/api/usage/events?applicationId=" + application.getId()
+                + "&apiKeyId=" + key.getId();
+        String token = jwtTokenService.issueAccessToken(owner.getId()).value();
+        HttpResponse<String> first = getWithBearer(url, token);
+        assertEquals(200, first.statusCode());
+        var firstData = objectMapper.readTree(first.body()).path("data");
+        assertEquals(11, firstData.path("total").asInt());
+        assertEquals(1, firstData.path("current").asInt());
+        assertEquals(10, firstData.path("size").asInt());
+        assertEquals(10, firstData.path("records").size());
+        assertEquals("event.11", firstData.at("/records/0/apiCode").asText());
+        assertEquals("event.2", firstData.at("/records/9/apiCode").asText());
+        assertEquals("2026-10-08T20:00:00+08:00", firstData.at("/records/0/occurredAt").asText());
+        assertEquals(4, firstData.at("/records/0").size());
+
+        HttpResponse<String> second = getWithBearer(url + "&current=2", token);
+        assertEquals(200, second.statusCode());
+        assertEquals(1, objectMapper.readTree(second.body()).at("/data/records").size());
+        assertEquals("event.1", objectMapper.readTree(second.body()).at("/data/records/0/apiCode").asText());
+
+        HttpResponse<String> custom = getWithBearer(url + "&size=5&current=3", token);
+        assertEquals(1, objectMapper.readTree(custom.body()).at("/data/records").size());
+
+        HttpResponse<String> invalid = getWithBearer(url + "&size=101", token);
+        assertEquals(400, invalid.statusCode());
+        assertEquals("INVALID_USAGE_PAGINATION", objectMapper.readTree(invalid.body()).at("/code").asText());
+        assertEquals(400, getWithBearer(url + "&current=0", token).statusCode());
+
+        HttpResponse<String> wrongApplication = getWithBearer(url.replace(
+                "applicationId=" + application.getId(), "applicationId=" + (application.getId() + 1000000)), token);
+        assertEquals(404, wrongApplication.statusCode());
+        assertEquals("APPLICATION_NOT_FOUND", objectMapper.readTree(wrongApplication.body()).at("/code").asText());
+
+        HttpResponse<String> anonymous = httpClient.send(HttpRequest.newBuilder(URI.create(url)).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertEquals(401, anonymous.statusCode());
+    }
+
+    private HttpResponse<String> getWithBearer(String url, String token) throws Exception {
+        return httpClient.send(HttpRequest.newBuilder(URI.create(url))
+                .header("Authorization", "Bearer " + token).GET().build(), HttpResponse.BodyHandlers.ofString());
+    }
+
     private void insertUsage(LocalDateTime occurredAt, String apiCode) {
         UsageEvent event = new UsageEvent();
         event.setApiKeyId(key.getId());

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
+import type { ScrollbarInstance } from 'element-plus'
 import { useUserStore } from '@/stores/userStore'
 import { Close, Document, Expand, Fold, Grid, Link, Monitor, SwitchButton } from '@element-plus/icons-vue'
 import brandSpark from '@/assets/icons/brand-spark.svg'
@@ -10,8 +11,13 @@ const router = useRouter()
 const userStore = useUserStore()
 const collapsed = ref(false)
 const mobileMenuOpen = ref(false)
+const scrollArea = ref<ScrollbarInstance | null>(null)
 
 watch(() => route.fullPath, () => { mobileMenuOpen.value = false })
+watch(() => route.path, async () => {
+  await nextTick()
+  scrollArea.value?.setScrollTop(0)
+})
 
 function closeMenuOnEscape(event: KeyboardEvent) {
   if (event.key === 'Escape') mobileMenuOpen.value = false
@@ -97,9 +103,11 @@ function logout() {
         </el-button>
       </header>
 
-      <main class="console-content">
-        <RouterView />
-      </main>
+      <el-scrollbar ref="scrollArea" class="console-scroll-area" aria-label="控制台内容" :tabindex="0">
+        <main class="console-content">
+          <RouterView />
+        </main>
+      </el-scrollbar>
     </div>
   </div>
 </template>
@@ -107,15 +115,16 @@ function logout() {
 <style scoped>
 .console-shell {
   display: flex;
-  min-height: 100vh;
-  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
   background: var(--nexus-paper);
 }
 .console-sidebar {
   display: flex;
   flex: 0 0 248px;
   flex-direction: column;
-  min-height: 100vh;
+  min-height: 0;
   padding: 34px 18px 22px;
   border-right: 1px solid var(--nexus-line);
   background: linear-gradient(160deg, #f1f4ed, var(--nexus-sage));
@@ -179,9 +188,10 @@ function logout() {
 }
 .collapse-button:hover { background: #e4ece3; }
 .mobile-menu-button, .mobile-menu-backdrop { display: none; }
-.console-main { min-width: 0; flex: 1; }
+.console-main { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; }
 .console-header {
   display: flex;
+  flex: none;
   align-items: center;
   justify-content: space-between;
   min-height: 84px;
@@ -197,6 +207,8 @@ function logout() {
 .header-breadcrumb a:hover { color: var(--nexus-teal); text-decoration: underline; }
 .header-breadcrumb strong { font-weight: 650; }
 .logout-button { display: inline-flex; gap: 6px; color: #526a60; }
+.console-scroll-area { min-height: 0; flex: 1; }
+.console-scroll-area :deep(.el-scrollbar__wrap) { overscroll-behavior-y: contain; }
 .console-content {
   width: 100%;
   max-width: 1600px;
@@ -204,11 +216,11 @@ function logout() {
   padding: clamp(30px, 4vw, 58px) clamp(24px, 3.5vw, 56px) 72px;
 }
 @media (max-width: 700px) {
-  .console-shell { display: block; }
+  .console-shell { flex-direction: column; }
   .console-sidebar, .console-sidebar.is-collapsed {
-    position: sticky;
-    top: 0;
+    position: relative;
     z-index: 30;
+    flex: 0 0 64px;
     flex-direction: row;
     align-items: center;
     justify-content: space-between;

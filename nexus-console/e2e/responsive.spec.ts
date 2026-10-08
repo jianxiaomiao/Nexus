@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { installMockApi, signIn } from './support/mockApi'
+import { installMockApi, sampleApplication, signIn } from './support/mockApi'
 
 test.use({ viewport: { width: 390, height: 844 } })
 
@@ -25,3 +25,31 @@ test('手机端 Key 列表切换为卡片，仍可进入详情', async ({ page }
   await mobileKey.getByRole('link', { name: '查看详情' }).click()
   await expect(page.getByRole('heading', { name: '开发环境 Key' })).toBeVisible()
 })
+
+for (const viewport of [{ width: 1280, height: 600 }, { width: 390, height: 600 }]) {
+  test(`${viewport.width}px 控制台只滚动内容区域，切换页面后从顶部开始`, async ({ page }) => {
+    await page.setViewportSize(viewport)
+    await installMockApi(page, { applications: Array.from({ length: 10 }, (_, index) => ({
+      ...sampleApplication, id: index + 1, name: `滚动测试应用 ${index + 1}`,
+    })) })
+    await signIn(page)
+
+    const scrollArea = page.locator('.console-scroll-area > .el-scrollbar__wrap')
+    await expect(page.locator('.console-scroll-area > .el-scrollbar__bar.is-vertical')).toHaveCount(1)
+    await expect.poll(() => scrollArea.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
+    const sidebarTop = await page.locator('.console-sidebar').evaluate((element) => element.getBoundingClientRect().top)
+    const headerTop = await page.locator('.console-header').evaluate((element) => element.getBoundingClientRect().top)
+    await scrollArea.hover()
+    await page.mouse.wheel(0, 1000)
+    await expect.poll(() => scrollArea.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+    expect(await page.evaluate(() => window.scrollY)).toBe(0)
+    expect(await page.evaluate(() => document.documentElement.scrollHeight - innerHeight)).toBeLessThanOrEqual(1)
+    expect(await page.locator('.console-sidebar').evaluate((element) => element.getBoundingClientRect().top)).toBe(sidebarTop)
+    expect(await page.locator('.console-header').evaluate((element) => element.getBoundingClientRect().top)).toBe(headerTop)
+
+    if (viewport.width < 700) await page.getByRole('button', { name: '打开导航' }).click()
+    await page.getByRole('link', { name: 'API 调试台' }).click()
+    await expect(page).toHaveURL(/\/playground$/)
+    await expect.poll(() => scrollArea.evaluate((element) => element.scrollTop)).toBe(0)
+  })
+}

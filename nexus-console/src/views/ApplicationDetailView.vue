@@ -30,9 +30,9 @@ async function load() {
   loading.value = true
   errorMessage.value = ''
   try {
-    const applications = await listApplications()
+    const applications = await listApplications({ applicationId: id })
     if (version !== loadVersion) return
-    application.value = applications.find((item) => item.id === id) ?? null
+    application.value = applications.records[0] ?? null
     if (!application.value) errorMessage.value = '这个应用不存在，或你没有访问权限'
   } catch (error) {
     if (version === loadVersion) errorMessage.value = applicationErrorMessage(error, '加载应用失败，请稍后重试')

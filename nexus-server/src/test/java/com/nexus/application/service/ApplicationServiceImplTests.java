@@ -151,15 +151,18 @@ class ApplicationServiceImplTests {
         disabled.setStatus(1);
         disabled.setCreatedAt(createdAt);
         disabled.setUpdatedAt(updatedAt);
-        when(applicationMapper.selectList(any())).thenReturn(List.of(enabled, disabled));
+        com.baomidou.mybatisplus.extension.plugins.pagination.Page<Application> page = new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(1, 10);
+        page.setTotal(2);
+        page.setRecords(List.of(enabled, disabled));
+        when(applicationMapper.selectPage(any(), any())).thenReturn(page);
 
-        List<ApplicationResponse> responses = applicationService.listMyApplications(42L);
+        var responses = applicationService.listMyApplications(42L, 1, 10, null);
 
         assertEquals(List.of(
                 new ApplicationResponse(100L, "enabled-app", 0, createdAt, updatedAt),
                 new ApplicationResponse(101L, "disabled-app", 1, createdAt, updatedAt)
-        ), responses);
-        verify(applicationMapper).selectList(org.mockito.ArgumentMatchers.argThat(wrapper -> {
+        ), responses.records());
+        verify(applicationMapper).selectPage(any(), org.mockito.ArgumentMatchers.argThat(wrapper -> {
             if (!(wrapper instanceof LambdaQueryWrapper<?> query)) {
                 return false;
             }
@@ -176,12 +179,12 @@ class ApplicationServiceImplTests {
 
     @Test
     void listShouldReturnEmptyListWhenOwnerHasNoActiveApplications() {
-        when(applicationMapper.selectList(any())).thenReturn(List.of());
+        when(applicationMapper.selectPage(any(), any())).thenReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<Application>(1, 10));
 
-        List<ApplicationResponse> responses = applicationService.listMyApplications(42L);
+        var responses = applicationService.listMyApplications(42L, 1, 10, null);
 
-        assertTrue(responses.isEmpty());
-        verify(applicationMapper).selectList(any());
+        assertTrue(responses.records().isEmpty());
+        verify(applicationMapper).selectPage(any(), any());
         verifyNoMoreInteractions(applicationMapper);
     }
 
