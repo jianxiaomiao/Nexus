@@ -33,6 +33,21 @@
 .playground-delete-help { margin: 8px 0 20px; padding: 14px; border: 1px solid #e9d9ad; border-radius: 8px; background: #fffaeb; color: #725b2b; font-size: 13px; line-height: 1.6; }
 .playground-form-error { margin: 0 0 13px; color: #a23932; font-size: 13px; }
 .playground-submit.el-button { width: 100%; min-height: 46px; margin-top: 2px; border-radius: 8px; font-size: 15px; font-weight: 650; }
+.playground-extract-help { margin: 0 0 24px; color: var(--nexus-muted); font-size: 13px; line-height: 1.7; }
+.playground-article-title { margin: 0 0 16px; font-size: 18px; line-height: 1.5; overflow-wrap: anywhere; }
+.playground-article-tabs .el-tabs__item { font-size: 13px; }
+.playground-preview-scroll, .playground-text-scroll { border: 1px solid var(--nexus-line); border-radius: 8px; background: #fdfefb; }
+.playground-article { padding: 18px; color: #435d53; font-size: 14px; line-height: 1.85; overflow-wrap: anywhere; }
+.playground-article > :first-child { margin-top: 0; }
+.playground-article > :last-child { margin-bottom: 0; }
+.playground-article h1, .playground-article h2, .playground-article h3, .playground-article h4, .playground-article h5, .playground-article h6 { margin: 18px 0 10px; font-size: 17px; }
+.playground-article p { margin: 0 0 16px; }
+.playground-article pre { max-width: 100%; padding: 12px; border-radius: 6px; background: #eef3ed; white-space: pre-wrap; overflow-wrap: anywhere; }
+.playground-article blockquote { margin: 12px 0; padding: 8px 14px; border-left: 3px solid #8cbab0; background: #f1f6f0; }
+.playground-article-image { display: block; max-width: 100%; min-height: 100px; margin: 14px 0; border-radius: 7px; }
+.playground-article-image img { display: block; width: auto; height: auto; max-width: 100%; max-height: 360px; margin: auto; object-fit: contain; }
+.playground-image-error { display: grid; min-height: 100px; padding: 18px; place-items: center; border: 1px dashed #d7e4d8; border-radius: 7px; background: #f3f6f1; color: var(--nexus-muted); font-size: 12px; text-align: center; }
+.playground-article-text { margin: 0; padding: 18px; color: #435d53; font-family: inherit; font-size: 14px; line-height: 1.85; white-space: pre-wrap; overflow-wrap: anywhere; }
 .playground-response-meta { display: flex; align-items: center; gap: 13px; color: var(--nexus-muted); font: 13px ui-monospace, SFMono-Regular, Consolas, monospace; }
 .playground-status { padding: 6px 10px; border-radius: 20px; background: var(--nexus-success-surface); color: var(--nexus-success-ink); font-weight: 700; }
 .playground-status.is-error { background: #fde9e6; color: #a23932; }
@@ -88,7 +103,7 @@
   .playground-intro h1 { font-size: 35px; }
   .playground-intro p:last-child { max-width: 270px; font-size: 14px; line-height: 1.6; }
   .playground-decoration { display: block; position: absolute; right: -30px; top: -13px; width: 160px; height: 160px; object-fit: contain; opacity: .55; pointer-events: none; }
-  .playground-endpoints { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; padding: 3px; border: 1px solid var(--nexus-line); border-radius: 10px; background: #f0f4ed; }
+  .playground-endpoints { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px; padding: 3px; border: 1px solid var(--nexus-line); border-radius: 10px; background: #f0f4ed; }
   .playground-endpoints .el-button { min-width: 0; padding: 0 5px; border: 0; background: transparent; font-size: 13px; }
   .playground-endpoints .el-button.is-active { border: 0; background: var(--nexus-teal); color: white; }
   .playground-operations-inner { gap: 13px; }

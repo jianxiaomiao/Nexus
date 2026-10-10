@@ -85,6 +85,20 @@ Hash 请求体错误均返回 HTTP 400，使用同样的 `code`、`message`、`d
 
 认证失败仍按下方的 401/403 规则处理，且先于请求体校验。
 
+## 网页正文提取（第一版）
+
+`POST /v1/web/extract` 使用机器 API Key。请求体为 `{"url":"https://blog.csdn.net/<作者>/article/details/<文章ID>"}`；当前仅接受 `https://blog.csdn.net` 和 `https://zhuanlan.zhihu.com` 的精确主机名，不接受自定义端口、URL 用户信息或片段。白名单与短链接分开，且不自动跟随目标站重定向。
+
+成功响应 `data` 包含三个字符串：`title`（标题）、`textContent`（纯文本）、`contentHtml`（保留段落与图片位置的净化 HTML）。`contentHtml` 中的图片只保留绝对 HTTPS URL；服务端不下载图片，也不保证原站允许客户端展示。调用方仍应将外站内容视为不可信输入。单次抓取只接收 HTML，响应体上限为 2 MiB；当前要求提取正文至少 80 个字符，正文识别仍是启发式行为，不能保证所有页面都能识别。
+
+| HTTP 状态 | `code` | 情况 |
+| --- | --- | --- |
+| 400 | `VALIDATION_ERROR` / `INVALID_WEB_EXTRACT_REQUEST` | URL 缺失、超长、格式不合法或不在白名单内。 |
+| 422 | `WEB_CONTENT_UNAVAILABLE` | 页面可读取，但没有可提取的正文。 |
+| 502 | `WEB_PAGE_FETCH_FAILED` | 上游拒绝、跳转、非 HTML、超大或网络失败。 |
+
+认证失败仍按下方的 401/403 规则处理；Filter 拒绝时不会向目标网站发起请求。建议用固定 HTML 样本做自动化测试，真实知乎/CSDN 页面只作为手工验收样本。抓取遵守目标站公开访问条件，不绕过登录或限制。
+
 ## 认证与错误
 
 请求到达 `/v1/*` 时，Filter 从 `Authorization` 提取完整密钥。认证器先用公开 ID 找记录，再验证 Secret 摘要，然后沿 Application 找到所有者 User，检查三层状态。成功后，仅把 `apiKeyId` 和 `applicationId` 放入本次请求，供 Controller 使用。

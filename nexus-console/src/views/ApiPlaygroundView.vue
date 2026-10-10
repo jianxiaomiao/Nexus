@@ -2,15 +2,17 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, ArrowRight, DataAnalysis, DocumentCopy, Link } from '@element-plus/icons-vue'
+import { ArrowDown, ArrowRight, DataAnalysis, Document, DocumentCopy, Link } from '@element-plus/icons-vue'
 import decoration from '@/assets/playground-decoration.png'
-import { callOpenApi, type HashAlgorithm, type OpenApiEndpoint } from '@/api/openApi'
+import { callOpenApi, callWebExtract, isWebExtractResponse, type HashAlgorithm, type OpenApiEndpoint, type WebExtractResponse } from '@/api/openApi'
 import { callShortLinkOpenApi, publicShortLinkUrl, type ShortLink, type ShortLinkOperation } from '@/api/shortLinks'
+import WebExtractPreview from './WebExtractPreview.vue'
 import '@/assets/playground.css'
 
-type PlaygroundEndpoint = OpenApiEndpoint | 'shortlink'
+type PlaygroundEndpoint = OpenApiEndpoint | 'shortlink' | 'web-extract'
 type Result = { status: number | null; durationMs: number | null; body: string; message: string }
 const allowedHosts = new Set(['www.douyin.com', 'v.douyin.com', 'www.xiaohongshu.com', 'weibo.com', 'm.weibo.cn'])
+const articleHosts = new Set(['blog.csdn.net', 'zhuanlan.zhihu.com'])
 const durations = [
   { label: '10 秒', value: '10s', ms: 10_000 },
   { label: '15 秒', value: '15s', ms: 15_000 },
@@ -23,7 +25,7 @@ const durations = [
 ] as const
 
 function queryEndpoint(value: unknown): PlaygroundEndpoint {
-  return value === 'uuid' || value === 'shortlink' ? value : 'hash'
+  return value === 'uuid' || value === 'shortlink' || value === 'web-extract' ? value : 'hash'
 }
 
 const route = useRoute()
@@ -38,6 +40,7 @@ const value = ref('hello')
 const byteCount = computed(() => new TextEncoder().encode(value.value).length)
 const name = ref('')
 const originalUrl = ref('')
+const articleUrl = ref('')
 const duration = ref('1d')
 const customExpiry = ref('')
 const targetId = ref('')
@@ -49,11 +52,14 @@ const exampleTab = ref<'curl' | 'powershell'>('curl')
 const result = ref<Result | null>(null)
 const createdLink = ref<ShortLink | null>(null)
 const listedLinks = ref<ShortLink[] | null>(null)
+const extractedArticle = ref<WebExtractResponse | null>(null)
+const articleTab = ref('preview')
 let controller: AbortController | null = null
 let requestId = 0
 
 const docsTarget = computed(() => endpoint.value === 'shortlink' ? 'shortlink' : endpoint.value)
 const endpointPath = computed(() => {
+  if (endpoint.value === 'web-extract') return 'POST /v1/web/extract'
   if (endpoint.value === 'shortlink') {
     const method = { create: 'POST', list: 'GET', update: 'PUT', delete: 'DELETE' }[operation.value]
     return `${method} /v1/short-links${operation.value === 'delete' ? '/{id}' : ''}`
@@ -62,6 +68,13 @@ const endpointPath = computed(() => {
 })
 const sample = computed(() => {
   const host = 'http://localhost:8080'
+  if (endpoint.value === 'web-extract') {
+    const path = `${host}/v1/web/extract`
+    if (exampleTab.value === 'powershell') {
+      return `$apiKey = Read-Host '输入完整 API Key'\n$articleUrl = Read-Host '输入文章的完整 HTTPS URL'\n$body = @{ url = $articleUrl } | ConvertTo-Json -Compress\nInvoke-RestMethod -Uri '${path}' \`\n  -Method Post -Headers @{ Authorization = "ApiKey $apiKey" } \`\n  -ContentType 'application/json; charset=utf-8' -Body $body`
+    }
+    return `curl -i '${path}' \\\n  -H 'Authorization: ApiKey <完整密钥>' \\\n  -H 'Content-Type: application/json' \\\n  -d '{"url":"https://zhuanlan.zhihu.com/p/<文章ID>"}'`
+  }
   if (endpoint.value === 'shortlink') {
     const path = `${host}/v1/short-links`
     if (exampleTab.value === 'powershell') {
@@ -99,6 +112,8 @@ function resetRequest() {
   result.value = null
   createdLink.value = null
   listedLinks.value = null
+  extractedArticle.value = null
+  articleTab.value = 'preview'
   formError.value = ''
 }
 
@@ -121,6 +136,9 @@ function resultMessage(status: number, code?: string): string {
   if (code === 'HASH_INPUT_TOO_LARGE') return '输入内容超过 4096 个 UTF-8 字节。'
   if (code === 'SHORT_LINK_NOT_FOUND') return '短链接不存在，或不属于当前 API Key。'
   if (code === 'SHORT_CODE_UNAVAILABLE') return '短码暂时无法生成，请稍后重试。'
+  if (code === 'INVALID_WEB_EXTRACT_REQUEST') return '文章 URL 有误，仅支持知乎专栏和 CSDN 的 HTTPS 地址。'
+  if (code === 'WEB_CONTENT_UNAVAILABLE') return '页面中没有可提取的文章正文。'
+  if (code === 'WEB_PAGE_FETCH_FAILED') return '目标页面无法获取，可能发生跳转、拒绝访问或网络异常。'
   if (status === 400) return '请求参数有误，请核对输入内容与接口文档。'
   return `请求失败（HTTP ${status}），请稍后重试。`
 }
@@ -167,6 +185,17 @@ async function sendRequest() {
   formError.value = ''
   if (!key) { keyError.value = '请输入完整 API Key'; return }
   if (endpoint.value === 'hash' && byteCount.value > 4096) return
+  if (endpoint.value === 'web-extract') {
+    try {
+      const target = articleUrl.value.trim()
+      const url = new URL(target)
+      if (target.length > 2048 || url.protocol !== 'https:' || !articleHosts.has(url.hostname)
+        || url.username || url.password || url.port || target.includes('#')) {
+        formError.value = '仅支持知乎专栏和 CSDN 的完整 HTTPS 地址，不允许登录信息、自定义端口或片段。'
+        return
+      }
+    } catch { formError.value = '请输入完整有效的 HTTPS 文章地址。'; return }
+  }
   const validated = endpoint.value === 'shortlink' ? validateShortLink() : {}
   if (validated.error) { formError.value = validated.error; return }
   if (endpoint.value === 'shortlink' && operation.value === 'delete') {
@@ -183,13 +212,21 @@ async function sendRequest() {
   result.value = null
   createdLink.value = null
   listedLinks.value = null
+  extractedArticle.value = null
+  articleTab.value = 'preview'
   const start = performance.now()
   try {
-    const response = endpoint.value === 'shortlink'
-      ? await callShortLinkOpenApi(operation.value, key, validated.payload, controller.signal)
-      : await callOpenApi(endpoint.value, key, algorithm.value, value.value, controller.signal)
+    const response = endpoint.value === 'web-extract'
+      ? await callWebExtract(key, articleUrl.value.trim(), controller.signal)
+      : endpoint.value === 'shortlink'
+        ? await callShortLinkOpenApi(operation.value, key, validated.payload, controller.signal)
+        : await callOpenApi(endpoint.value, key, algorithm.value, value.value, controller.signal)
     if (currentId !== requestId) return
     const responseText = JSON.stringify(response.body, null, 2).replaceAll(key, '[已隐藏]')
+    if (endpoint.value === 'web-extract' && response.status >= 200 && response.status < 300) {
+      const data: unknown = JSON.parse(responseText)?.data
+      if (isWebExtractResponse(data)) extractedArticle.value = data
+    }
     if (endpoint.value === 'shortlink' && operation.value === 'create' && response.status >= 200 && response.status < 300) {
       createdLink.value = response.body?.data as ShortLink
     }
@@ -232,6 +269,7 @@ onBeforeUnmount(() => { controller?.abort(); apiKey.value = '' })
       <el-button :class="{ 'is-active': endpoint === 'uuid' }" :aria-pressed="endpoint === 'uuid'" @click="selectEndpoint('uuid')"><el-icon aria-hidden="true"><DocumentCopy /></el-icon>生成 UUID</el-button>
       <el-button :class="{ 'is-active': endpoint === 'hash' }" :aria-pressed="endpoint === 'hash'" @click="selectEndpoint('hash')"><el-icon aria-hidden="true"><DataAnalysis /></el-icon>计算 Hash</el-button>
       <el-button :class="{ 'is-active': endpoint === 'shortlink' }" :aria-pressed="endpoint === 'shortlink'" @click="selectEndpoint('shortlink')"><el-icon aria-hidden="true"><Link /></el-icon>短链接</el-button>
+      <el-button :class="{ 'is-active': endpoint === 'web-extract' }" :aria-pressed="endpoint === 'web-extract'" @click="selectEndpoint('web-extract')"><el-icon aria-hidden="true"><Document /></el-icon>网页正文提取</el-button>
     </div>
     <el-scrollbar v-if="endpoint === 'shortlink'" class="playground-operations"><div class="playground-operations-inner" role="group" aria-label="短链接操作">
       <el-button v-for="item in ([['create', '创建短链'], ['list', '查询列表'], ['update', '修改短链'], ['delete', '删除短链']] as const)" :key="item[0]" text :class="{ 'is-active': operation === item[0] }" :aria-pressed="operation === item[0]" @click="operation = item[0]">{{ item[1] }}</el-button>
@@ -246,6 +284,10 @@ onBeforeUnmount(() => { controller?.abort(); apiKey.value = '' })
             <p v-else-if="operation === 'list'" class="playground-uuid-help">列出当前 API Key 创建且未删除的短链接。其他 Key 的记录不会出现在结果中。</p>
             <template v-else><div class="playground-field"><label for="short-link-id">短链 ID</label><el-input id="short-link-id" v-model="targetId" type="number" min="1" step="1" placeholder="例如：123" /></div><template v-if="operation === 'update'"><div class="playground-field"><label for="short-link-update-name">新名称（可选）</label><el-input id="short-link-update-name" v-model="updatedName" maxlength="64" placeholder="留空则不修改名称" /></div><div class="playground-field"><label for="short-link-update-status">新状态（可选）</label><el-select id="short-link-update-status" v-model="updatedStatus" aria-label="新状态（可选）"><el-option label="不修改状态" value="" /><el-option label="启用" value="0" /><el-option label="禁用" value="1" /></el-select><small>原始地址和到期时刻创建后不可修改。</small></div></template><p v-else class="playground-delete-help">删除后短链将无法跳转，短码也不会再次分配。</p></template>
           </template>
+          <template v-else-if="endpoint === 'web-extract'">
+            <div class="playground-field"><label for="playground-article-url">文章 URL</label><el-input id="playground-article-url" v-model="articleUrl" type="url" maxlength="2048" placeholder="https://zhuanlan.zhihu.com/p/…" aria-describedby="playground-article-help" @input="formError = ''" /><small id="playground-article-help">仅支持 zhuanlan.zhihu.com 和 blog.csdn.net 的 HTTPS 文章地址；不自动跟随跳转。</small></div>
+            <p class="playground-extract-help">提取标题、正文和图片位置。图片由浏览器直接加载，原站限制可能导致图片无法显示。</p>
+          </template>
           <p v-else class="playground-uuid-help">此接口不需要请求体，每次发送都会生成一个新 UUID。</p>
           <p v-if="formError" class="playground-form-error" role="alert">{{ formError }}</p>
           <el-button class="playground-submit" native-type="submit" type="primary" :loading="loading" :disabled="endpoint === 'hash' && byteCount > 4096">{{ loading ? '发送中…' : '发送请求' }}</el-button>
@@ -255,7 +297,15 @@ onBeforeUnmount(() => { controller?.abort(); apiKey.value = '' })
         <p v-if="result" class="playground-result-message" :class="{ 'is-error': result.status === null || result.status >= 400 }">{{ result.message }}</p>
         <div v-if="createdLink" class="playground-created-link"><p class="playground-eyebrow">SHORT LINK CREATED</p><h3>短链接已创建</h3><p>复制后即可分享；到期或禁用后将无法跳转。</p><code>{{ publicShortLinkUrl(createdLink.shortCode) }}</code><div class="playground-created-actions"><el-button type="primary" @click="copyShortUrl(createdLink.shortCode)">复制短地址</el-button><RouterLink :to="{ name: 'short-links', query: { apiKeyId: createdLink.apiKeyId } }">管理这把 Key 的短链 <el-icon aria-hidden="true"><ArrowRight /></el-icon></RouterLink></div></div>
         <div v-if="listedLinks" class="playground-link-list"><h3>这把 Key 的短链接</h3><p v-if="listedLinks.length === 0" class="playground-list-empty">这把 Key 还没有短链接。</p><div v-for="link in listedLinks" :key="link.id" class="playground-link-item"><strong>{{ link.name }}</strong><small>ID {{ link.id }} · {{ link.status === 1 ? '已禁用' : new Date(link.expiresAt).getTime() <= Date.now() ? '已到期' : '自身启用' }} · 到期 {{ new Date(link.expiresAt).toLocaleString('zh-CN') }}</small><a :href="publicShortLinkUrl(link.shortCode)" target="_blank" rel="noopener noreferrer">{{ publicShortLinkUrl(link.shortCode) }}</a><div class="playground-link-actions"><el-button size="small" @click="copyShortUrl(link.shortCode)">复制短地址</el-button><a :href="publicShortLinkUrl(link.shortCode)" target="_blank" rel="noopener noreferrer">打开短地址 <el-icon aria-hidden="true"><ArrowRight /></el-icon></a></div></div></div>
-        <div v-if="result?.body" class="playground-code"><span>JSON</span><el-scrollbar max-height="480px"><pre><code>{{ result.body }}</code></pre></el-scrollbar></div><div v-else class="playground-response-empty"><p v-if="loading">正在等待服务器响应…</p><p v-else-if="!result">填写 API Key 并发送请求后，结果会显示在这里。</p><p v-else>本次请求没有可显示的 JSON 响应。</p></div>
+        <div v-if="extractedArticle" class="playground-extracted-result">
+          <h3 class="playground-article-title">{{ extractedArticle.title || '未提供标题' }}</h3>
+          <el-tabs v-model="articleTab" class="playground-article-tabs" aria-label="提取结果格式">
+            <el-tab-pane label="正文预览" name="preview" lazy><el-scrollbar max-height="480px" class="playground-preview-scroll"><WebExtractPreview :html="extractedArticle.contentHtml" /></el-scrollbar></el-tab-pane>
+            <el-tab-pane label="纯文本" name="text" lazy><el-scrollbar max-height="480px" class="playground-text-scroll"><pre class="playground-article-text">{{ extractedArticle.textContent }}</pre></el-scrollbar></el-tab-pane>
+            <el-tab-pane label="JSON" name="json" lazy><div class="playground-code"><span>JSON</span><el-scrollbar max-height="480px"><pre><code>{{ result?.body }}</code></pre></el-scrollbar></div></el-tab-pane>
+          </el-tabs>
+        </div>
+        <div v-else-if="result?.body" class="playground-code"><span>JSON</span><el-scrollbar max-height="480px"><pre><code>{{ result.body }}</code></pre></el-scrollbar></div><div v-else class="playground-response-empty"><p v-if="loading">正在等待服务器响应…</p><p v-else-if="!result">填写 API Key 并发送请求后，结果会显示在这里。</p><p v-else>本次请求没有可显示的 JSON 响应。</p></div>
       </section>
     </div>
     <section class="playground-panel playground-examples" aria-labelledby="playground-example-title"><div class="playground-example-heading"><el-button text class="playground-example-toggle" :aria-expanded="examplesOpen" aria-controls="playground-example-content" @click="examplesOpen = !examplesOpen"><h2 id="playground-example-title">请求示例</h2><el-icon aria-hidden="true" :class="{ 'is-open': examplesOpen }"><ArrowDown /></el-icon></el-button><RouterLink :to="{ name: 'docs-article', params: { slug: docsTarget } }">查看接口文档 <el-icon aria-hidden="true"><ArrowRight /></el-icon></RouterLink></div><div v-if="examplesOpen" id="playground-example-content"><div class="playground-example-tabs" role="group" aria-label="示例命令格式"><el-button :class="{ 'is-active': exampleTab === 'curl' }" :aria-pressed="exampleTab === 'curl'" @click="exampleTab = 'curl'">curl</el-button><el-button :class="{ 'is-active': exampleTab === 'powershell' }" :aria-pressed="exampleTab === 'powershell'" @click="exampleTab = 'powershell'">PowerShell</el-button></div><p class="playground-example-note">示例始终使用占位密钥，不会包含你在上方输入的 API Key。本地后端默认端口为 8080。</p><div class="playground-code playground-example-code"><el-button @click="copyExample">复制示例</el-button><el-scrollbar max-height="480px"><pre><code>{{ sample }}</code></pre></el-scrollbar></div></div></section>

@@ -57,12 +57,18 @@ WWW-Authenticate: ApiKey realm="nexus-openapi"
 
 机器端查询、修改或删除其他 Key 的短链，按不存在处理，返回 404 `SHORT_LINK_NOT_FOUND`。公开 `/s/{shortCode}` 遇到禁用或删除的短链及其上层资源也返回 404；仍可用但已到期时返回 410 `SHORT_LINK_EXPIRED`。具体归属、白名单和状态规则见 **短链接** 文档。
 
+## 网页正文提取错误
+
+`POST /v1/web/extract` 的 400 `INVALID_WEB_EXTRACT_REQUEST` 表示文章 URL 不符合要求；422 `WEB_CONTENT_UNAVAILABLE` 表示页面没有可识别正文；502 `WEB_PAGE_FETCH_FAILED` 表示目标页面无法获取，包括网络错误、上游拒绝、重定向、非 HTML 或响应过大。具体限制与示例见 **网页正文提取** 文档。
+
+测试库和日常库中的 Key 不能混用。若后端正常运行却返回 401，除了核对完整 Key，还要确认该 Key 是在当前后端连接的数据库中创建的。
+
 ## 没有 HTTP 响应怎么办
 
 “无法连接”“连接被拒绝”或请求超时不是上表中的业务错误，因为请求可能根本没到 Nexus。按顺序检查：
 
 1. 后端是否启动；本地示例是否真的监听 `8080` 端口。
-2. 请求地址和路径是否正确：`/v1/utils/uuid`、`/v1/utils/hash`、`/v1/short-links` 或公开 `/s/{shortCode}`。
+2. 请求地址和路径是否正确：`/v1/utils/uuid`、`/v1/utils/hash`、`/v1/short-links`、`/v1/web/extract` 或公开 `/s/{shortCode}`。
 3. 如果从手机、容器或另一台电脑请求，`localhost` 指的是**那台设备自己**；请使用它能访问的服务端地址。
 4. 若从浏览器前端直接请求，不要把完整 API Key 嵌入前端。让受信任的服务端发起机器调用。
 

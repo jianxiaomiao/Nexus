@@ -77,7 +77,7 @@ onUnmounted(() => {
           <h1>{{ doc.title }}</h1>
           <div v-if="doc.path" class="docs-endpoint"><span class="docs-method" :class="doc.method?.toLowerCase()">{{ doc.method }}</span><code>{{ doc.path }}</code></div>
           <p>{{ doc.summary }}</p>
-          <RouterLink v-if="doc.slug === 'uuid' || doc.slug === 'hash' || doc.slug === 'shortlink'" class="docs-try-link" :to="{ name: 'playground', query: { endpoint: doc.slug } }">在线试用此接口 <el-icon aria-hidden="true"><ArrowRight /></el-icon></RouterLink>
+          <RouterLink v-if="doc.path" class="docs-try-link" :to="{ name: 'playground', query: { endpoint: doc.slug } }">在线试用此接口 <el-icon aria-hidden="true"><ArrowRight /></el-icon></RouterLink>
         </header>
         <div ref="articleBody" class="docs-markdown" @click="copyCode">
           <template v-for="(part, index) in rendered.parts" :key="index">

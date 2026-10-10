@@ -9,6 +9,7 @@ public enum ApiCode {
 
     // hash工具接口
     UTILS_HASH("utils.hash", "哈希计算工具"),
+    WEB_EXTRACT("web.extract", "网页正文提取"),
     // 其他接口继续在这里扩展
     UUID_GENERATE("uuid.generate", "生成UUID");
 

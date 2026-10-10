@@ -2,6 +2,10 @@
 
 ## Current checkpoint
 
+2026-10-10：网页正文提取已接入前端。机器 `POST /v1/web/extract` 接收 `{url}`，返回字符串 `title`、`textContent`、`contentHtml`；只允许 HTTPS 的 `blog.csdn.net` 与 `zhuanlan.zhihu.com`。后端在实际 DNS 解析结果上限制公网地址，禁用自动重定向；Readability4J 识别正文，jsoup 净化 HTML，图片只保留 HTTPS URL、不会由后端下载。前端第七篇教程 `/docs/web-extract` 可跳转到调试台第四个入口；预览逐个重建允许的元素、只传递 HTTPS 图片地址与 alt，使用 Element Plus 图片错误提示及 Scrollbar，另有纯文本和 JSON 标签。后端提取定向测试 14/14 通过；前端构建、E2E 类型检查和完整 Playwright 66/66 通过。第一次定向运行因登录成功 toast 与字段错误都使用 alert role 而定位不唯一；限定字段 ID 后修正。第一次全套因窄屏两次坐标测量之间发生自动滚动而误判；改成同帧采样后重复 5/5、最终全套 66/66 均通过。
+
+真实后端使用新账号和新 Key：错误 Key 401、非白名单目标 400 已验证；Agent 首次真实 CSDN 验收返回 502，当时已核对 8080 的 Flyway schema 为 `nexus_test`，本机 DNS 把两站解析成 `198.18.0.41/42`，属于后端拒绝的特殊地址段。随后开发者关闭 VPN 并重启后端，确认真实文本提取成功；无需放宽 SSRF 策略。该成功是开发者反馈，本轮未重新运行 Agent 真实验收脚本，也未确认两站均成功或真实图片展示。`nexus-console/scripts/accept-web-extract-real.mjs` 保留作可重复验收；此前 Application 608 已软删除，随机测试账号仍在可丢弃的测试库。开发者可能已自行切回 `nexus`，后续自动测试须重新核实当前库。
+
 2026-10-10：API Key 原地轮换凭据已完成。管理端 `POST /api/apiKey/{apiKeyId}/rotate` 使用当前 `publicId` 作并发前置条件；轮换后 Key ID、状态、短链归属与 Usage 历史不变，旧完整 Key 立即失效，新完整 Key 只在成功响应中返回一次。Vue Key 详情页有轮换确认与一次性展示，连接异常提示先核对状态、不自动重试。后端全套在 `nexus_test` 上通过 189/189（含测试启动前数据库保护）；前端构建、类型检查与 60/60 Playwright 回归通过。首次前端全套曾因冲突测试在页面数据加载前修改 mock 状态而出现 1 次误判；增加“旧 Public ID 已显示”的前置等待后，该用例重复 5/5 及全套 60/60 均通过。`nexus-console/scripts/accept-rotate-real.mjs` 在真实 Chromium、Vite、Spring 与 `nexus_test` 上验收成功：旧 Key 401、新 Key 200，短链仍可跳转，Usage 历史连续；本次测试 Application 已软删除。临时前后端进程已停止。`docs/LOCAL_TESTING.md` 已补运行步骤。本地 `config/application-local.yml` 中旧 `nexus` URL 是注释，实际启用的是 `nexus_test`；不要只匹配文本中的第一个 URL 来判断测试库。
 
 Registration/Login, Application and API Key management, UUID/Hash machine APIs, and the first short-link backend are implemented. Management uses human Bearer JWT; `/v1/*` uses `Authorization: ApiKey <fullKey>`. The Vue console has Application/Key screens, Key-scoped short-link management, six Markdown-backed developer docs, and a playground for UUID/Hash and all four machine short-link operations. The developer confirmed real-backend UUID and Hash calls on 2026-10-06; do not repeat or persist the test credential.
@@ -27,7 +31,7 @@ Short links belong to the creating Key. `/v1/short-links` provides machine creat
 ## Next task and open checks
 
 - Before the next raw `mvn test` or real acceptance run, confirm the effective datasource and Flyway log point to `nexus_test`. The current local file has a commented-out old `nexus` URL and an active `nexus_test` URL. A test-classpath-only EnvironmentPostProcessor now rejects missing or wrong datasource/Flyway targets before a connection; explicit wrong-target testing confirmed no Hikari/Flyway initialization. Real `spring-boot:run` acceptance is not guarded by test classes, so verify its Flyway log separately.
-- Rotation is ready for review and a scoped commit. The new real acceptance script soft-deletes its Application but leaves a random test account in the disposable test database, like the Usage acceptance script. Never reuse or persist credentials from acceptance runs.
+- Real text extraction now succeeds per developer feedback after disabling VPN and restarting the backend. The user has requested a Chinese-described GitHub commit of this feature. Next finish a small real playground check with an article containing images, then select the next business requirement. Existing build/type checks, mocked browser 66/66, and focused backend 14/14 remain the verification evidence; repeat only for a relevant change or newly observed problem. Recheck the datasource before any automatic acceptance run and never reuse or persist credentials.
 - No additional infrastructure is justified by this checkpoint. Decide the next business feature from an explicit user problem; do not add Redis or RabbitMQ by default. The Filter → authenticator → request attribute → Controller explanation remains a learning checkpoint, not an implementation blocker.
 
 ## Relevant files
@@ -40,6 +44,7 @@ Short links belong to the creating Key. `/v1/short-links` provides machine creat
 - `nexus-console/src/views/ApiKeyDetailView.vue`, `nexus-console/src/views/ApiKeyUsagePanel.vue`, `nexus-console/src/api/usage.ts`, `nexus-console/e2e/usage.spec.ts`
 - `nexus-console/scripts/accept-usage-real.mjs`, `docs/LOCAL_TESTING.md`
 - `nexus-console/scripts/accept-rotate-real.mjs`, `nexus-console/e2e/apiKeys.spec.ts`, `nexus-server/src/main/java/com/nexus/apikey/`
+- `nexus-server/src/main/java/com/nexus/webExtract/`, `nexus-console/src/views/WebExtractPreview.vue`, `nexus-console/src/docs/content/web-extract.md`, `nexus-console/e2e/webExtract.spec.ts`, `nexus-console/scripts/accept-web-extract-real.mjs`
 - `nexus-server/src/main/java/com/nexus/usage/`, `nexus-server/src/test/java/com/nexus/usage/`
 
 Inspect `git status` before further edits; preserve any future uncommitted work.

@@ -26,6 +26,9 @@ import com.nexus.shortlink.exception.ShortLinkExpiredException;
 import com.nexus.shortlink.exception.ShortLinkNotFoundException;
 import com.nexus.usage.exception.InvalidUsageTimeRangeException;
 import com.nexus.usage.exception.InvalidUsagePaginationException;
+import com.nexus.webExtract.exception.InvalidWebExtractRequestException;
+import com.nexus.webExtract.exception.WebContentUnavailableException;
+import com.nexus.webExtract.exception.WebPageFetchException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,6 +49,24 @@ import java.util.Map;
 public class GlobalExceptionHandler{
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ExceptionHandler(InvalidWebExtractRequestException.class)
+    public ApiResponse<Void> handleInvalidWebExtractRequest(InvalidWebExtractRequestException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.BAD_REQUEST, "INVALID_WEB_EXTRACT_REQUEST", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.BAD_GATEWAY)
+    @ExceptionHandler(WebPageFetchException.class)
+    public ApiResponse<Void> handleWebPageFetch(WebPageFetchException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.BAD_GATEWAY, "WEB_PAGE_FETCH_FAILED", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.UNPROCESSABLE_ENTITY)
+    @ExceptionHandler(WebContentUnavailableException.class)
+    public ApiResponse<Void> handleWebContentUnavailable(WebContentUnavailableException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.UNPROCESSABLE_ENTITY, "WEB_CONTENT_UNAVAILABLE", exception.getMessage(), null);
+    }
 
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     @ExceptionHandler(InvalidListPageException.class)

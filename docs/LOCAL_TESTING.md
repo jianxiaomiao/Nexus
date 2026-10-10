@@ -108,6 +108,27 @@ node scripts/accept-rotate-real.mjs
 
 脚本在真实后端创建随机测试账号、Application、全新 Key 和短链，再通过 Chromium 页面点击轮换，验证旧凭据 401、新凭据 200、旧短链仍归原 Key 且能跳转、Usage 历史连续、列表中 Key ID 不变且 Public ID 更新。脚本不打印或持久化密码、JWT、完整 Key；结束时软删除本次 Application，但测试账号仍留在 `nexus_test`，因此只在可重建的专用测试库运行。若服务地址不同，可使用 `NEXUS_ACCEPT_API_ORIGIN`、`NEXUS_ACCEPT_CONSOLE_ORIGIN` 覆盖；还要确保 Vite 代理与所测后端一致。
 
+## 6. 网页正文提取验收
+
+浏览器场景在 `nexus-console/e2e/webExtract.spec.ts`：固定响应验证机器 Key 请求、正文/图片顺序、图片成功与失败、纯文本/JSON 切换、脚本和事件属性不执行、URL 校验、401/403/400/422/502 展示、网络失败、切换 API 取消请求、文档入口、窄屏布局和离开页面清除 Key。按第 2 节构建并运行完整 Playwright 回归即可；这些是模拟响应的浏览器测试。
+
+真实后端验收前仍须确认运行服务的 Flyway schema 是 `nexus_test`。在 `nexus-console` 执行：
+
+```powershell
+node scripts/accept-web-extract-real.mjs
+```
+
+脚本创建随机账号、Application 和全新 Key，检查错误 Key 返回 401、不在白名单的目标返回 400，再提取一篇真实 CSDN 文章，要求 HTTP 200、纯文本至少 80 字符和净化后的正文 HTML。它不打印或保存密码、JWT、完整 Key，结束时软删除本次 Application；随机账号留在可丢弃的测试库。脚本只验收真实后端，不启动浏览器；真实文章受网络、原站访问规则和正文识别影响，失败不会被记作通过。
+
+可用 `NEXUS_ACCEPT_API_ORIGIN` 覆盖后端地址；用 `NEXUS_ACCEPT_WEB_URL` 指定另一篇公开的知乎专栏或 CSDN 文章：
+
+```powershell
+$env:NEXUS_ACCEPT_WEB_URL = Read-Host '输入公开文章的完整 HTTPS URL'
+node scripts/accept-web-extract-real.mjs
+```
+
+若出现 502，先检查本机 DNS 结果。代理的 Fake-IP 模式可能把目标解析到 `198.18.0.0/15`；该特殊地址段会被 SSRF 策略拒绝。应让允许的文章域名使用正常公网 DNS 结果，并重启后端以免复用 DNS 缓存，不应删除 IP 检查或扩大安全白名单。切换 `application-local.yml` 到 `nexus` 后也要重启后端；Key 必须由当前连接库中的应用创建。
+
 ## 这些测试各自证明什么
 
 | 层次 | 主要证明 | 不证明 |
@@ -126,3 +147,7 @@ node scripts/accept-rotate-real.mjs
 2026-10-08：Element Plus 组件与滚动条改造后，前端构建、E2E 类型检查和模拟浏览器回归 56/56 通过。提交前尝试重新运行后端全套时，从 Flyway 日志发现当前本地配置连接 `nexus` 而不是文档建议的独立 `nexus_test`，已中止运行；这次不能记作通过，也不保证中止前没有测试写入。后续只对核实属于 Usage 验收的三名 `usage-accept` 用户及其关联数据执行了定向清理，不能据此断言其他测试写入均已清除。再次运行前先核实专用测试库及连接配置，再使用新生成的临时 JWT 密钥。
 
 2026-10-10：API Key 轮换与测试库保护收尾。当前本地配置里旧 `nexus` URL 是注释，生效 URL 为 `nexus_test`。负向实验把测试 URL 显式设为错误库名，确认在 Hikari/Flyway 建连前拒绝；后端全套 189/189、前端构建与 E2E 类型检查、Playwright 60/60 均通过。轮换真实浏览器脚本验证旧 Key 401、新 Key 200、短链和 Usage 连续；本次 Application 已软删除，随机测试账号留在可丢弃的测试库。
+
+2026-10-10：网页正文提取前端完成后，构建、E2E 类型检查、完整 Playwright 66/66 和后端提取定向测试 14/14 通过；本轮未重跑后端全套。窄屏布局断言改成同一帧读取两张卡片坐标，重复 5/5 通过。真实后端验收确认新 Key 通过认证、无效 Key 401、非白名单目标 400，但真实 CSDN 文章返回 502；本机 DNS 将两个文章主机解析为 `198.18.0.41/42`，安全策略正确拒绝。真实文章成功验收尚未完成，不能把模拟浏览器通过当作真实站点抓取成功。此次 Application 608 已软删除，随机账号留在测试库。
+
+2026-10-10 后续：开发者关闭 VPN 并重启后端后，反馈真实文章文本提取成功，先前的网络环境阻塞已解除。该反馈不代表 Agent 重新运行真实验收脚本，也不代表已确认两站或真实图片展示；本轮未重复运行自动化测试。
