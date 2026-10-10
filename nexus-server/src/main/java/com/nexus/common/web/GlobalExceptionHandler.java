@@ -7,7 +7,9 @@ import com.nexus.application.exception.InvalidApplicationIdException;
 import com.nexus.application.exception.InvalidApplicationUpdateException;
 import com.nexus.apikey.exception.ApiKeyNameAlreadyExistsException;
 import com.nexus.apikey.exception.ApiKeyNotFoundException;
+import com.nexus.apikey.exception.ApiKeyRotationConflictException;
 import com.nexus.apikey.exception.InvalidApiKeyDeleteException;
+import com.nexus.apikey.exception.InvalidApiKeyRotationException;
 import com.nexus.apikey.exception.InvalidApiKeyUpdateException;
 import com.nexus.auth.exception.AccountForbiddenException;
 import com.nexus.auth.exception.EmailAlreadyRegisteredException;
@@ -201,6 +203,13 @@ public class GlobalExceptionHandler{
                 "API_KEY_NAME_ALREADY_EXISTS", exception.getMessage(), null);
     }
 
+    @ResponseStatus(HttpStatus.CONFLICT)
+    @ExceptionHandler(ApiKeyRotationConflictException.class)
+    public ApiResponse<Void> handleApiKeyRotationConflict(ApiKeyRotationConflictException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.CONFLICT,
+                "API_KEY_ROTATION_CONFLICT", exception.getMessage(), null);
+    }
+
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     @ExceptionHandler(InvalidApplicationUpdateException.class)
     public ApiResponse<Void> handleInvalidApplicationUpdateException(InvalidApplicationUpdateException exception, HttpServletRequest request) {
@@ -218,6 +227,13 @@ public class GlobalExceptionHandler{
     @ExceptionHandler(InvalidApiKeyUpdateException.class)
     public ApiResponse<Void> handleInvalidApiKeyUpdateException(InvalidApiKeyUpdateException exception, HttpServletRequest request) {
         return handled(request, exception, HttpStatus.BAD_REQUEST, "INVALID_API_KEY_UPDATE", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ExceptionHandler(InvalidApiKeyRotationException.class)
+    public ApiResponse<Void> handleInvalidApiKeyRotation(InvalidApiKeyRotationException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.BAD_REQUEST,
+                "INVALID_API_KEY_ROTATION", exception.getMessage(), null);
     }
 
     @ResponseStatus(HttpStatus.NOT_FOUND)

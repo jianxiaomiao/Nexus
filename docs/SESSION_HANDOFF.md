@@ -2,6 +2,8 @@
 
 ## Current checkpoint
 
+2026-10-10：API Key 原地轮换凭据已完成。管理端 `POST /api/apiKey/{apiKeyId}/rotate` 使用当前 `publicId` 作并发前置条件；轮换后 Key ID、状态、短链归属与 Usage 历史不变，旧完整 Key 立即失效，新完整 Key 只在成功响应中返回一次。Vue Key 详情页有轮换确认与一次性展示，连接异常提示先核对状态、不自动重试。后端全套在 `nexus_test` 上通过 189/189（含测试启动前数据库保护）；前端构建、类型检查与 60/60 Playwright 回归通过。首次前端全套曾因冲突测试在页面数据加载前修改 mock 状态而出现 1 次误判；增加“旧 Public ID 已显示”的前置等待后，该用例重复 5/5 及全套 60/60 均通过。`nexus-console/scripts/accept-rotate-real.mjs` 在真实 Chromium、Vite、Spring 与 `nexus_test` 上验收成功：旧 Key 401、新 Key 200，短链仍可跳转，Usage 历史连续；本次测试 Application 已软删除。临时前后端进程已停止。`docs/LOCAL_TESTING.md` 已补运行步骤。本地 `config/application-local.yml` 中旧 `nexus` URL 是注释，实际启用的是 `nexus_test`；不要只匹配文本中的第一个 URL 来判断测试库。
+
 Registration/Login, Application and API Key management, UUID/Hash machine APIs, and the first short-link backend are implemented. Management uses human Bearer JWT; `/v1/*` uses `Authorization: ApiKey <fullKey>`. The Vue console has Application/Key screens, Key-scoped short-link management, six Markdown-backed developer docs, and a playground for UUID/Hash and all four machine short-link operations. The developer confirmed real-backend UUID and Hash calls on 2026-10-06; do not repeat or persist the test credential.
 
 Usage recording marks authenticated machine controller methods with `@UsageApi` and asynchronously writes `usage_events` with bounded retries and one stable event UUID per request. V7 added the unique event ID to the local MySQL schema on 2026-10-08. A real HTTP/MySQL test verified one `utils.hash` event for HTTP 200 and one for HTTP 400. The management query checks Application/Key ownership and returns all-time, daily, and API-code aggregates for an `Asia/Shanghai` range; disabled parents remain readable. `GET /api/usage` now uses query parameters, with real JWT/HTTP/MySQL tests for date boundaries, zero days, invalid custom ranges, and disabled history. The API Key detail page has Key info, short-link entry, and Usage tabs. The full backend suite passed 165/165 using a fresh temporary JWT secret; the frontend build and mocked browser suite passed 44/44. On 2026-10-08, `nexus-console/scripts/accept-usage-real.mjs` passed against running Vite/Spring/MySQL with a newly created Key: UUID usage appeared in the browser, today/custom ranges worked, disabled history stayed visible while machine calls returned 403, and re-enable allowed calls again. The test Application was soft-deleted. Repeatable setup and commands are in `docs/LOCAL_TESTING.md`.
@@ -17,18 +19,16 @@ Short links belong to the creating Key. `/v1/short-links` provides machine creat
 ## Decisions worth carrying forward
 
 - A valid API Key grants access to all `/v1/*` machine APIs; there are no Scopes. This keeps one credential model for tools and short links, at the cost of no per-API restriction. Key ownership of individual short links and independent Key disable/delete still apply.
-- A different Key in the same Application cannot view or change a link. JWT management checks the owning user and the selected Key. Full Key credentials are shown only at creation.
+- A different Key in the same Application cannot view or change a link. JWT management checks the owning user and the selected Key. Full Key credentials are shown only at creation or successful rotation.
 - Public redirect uses 302 and `Cache-Control: no-store`; it checks link, Key, and Application state. Parent disablement does not rewrite link status; parent deletion soft-deletes links. Deleted short codes cannot be reused.
 - Creation accepts HTTPS and exact allowlisted hostnames only. This validates protocol and host, not destination content. Expiry is an absolute instant and equality means expired. Generated code collisions receive bounded retries.
 - Docs are login-gated; whether they should become public is undecided. The playground does not persist a Key.
 
 ## Next task and open checks
 
-- Before rerunning integration tests, check that the local datasource points to a disposable, dedicated test database. On 2026-10-08 a new full-suite run was interrupted after its Flyway log showed the local configuration pointed to `nexus` rather than the documented `nexus_test`; this attempt is not a passing run. Three confirmed `usage-accept` users (IDs 1072–1074), their three Applications, three API Keys, and five Usage events were later hard-deleted in a checked transaction and verified absent; no broader cleanup was attempted. Keep the prior 167/167 result distinct from this stopped attempt.
-- Once a safe test datasource is configured, rerun the backend suite and, if useful for release confidence, exercise the 11th-row management pagination through a real browser/backend connection. The existing mocked browser checks and real MySQL/HTTP tests already cover that behavior separately.
-- The developer reported real frontend/backend short-link testing. Existing mocked-browser and real HTTP/MySQL tests cover the specified behaviors; do not repeat the lifecycle merely to produce a manual checklist. If a future issue depends on a particular real-browser scenario, verify only that gap. The console builds short URLs from a configured public origin plus `shortCode`; local Vite proxies only `/s/` to the backend.
-- The real Usage acceptance script now verifies the Key create/use/disable 403/re-enable path for its fresh test Key. The developer's explanation of Filter → authenticator → request attribute → Controller remains a learning checkpoint. CI and extra infrastructure await concrete requirements.
-- UI control unification is complete within the agreed scope. Usage custom range remains Beijing wall time; Playground expiry remains browser-local time converted to an instant. `ConsoleLayout.vue` and `DocsLayout.vue` intentionally keep their navigation/overlay buttons. Verify against a running backend only if a later regression points to this boundary.
+- Before the next raw `mvn test` or real acceptance run, confirm the effective datasource and Flyway log point to `nexus_test`. The current local file has a commented-out old `nexus` URL and an active `nexus_test` URL. A test-classpath-only EnvironmentPostProcessor now rejects missing or wrong datasource/Flyway targets before a connection; explicit wrong-target testing confirmed no Hikari/Flyway initialization. Real `spring-boot:run` acceptance is not guarded by test classes, so verify its Flyway log separately.
+- Rotation is ready for review and a scoped commit. The new real acceptance script soft-deletes its Application but leaves a random test account in the disposable test database, like the Usage acceptance script. Never reuse or persist credentials from acceptance runs.
+- No additional infrastructure is justified by this checkpoint. Decide the next business feature from an explicit user problem; do not add Redis or RabbitMQ by default. The Filter → authenticator → request attribute → Controller explanation remains a learning checkpoint, not an implementation blocker.
 
 ## Relevant files
 
@@ -39,6 +39,7 @@ Short links belong to the creating Key. `/v1/short-links` provides machine creat
 - `nexus-console/src/views/ShortLinksView.vue`, `nexus-console/src/api/shortLinks.ts`, `nexus-console/src/docs/content/shortlink.md`, `nexus-console/e2e/shortLinks.spec.ts`
 - `nexus-console/src/views/ApiKeyDetailView.vue`, `nexus-console/src/views/ApiKeyUsagePanel.vue`, `nexus-console/src/api/usage.ts`, `nexus-console/e2e/usage.spec.ts`
 - `nexus-console/scripts/accept-usage-real.mjs`, `docs/LOCAL_TESTING.md`
+- `nexus-console/scripts/accept-rotate-real.mjs`, `nexus-console/e2e/apiKeys.spec.ts`, `nexus-server/src/main/java/com/nexus/apikey/`
 - `nexus-server/src/main/java/com/nexus/usage/`, `nexus-server/src/test/java/com/nexus/usage/`
 
 Inspect `git status` before further edits; preserve any future uncommitted work.

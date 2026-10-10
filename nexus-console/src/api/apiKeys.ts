@@ -16,6 +16,10 @@ export interface CreatedApiKey extends Omit<ApiKey, 'updatedAt'> {
   apiKey: string
 }
 
+export interface RotatedApiKey extends Omit<ApiKey, 'createdAt'> {
+  apiKey: string
+}
+
 export interface UpdateApiKeyRequest {
   applicationId: number
   apiKeyId: number
@@ -40,4 +44,9 @@ export async function updateApiKey(request: UpdateApiKeyRequest): Promise<ApiKey
 
 export async function deleteApiKey(applicationId: number, apiKeyId: number): Promise<void> {
   await http.delete('/apiKey', { data: { applicationId, apiKeyId } })
+}
+
+export async function rotateApiKey(apiKeyId: number, expectedPublicId: string): Promise<RotatedApiKey> {
+  const response = await http.post<ApiResponse<RotatedApiKey>>(`/apiKey/${apiKeyId}/rotate`, { expectedPublicId })
+  return response.data.data
 }

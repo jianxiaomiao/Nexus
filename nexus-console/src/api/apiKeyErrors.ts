@@ -18,6 +18,10 @@ export function apiKeyErrorMessage(error: unknown, fallback: string): string {
       return '这个 Key 名称已被使用，请换一个名称'
     case 'API_KEY_NOT_FOUND':
       return '这个 API Key 不存在，或已被删除'
+    case 'API_KEY_ROTATION_CONFLICT':
+      return 'Public ID 已变化。请刷新详情核对，勿直接重试轮换'
+    case 'INVALID_API_KEY_ROTATION':
+      return '轮换请求无效，请刷新详情后重试'
     case 'INVALID_LIST_PAGE':
       return error.response.data.message || '页码或每页条数无效'
     case 'VALIDATION_ERROR':

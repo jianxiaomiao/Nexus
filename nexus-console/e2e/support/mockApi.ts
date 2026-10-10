@@ -53,6 +53,7 @@ export const sampleKey: ApiKey = {
 }
 // 故意不是可用凭证；只用于检查创建后的一次性展示。
 export const oneTimeKey = 'PLAYWRIGHT_FAKE_KEY_NOT_VALID'
+export const oneTimeRotatedKey = 'PLAYWRIGHT_FAKE_ROTATED_KEY_NOT_VALID'
 export const sampleUsage: UsageSummary = {
   allTimeCount: 15,
   periodCount: 3,
@@ -148,6 +149,20 @@ export async function installMockApi(page: Page, initial?: { applications?: Appl
       }
       keys.push(created)
       await respond({ ...created, apiKey: oneTimeKey })
+    } else if (/^\/api\/apiKey\/\d+\/rotate$/.test(path) && method === 'POST') {
+      const keyId = Number(path.split('/')[3])
+      const target = keys.find((item) => item.id === keyId)
+      if (!target) { await respond(null, 404, 'API_KEY_NOT_FOUND'); return }
+      if (body.expectedPublicId !== target.publicId) {
+        await respond(null, 409, 'API_KEY_ROTATION_CONFLICT')
+        return
+      }
+      target.publicId = 'rotated-test-public-id'
+      target.keyPreview = 'nexus_••••9012'
+      target.updatedAt = '2026-10-10T10:00:00'
+      await respond({ id: target.id, applicationId: target.applicationId, name: target.name,
+        publicId: target.publicId, keyPreview: target.keyPreview, apiKey: oneTimeRotatedKey,
+        status: target.status, updatedAt: target.updatedAt })
     } else if (path === '/api/apiKey' && method === 'PUT') {
       const target = keys.find((item) => item.applicationId === body.applicationId && item.id === body.apiKeyId)
       if (!target) { await respond(null, 404, 'API_KEY_NOT_FOUND'); return }

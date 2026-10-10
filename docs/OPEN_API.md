@@ -8,6 +8,14 @@
 
 当前一枚有效 API Key 可以调用全部 `/v1/*` 机器接口，包括工具和短链接口，不按 Scope 分权。这样客户端只需管理一种机器凭证；代价是无法把某枚 Key 限制为“只用工具”或“只管短链”。不同 Key 仍分别拥有自己的短链，持有一枚 Key 不代表可以操作另一枚 Key 的资源；每枚 Key 也可以单独禁用或删除。
 
+### 管理端轮换 API Key 凭据
+
+拥有该 Key 的用户可用 Bearer JWT 调用 `POST /api/apiKey/{apiKeyId}/rotate`，请求体为 `{"expectedPublicId":"<当前列表中的 publicId>"}`。不提交旧完整 Key。成功响应的 `data` 包含原 `id`、`applicationId`、`name`、新 `publicId`、`keyPreview`、完整 `apiKey`、原 `status` 和 `updatedAt`；完整 Key 只返回这一次，数据库只保存 Secret 摘要。Key ID 和状态不变，已有短链接与 Usage 历史仍归这枚 Key。
+
+轮换提交后，旧完整 Key 的后续机器请求返回 401；新凭据在 Key、Application 和账号均启用时可用。如果 Key 原先禁用，轮换不会自动启用，新凭据仍返回 403。缺失或无效的管理 JWT 返回 401；Key 不存在、已删除或不属于当前用户返回 404 `API_KEY_NOT_FOUND`；`expectedPublicId` 已变化时返回 409 `API_KEY_ROTATION_CONFLICT`，不会再次轮换。缺失或空的 `expectedPublicId` 返回 400 `VALIDATION_ERROR`。
+
+若轮换已提交但成功响应丢失，不能找回新完整 Key。刷新管理列表确认公开 ID 已改变后，用新的 `expectedPublicId` 主动发起下一次轮换；不要自动重试旧请求。并发轮换只有一个基于同一旧公开 ID 的请求能成功。
+
 ## 生成 UUID
 
 ```http

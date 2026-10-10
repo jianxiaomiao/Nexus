@@ -10,6 +10,8 @@ GRANT ALL PRIVILEGES ON nexus_test.* TO 'nexus_test_user'@'127.0.0.1';
 
 不要把测试指向日常开发库或生产库；集成测试会创建、修改和清理业务数据。Flyway 会在 Spring 启动时应用 `nexus-server/src/main/resources/db/migration/` 中的迁移。
 
+后端测试 classpath 另有启动前保护：`mvn test` 的 Spring 上下文只接受最终生效的 MySQL schema 为 `nexus_test`，并检查单独设置的 Hikari/Flyway URL 和 Flyway schema；缺失或不匹配时，在连接数据库前拒绝启动。这个保护不随正式应用打包，但运行真实后端验收时仍须人工确认启动日志中的 Flyway schema。本机配置可能保留注释掉的旧 `nexus` URL；判断生效值时不要只搜索文件里的第一个 JDBC URL。
+
 ## 1. 配置测试库与临时 JWT 密钥
 
 在 `nexus-server/config/application-local.yml` 配置测试库连接。该文件已被 Git 忽略，不提交真实密码；至少需要以下属性：
@@ -96,6 +98,16 @@ node scripts/accept-usage-real.mjs
 
 可重复验证：在专用测试库运行 `mvn -q -Dtest=UsageHttpIntegrationTests test`，它插入同一时刻的 11 条记录，并验证默认第一页 10 条、第二页 1 条、自定义每页 5 条、禁用历史、无权访问及非法页大小。运行 `npm run test:e2e -- e2e/usage.spec.ts` 验证浏览器翻页和每页条数输入。完整回归仍按第 1、2 节执行；第 3 节现有真实浏览器脚本只覆盖 Usage 汇总与禁用历史，不覆盖 11 条翻页。
 
+## 5. API Key 轮换真实浏览器验收
+
+先确认后端实际连接的是**可丢弃的 `nexus_test`**：真实服务启动不带测试 classpath 保护，不能未经核对就运行验收。可在启动后端的同一个 PowerShell 窗口临时设置 `$env:SPRING_DATASOURCE_URL` 为 `jdbc:mysql://127.0.0.1:3306/nexus_test?...`，并按第 1 节生成本次专用 JWT 密钥；启动日志中的 Flyway schema 必须明确是 `nexus_test`。前端 Vite 默认把 `/api`、`/v1` 和 `/s` 代理到 `localhost:8080`，所以也要确认 8080 没有其他指向日常库的后端实例。分别启动 `mvn spring-boot:run` 和 `npm run dev -- --host localhost --port 5173 --strictPort` 后，在 `nexus-console` 运行：
+
+```powershell
+node scripts/accept-rotate-real.mjs
+```
+
+脚本在真实后端创建随机测试账号、Application、全新 Key 和短链，再通过 Chromium 页面点击轮换，验证旧凭据 401、新凭据 200、旧短链仍归原 Key 且能跳转、Usage 历史连续、列表中 Key ID 不变且 Public ID 更新。脚本不打印或持久化密码、JWT、完整 Key；结束时软删除本次 Application，但测试账号仍留在 `nexus_test`，因此只在可重建的专用测试库运行。若服务地址不同，可使用 `NEXUS_ACCEPT_API_ORIGIN`、`NEXUS_ACCEPT_CONSOLE_ORIGIN` 覆盖；还要确保 Vite 代理与所测后端一致。
+
 ## 这些测试各自证明什么
 
 | 层次 | 主要证明 | 不证明 |
@@ -112,3 +124,5 @@ node scripts/accept-usage-real.mjs
 2026-10-08：Application、API Key、短链接管理列表的现有查询已分页。可运行 `mvn -q -Dtest=ManagementListPaginationIntegrationTests test` 验证三个列表各 11 条跨页、自定义条数和权限隔离；运行 `npm run test:e2e -- e2e/listPagination.spec.ts` 验证页面翻页与页外详情。完整后端套件在限制本次测试连接池后通过 167/167，模拟浏览器回归 48/48。接口说明见 `docs/MANAGEMENT_PAGINATION.md`。
 
 2026-10-08：Element Plus 组件与滚动条改造后，前端构建、E2E 类型检查和模拟浏览器回归 56/56 通过。提交前尝试重新运行后端全套时，从 Flyway 日志发现当前本地配置连接 `nexus` 而不是文档建议的独立 `nexus_test`，已中止运行；这次不能记作通过，也不保证中止前没有测试写入。后续只对核实属于 Usage 验收的三名 `usage-accept` 用户及其关联数据执行了定向清理，不能据此断言其他测试写入均已清除。再次运行前先核实专用测试库及连接配置，再使用新生成的临时 JWT 密钥。
+
+2026-10-10：API Key 轮换与测试库保护收尾。当前本地配置里旧 `nexus` URL 是注释，生效 URL 为 `nexus_test`。负向实验把测试 URL 显式设为错误库名，确认在 Hikari/Flyway 建连前拒绝；后端全套 189/189、前端构建与 E2E 类型检查、Playwright 60/60 均通过。轮换真实浏览器脚本验证旧 Key 401、新 Key 200、短链和 Usage 连续；本次 Application 已软删除，随机测试账号留在可丢弃的测试库。

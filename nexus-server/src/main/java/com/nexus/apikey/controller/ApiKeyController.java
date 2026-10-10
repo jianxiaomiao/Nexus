@@ -59,6 +59,16 @@ public class ApiKeyController {
                 apiKeyService.updateMyApiKey(userId, request));
     }
 
+    @PostMapping("/{apiKeyId}/rotate")
+    public ApiResponse<RotateApiKeyResponse> rotateMyApiKey(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @PathVariable Long apiKeyId,
+            @Valid @RequestBody RotateApiKeyRequest request) {
+        long userId = bearerUserIdResolver.resolve(authorization);
+        return new ApiResponse<>("SUCCESS", "轮换成功",
+                apiKeyService.rotateMyApiKey(userId, apiKeyId, request.expectedPublicId()));
+    }
+
     @DeleteMapping
     public ApiResponse<Void> deleteMyApiKey(
             @RequestHeader(value = "Authorization", required = false) String authorization,

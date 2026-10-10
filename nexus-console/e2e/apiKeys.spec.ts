@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { installMockApi, oneTimeKey, openApplication, sampleApplication, signIn } from './support/mockApi'
+import { installMockApi, oneTimeKey, oneTimeRotatedKey, openApplication, sampleApplication, sampleKey, signIn } from './support/mockApi'
 
 async function openKeysTab(page: Page) {
   await openApplication(page)
@@ -18,7 +18,7 @@ test('列表到详情只显示 Key Preview，不再显示完整凭证', async ({
   await openKeyDetail(page)
   await expect(page.getByRole('heading', { name: '开发环境 Key' })).toBeVisible()
   await expect(page.getByText('test-public-id')).toBeVisible()
-  await expect(page.getByRole('note')).toContainText('完整 API Key 仅在创建时显示')
+  await expect(page.getByRole('note')).toContainText('完整 API Key 仅在创建或轮换成功时显示一次')
   await expect(page.locator('body')).not.toContainText(oneTimeKey)
 })
 
@@ -96,6 +96,76 @@ test('Key 详情支持改名、禁用与重新启用', async ({ page }) => {
     { applicationId: 1, apiKeyId: 11, status: 1 },
     { applicationId: 1, apiKeyId: 11, status: 0 },
   ])
+})
+
+test('轮换须确认，成功后只展示一次新凭据并保留 Key 状态与资源', async ({ page }) => {
+  const api = await installMockApi(page)
+  await openKeyDetail(page)
+
+  await page.getByRole('button', { name: '轮换凭据' }).click()
+  const confirmDialog = page.getByRole('dialog', { name: '轮换 API Key 凭据' })
+  await expect(confirmDialog).toContainText('旧凭据立即失效')
+  await confirmDialog.getByRole('button', { name: '取消' }).click()
+  expect(api.calls.filter((call) => call.path.endsWith('/rotate'))).toHaveLength(0)
+
+  await page.getByRole('button', { name: '轮换凭据' }).click()
+  await confirmDialog.getByRole('button', { name: '确认轮换' }).click()
+  const revealDialog = page.getByRole('dialog', { name: '轮换成功' })
+  const credential = revealDialog.getByRole('textbox', { name: '新的 API Key（仅显示一次）' })
+  await expect(credential).toHaveAttribute('type', 'password')
+  await expect(credential).toHaveValue(oneTimeRotatedKey)
+  await revealDialog.getByRole('button', { name: '显示' }).click()
+  await expect(credential).toHaveAttribute('type', 'text')
+  await expect(revealDialog.getByRole('button', { name: '我已保存，关闭' })).toBeDisabled()
+  await page.keyboard.press('Escape')
+  await expect(revealDialog).toBeVisible()
+  await page.evaluate(() => document.querySelector<HTMLAnchorElement>('.back-link')?.click())
+  await expect(page).toHaveURL(/\/applications\/1\/keys\/11$/)
+  await expect(page.getByText('请先保存完整 API Key，并勾选确认后再离开')).toBeVisible()
+
+  expect(api.calls.filter((call) => call.path.endsWith('/rotate')).map((call) => ({ method: call.method, body: call.body })))
+    .toEqual([{ method: 'POST', body: { expectedPublicId: 'test-public-id' } }])
+  expect(api.keys[0]?.id).toBe(11)
+  expect(api.keys[0]?.status).toBe(0)
+  await revealDialog.getByText('我已安全保存新的 API Key').click()
+  await revealDialog.getByRole('button', { name: '我已保存，关闭' }).click()
+  await expect(revealDialog).not.toBeVisible()
+  await expect(page.getByText('rotated-test-public-id')).toBeVisible()
+  await expect(page.locator('body')).not.toContainText(oneTimeRotatedKey)
+})
+
+test('已禁用 Key 可以轮换，但不会因此启用', async ({ page }) => {
+  const api = await installMockApi(page, { keys: [{ ...sampleKey, status: 1 }] })
+  await openKeyDetail(page)
+  await page.getByRole('button', { name: '轮换凭据' }).click()
+  const confirmDialog = page.getByRole('dialog', { name: '轮换 API Key 凭据' })
+  await expect(confirmDialog).toContainText('轮换不会自动启用')
+  await confirmDialog.getByRole('button', { name: '确认轮换' }).click()
+  await expect(page.getByRole('dialog', { name: '轮换成功' })).toBeVisible()
+  expect(api.keys[0]?.status).toBe(1)
+  await expect(page.getByRole('button', { name: '启用 Key' })).toBeVisible()
+})
+
+test('轮换时 Public ID 已变化会提示刷新，不自动重试', async ({ page }) => {
+  const api = await installMockApi(page)
+  await openKeyDetail(page)
+  await expect(page.getByText('test-public-id')).toBeVisible()
+  api.keys[0]!.publicId = 'already-rotated-id'
+  await page.getByRole('button', { name: '轮换凭据' }).click()
+  await page.getByRole('dialog', { name: '轮换 API Key 凭据' }).getByRole('button', { name: '确认轮换' }).click()
+  await expect(page.getByText('Public ID 已变化。请刷新详情核对，勿直接重试轮换')).toBeVisible()
+  await expect(page.getByRole('dialog', { name: '轮换成功' })).not.toBeVisible()
+  expect(api.calls.filter((call) => call.path.endsWith('/rotate'))).toHaveLength(1)
+})
+
+test('轮换响应异常时提示结果不确定，不自动重试', async ({ page }) => {
+  const api = await installMockApi(page)
+  api.failures.set('POST /api/apiKey/11/rotate', { status: 503, code: 'TEMPORARY_ERROR', message: '服务暂时不可用' })
+  await openKeyDetail(page)
+  await page.getByRole('button', { name: '轮换凭据' }).click()
+  await page.getByRole('dialog', { name: '轮换 API Key 凭据' }).getByRole('button', { name: '确认轮换' }).click()
+  await expect(page.getByText(/轮换结果可能已生效。请先刷新详情核对 Public ID/)).toBeVisible()
+  expect(api.calls.filter((call) => call.path.endsWith('/rotate'))).toHaveLength(1)
 })
 
 test('删除 Key 需要输入正确名称，并回到所属应用 Key 列表', async ({ page }) => {

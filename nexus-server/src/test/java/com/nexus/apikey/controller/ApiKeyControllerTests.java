@@ -4,9 +4,12 @@ import com.nexus.apikey.dto.ApiKeyResponse;
 import com.nexus.apikey.dto.CreateApiKeyRequest;
 import com.nexus.apikey.dto.CreateApiKeyResponse;
 import com.nexus.apikey.dto.DeleteApiKeyRequest;
+import com.nexus.apikey.dto.RotateApiKeyRequest;
+import com.nexus.apikey.dto.RotateApiKeyResponse;
 import com.nexus.apikey.dto.UpdateApiKeyRequest;
 import com.nexus.apikey.exception.ApiKeyNameAlreadyExistsException;
 import com.nexus.apikey.exception.ApiKeyNotFoundException;
+import com.nexus.apikey.exception.ApiKeyRotationConflictException;
 import com.nexus.apikey.service.ApiKeyService;
 import com.nexus.application.exception.ApplicationNotFoundException;
 import com.nexus.auth.exception.InvalidAccessTokenException;
@@ -106,6 +109,61 @@ class ApiKeyControllerTests {
                 .andExpect(jsonPath("$.data.apiKey").doesNotExist());
 
         verify(apiKeyService).updateMyApiKey(42L, request);
+    }
+
+    @Test
+    void rotateUsesBearerAndReturnsNewCredentialOnlyInSuccessResponse() throws Exception {
+        RotateApiKeyRequest request = new RotateApiKeyRequest("old-public-id");
+        when(bearerUserIdResolver.resolve("Bearer valid-token")).thenReturn(42L);
+        when(apiKeyService.rotateMyApiKey(42L, 9L, "old-public-id"))
+                .thenReturn(new RotateApiKeyResponse(9L, 7L, "key", "new-public-id",
+                        "new-preview", "new-complete-key", 0, LocalDateTime.of(2026, 10, 9, 12, 0)));
+
+        mockMvc.perform(post(BASE_PATH + "/9/rotate")
+                        .header("Authorization", "Bearer valid-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(9))
+                .andExpect(jsonPath("$.data.publicId").value("new-public-id"))
+                .andExpect(jsonPath("$.data.apiKey").value("new-complete-key"))
+                .andExpect(jsonPath("$.data.secretHash").doesNotExist());
+
+        verify(apiKeyService).rotateMyApiKey(42L, 9L, "old-public-id");
+    }
+
+    @Test
+    void rotateRejectsMissingTokenAndInvalidExpectedPublicId() throws Exception {
+        when(bearerUserIdResolver.resolve(null)).thenThrow(new InvalidAccessTokenException());
+
+        mockMvc.perform(post(BASE_PATH + "/9/rotate")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedPublicId\":\"old-public-id\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("INVALID_ACCESS_TOKEN"));
+        mockMvc.perform(post(BASE_PATH + "/9/rotate")
+                        .header("Authorization", "Bearer valid-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedPublicId\":\"\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+
+        verifyNoInteractions(apiKeyService);
+    }
+
+    @Test
+    void staleRotationReturns409() throws Exception {
+        when(bearerUserIdResolver.resolve("Bearer valid-token")).thenReturn(42L);
+        when(apiKeyService.rotateMyApiKey(42L, 9L, "old-public-id"))
+                .thenThrow(new ApiKeyRotationConflictException());
+
+        mockMvc.perform(post(BASE_PATH + "/9/rotate")
+                        .header("Authorization", "Bearer valid-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedPublicId\":\"old-public-id\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("API_KEY_ROTATION_CONFLICT"))
+                .andExpect(jsonPath("$.data.apiKey").doesNotExist());
     }
 
     @Test

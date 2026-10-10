@@ -9,7 +9,9 @@ import com.nexus.apikey.dto.*;
 import com.nexus.apikey.entity.ApiKey;
 import com.nexus.apikey.exception.ApiKeyNameAlreadyExistsException;
 import com.nexus.apikey.exception.ApiKeyNotFoundException;
+import com.nexus.apikey.exception.ApiKeyRotationConflictException;
 import com.nexus.apikey.exception.InvalidApiKeyDeleteException;
+import com.nexus.apikey.exception.InvalidApiKeyRotationException;
 import com.nexus.apikey.exception.InvalidApiKeyUpdateException;
 import com.nexus.apikey.mapper.ApiKeyMapper;
 import com.nexus.application.entity.Application;
@@ -116,6 +118,58 @@ public class ApiKeyService {
                         key.getCreatedAt(),
                         key.getUpdatedAt()
                 ));
+    }
+
+    @Transactional
+    public RotateApiKeyResponse rotateMyApiKey(Long userId, Long apiKeyId, String expectedPublicId) {
+        if (userId == null || apiKeyId == null || apiKeyId <= 0
+                || expectedPublicId == null || expectedPublicId.isBlank()) {
+            throw new InvalidApiKeyRotationException();
+        }
+
+        // 先读取不可变的 Application ID，再按 Application → Key 的既有顺序加锁。
+        ApiKey snapshot = apiKeyMapper.selectById(apiKeyId);
+        if (snapshot == null || Integer.valueOf(1).equals(snapshot.getIsDeleted())) {
+            throw new ApiKeyNotFoundException();
+        }
+        Application application = applicationMapper.selectOne(Wrappers.<Application>lambdaQuery()
+                .eq(Application::getId, snapshot.getApplicationId())
+                .eq(Application::getOwnerUserId, userId)
+                .eq(Application::getIsDeleted, 0)
+                .last("FOR UPDATE"));
+        if (application == null) {
+            throw new ApiKeyNotFoundException();
+        }
+        ApiKey current = apiKeyMapper.selectOne(Wrappers.<ApiKey>lambdaQuery()
+                .eq(ApiKey::getId, apiKeyId)
+                .eq(ApiKey::getApplicationId, application.getId())
+                .eq(ApiKey::getIsDeleted, 0)
+                .last("FOR UPDATE"));
+        if (current == null) {
+            throw new ApiKeyNotFoundException();
+        }
+        if (!expectedPublicId.equals(current.getPublicId())) {
+            throw new ApiKeyRotationConflictException();
+        }
+
+        GeneratedApiKey generated = credentialGenerator.generate();
+        LocalDateTime updatedAt = LocalDateTime.now();
+        int changed = apiKeyMapper.update(null, Wrappers.<ApiKey>lambdaUpdate()
+                .eq(ApiKey::getId, apiKeyId)
+                .eq(ApiKey::getApplicationId, application.getId())
+                .eq(ApiKey::getPublicId, expectedPublicId)
+                .eq(ApiKey::getIsDeleted, 0)
+                .set(ApiKey::getPublicId, generated.publicId())
+                .set(ApiKey::getSecretHash, generated.secretHash())
+                .set(ApiKey::getKeyPreview, generated.keyPreview())
+                .set(ApiKey::getUpdatedAt, updatedAt));
+        if (changed != 1) {
+            throw new ApiKeyRotationConflictException();
+        }
+
+        return new RotateApiKeyResponse(current.getId(), current.getApplicationId(), current.getName(),
+                generated.publicId(), generated.keyPreview(), generated.plaintextKey(),
+                current.getStatus(), updatedAt);
     }
 
     @Transactional

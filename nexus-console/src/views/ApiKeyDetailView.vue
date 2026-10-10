@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, CircleCheck, CircleClose, Delete, EditPen } from '@element-plus/icons-vue'
+import { ArrowLeft, CircleCheck, CircleClose, Delete, EditPen, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { isAxiosError } from 'axios'
 import type { Application } from '@/api/applications'
 import { listApplications } from '@/api/applications'
-import { deleteApiKey, listApiKeys, updateApiKey, type ApiKey } from '@/api/apiKeys'
+import { deleteApiKey, listApiKeys, rotateApiKey, updateApiKey, type ApiKey } from '@/api/apiKeys'
 import { apiKeyErrorMessage } from '@/api/apiKeyErrors'
 import { applicationErrorMessage } from '@/api/applicationErrors'
 import ApiKeyUsagePanel from './ApiKeyUsagePanel.vue'
@@ -17,8 +18,22 @@ const apiKey = ref<ApiKey | null>(null)
 const loading = ref(false)
 const errorMessage = ref('')
 const actionBusy = ref(false)
+// 完整新凭据只暂存在详情页的一次性弹窗中，不放进 apiKey、Store 或 URL。
+const rotatedKey = ref('')
+const revealOpen = ref(false)
+const savedConfirmation = ref(false)
+const copied = ref(false)
+const secretVisible = ref(false)
 const activeTab = computed(() => route.query.tab === 'short-links' || route.query.tab === 'usage' ? route.query.tab : 'info')
 let loadVersion = 0
+let copyResetTimer: ReturnType<typeof setTimeout> | undefined
+let removeNavigationGuard: (() => void) | undefined
+
+function warnBeforeUnload(event: BeforeUnloadEvent) {
+  if (!rotatedKey.value || savedConfirmation.value) return
+  event.preventDefault()
+  event.returnValue = ''
+}
 
 async function load() {
   const version = ++loadVersion
@@ -120,6 +135,66 @@ async function toggleStatus() {
   }
 }
 
+async function rotate() {
+  const current = apiKey.value
+  if (!current || actionBusy.value || revealOpen.value) return
+  try {
+    await ElMessageBox.confirm(
+      `轮换后旧凭据立即失效，使用它的客户端需要更新。新凭据仅显示一次，请及时保存。${current.status === 1 ? '这枚 Key 目前已禁用，轮换不会自动启用。' : ''}`,
+      '轮换 API Key 凭据',
+      { type: 'warning', confirmButtonText: '确认轮换', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+
+  actionBusy.value = true
+  try {
+    const result = await rotateApiKey(current.id, current.publicId)
+    apiKey.value = {
+      ...current,
+      publicId: result.publicId,
+      keyPreview: result.keyPreview,
+      status: result.status,
+      updatedAt: result.updatedAt,
+    }
+    savedConfirmation.value = false
+    copied.value = false
+    secretVisible.value = false
+    rotatedKey.value = result.apiKey
+    revealOpen.value = true
+  } catch (error) {
+    if (isAxiosError(error) && (!error.response || error.response.status >= 500)) {
+      ElMessage.error('轮换结果可能已生效。请先刷新详情核对 Public ID；不要直接重试。若已变化，需再次轮换才能取得新凭据')
+    } else {
+      ElMessage.error(apiKeyErrorMessage(error, '轮换失败，请稍后重试'))
+    }
+  } finally {
+    actionBusy.value = false
+  }
+}
+
+async function copyRotatedKey() {
+  if (!rotatedKey.value) return
+  try {
+    await navigator.clipboard.writeText(rotatedKey.value)
+    copied.value = true
+    ElMessage.success('已复制，请妥善保存')
+    if (copyResetTimer) clearTimeout(copyResetTimer)
+    copyResetTimer = setTimeout(() => { copied.value = false }, 2000)
+  } catch {
+    ElMessage.error('复制失败，请点击显示后手动选择并复制')
+  }
+}
+
+function closeReveal() {
+  if (!savedConfirmation.value) return
+  rotatedKey.value = ''
+  secretVisible.value = false
+  copied.value = false
+  revealOpen.value = false
+}
+
 async function remove() {
   const current = apiKey.value
   if (!current || actionBusy.value) return
@@ -151,7 +226,21 @@ async function remove() {
   }
 }
 
-onMounted(() => { void load() })
+onMounted(() => {
+  void load()
+  window.addEventListener('beforeunload', warnBeforeUnload)
+  removeNavigationGuard = router.beforeEach(() => {
+    if (!rotatedKey.value || savedConfirmation.value) return
+    ElMessage.warning('请先保存完整 API Key，并勾选确认后再离开')
+    return false
+  })
+})
+onUnmounted(() => {
+  rotatedKey.value = ''
+  if (copyResetTimer) clearTimeout(copyResetTimer)
+  window.removeEventListener('beforeunload', warnBeforeUnload)
+  removeNavigationGuard?.()
+})
 watch([() => route.params.applicationId, () => route.params.keyId], () => { void load() })
 </script>
 
@@ -176,6 +265,7 @@ watch([() => route.params.applicationId, () => route.params.keyId], () => { void
         </div>
         <div class="heading-actions" role="group" aria-label="API Key 操作">
           <el-tooltip content="编辑名称" placement="top"><el-button class="icon-action" :disabled="actionBusy" aria-label="编辑 Key 名称" @click="rename"><el-icon :size="18" aria-hidden="true"><EditPen /></el-icon></el-button></el-tooltip>
+          <el-tooltip content="轮换凭据" placement="top"><el-button class="icon-action rotate-action" :disabled="actionBusy" aria-label="轮换凭据" @click="rotate"><el-icon :size="18" aria-hidden="true"><Refresh /></el-icon></el-button></el-tooltip>
           <el-tooltip :content="apiKey.status === 0 ? '禁用 Key' : '启用 Key'" placement="top"><el-button class="icon-action warning-action" :disabled="actionBusy" :aria-label="apiKey.status === 0 ? '禁用 Key' : '启用 Key'" @click="toggleStatus"><el-icon :size="18" aria-hidden="true"><CircleClose v-if="apiKey.status === 0" /><CircleCheck v-else /></el-icon></el-button></el-tooltip>
           <el-tooltip content="删除 Key" placement="top"><el-button class="icon-action danger-action" :disabled="actionBusy" aria-label="删除 Key" @click="remove"><el-icon :size="18" aria-hidden="true"><Delete /></el-icon></el-button></el-tooltip>
         </div>
@@ -200,13 +290,26 @@ watch([() => route.params.applicationId, () => route.params.keyId], () => { void
           <div><dt>创建时间</dt><dd>{{ formatDate(apiKey.createdAt) }}</dd></div>
           <div><dt>更新时间</dt><dd>{{ formatDate(apiKey.updatedAt) }}</dd></div>
         </dl>
-        <div class="secret-notice" role="note">完整 API Key 仅在创建时显示，之后无法再次查看。</div>
+        <div class="secret-notice" role="note">完整 API Key 仅在创建或轮换成功时显示一次，之后无法再次查看。</div>
       </div>
       <div v-else-if="activeTab === 'short-links'" class="detail-card short-links-entry">
         <div><h2>短链接</h2><p>查看和管理这枚 Key 创建的短链。创建新短链需要使用保存的完整 API Key。</p></div>
         <RouterLink :to="{ name: 'short-links', query: { applicationId: application.id, apiKeyId: apiKey.id } }">查看短链接 →</RouterLink>
       </div>
       <ApiKeyUsagePanel v-else :application-id="application.id" :api-key-id="apiKey.id" />
+
+      <el-dialog :model-value="revealOpen" title="轮换成功" width="min(560px, 94vw)" destroy-on-close :show-close="false" :close-on-click-modal="false" :close-on-press-escape="false">
+        <p class="secret-warning">旧凭据已失效。请立即复制并更新客户端；关闭后无法再次查看完整凭据。</p>
+        <label class="secret-label" for="rotated-api-key">新的 API Key（仅显示一次）</label>
+        <div class="secret-row">
+          <el-input id="rotated-api-key" :model-value="rotatedKey" :type="secretVisible ? 'text' : 'password'" readonly class="secret-input" />
+          <el-button @click="secretVisible = !secretVisible">{{ secretVisible ? '隐藏' : '显示' }}</el-button>
+          <el-button type="primary" @click="copyRotatedKey">{{ copied ? '已复制' : '复制凭据' }}</el-button>
+        </div>
+        <p class="rotation-note">Public ID 已更新；Key ID、状态、短链接和历史记录保持不变。</p>
+        <el-checkbox v-model="savedConfirmation" class="saved-confirmation">我已安全保存新的 API Key</el-checkbox>
+        <template #footer><el-button type="primary" :disabled="!savedConfirmation" @click="closeReveal">我已保存，关闭</el-button></template>
+      </el-dialog>
     </template>
   </section>
 </template>
@@ -225,6 +328,7 @@ h1 { overflow-wrap: anywhere; margin: 0; color: var(--nexus-ink); font-size: cla
 .heading-actions :deep(.warning-action) { border-color: #edcb95; color: var(--nexus-warning-ink); }
 .heading-actions :deep(.danger-action) { border-color: #e4aaa2; color: #aa453c; }
 .heading-actions :deep(.icon-action:hover) { background: var(--nexus-sage); }
+.heading-actions :deep(.rotate-action) { border-color: var(--nexus-teal); color: var(--nexus-teal); }
 .heading-actions :deep(.danger-action:hover) { background: #fff1ee; }
 .status-pill { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; font-size: 13px; font-weight: 650; white-space: nowrap; }
 .status-pill.is-active { background: var(--nexus-success-surface); color: var(--nexus-success-ink); }
@@ -246,6 +350,13 @@ code { font-family: 'Consolas', 'SFMono-Regular', monospace; font-size: 13px; }
 .application-link { color: var(--nexus-teal); text-decoration: none; }
 .application-link:hover { text-decoration: underline; }
 .secret-notice { margin-top: 20px; padding: 16px 18px; border: 1px solid #d6e5e5; border-radius: 9px; background: #f2f8f8; color: #476775; font-size: 13px; }
+.secret-warning { margin: 0 0 22px; color: var(--nexus-ink); line-height: 1.7; }
+.secret-label { display: block; margin-bottom: 8px; font-size: 13px; font-weight: 600; }
+.secret-row { display: flex; gap: 10px; }
+.secret-input { min-width: 0; }
+.secret-input :deep(input) { font-family: 'Consolas', 'SFMono-Regular', monospace; }
+.rotation-note { margin: 14px 0 0; color: var(--nexus-muted); font-size: 13px; }
+.saved-confirmation { margin-top: 20px; }
 .error-card { color: #8a3c33; }
 .error-card p { margin: 12px 0 22px; }
 .short-links-entry { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
@@ -255,4 +366,5 @@ code { font-family: 'Consolas', 'SFMono-Regular', monospace; font-size: 13px; }
 .short-links-entry a:hover { text-decoration: underline; }
 @media (max-width: 650px) { .detail-heading { align-items: flex-start; flex-direction: column; } dl > div { grid-template-columns: 1fr; gap: 6px; } }
 @media (max-width: 650px) { .short-links-entry { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 650px) { .secret-row { flex-wrap: wrap; } .secret-input { flex-basis: 100%; } }
 </style>
