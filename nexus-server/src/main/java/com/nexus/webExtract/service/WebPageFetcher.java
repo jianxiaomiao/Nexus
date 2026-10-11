@@ -1,6 +1,7 @@
 package com.nexus.webExtract.service;
 
 import com.nexus.webExtract.exception.WebPageFetchException;
+import com.nexus.common.net.PublicWebDnsResolver;
 import jakarta.annotation.PreDestroy;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.apache.hc.client5.http.config.ConnectionConfig;
@@ -30,7 +31,7 @@ public class WebPageFetcher {
     public WebPageFetcher(WebExtractUrlPolicy policy) {
         this.policy = policy;
         var connectionManager = PoolingHttpClientConnectionManagerBuilder.create()
-                .setDnsResolver(new PublicWebDnsResolver(policy))
+                .setDnsResolver(new PublicWebDnsResolver(policy::isAllowedHost))
                 .setDefaultConnectionConfig(ConnectionConfig.custom()
                         .setConnectTimeout(Timeout.ofSeconds(3)).build())
                 .setMaxConnTotal(16)

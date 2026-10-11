@@ -2,15 +2,16 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, ArrowRight, DataAnalysis, Document, DocumentCopy, Link } from '@element-plus/icons-vue'
+import { ArrowDown, ArrowRight, Camera, DataAnalysis, Document, DocumentCopy, Link } from '@element-plus/icons-vue'
 import decoration from '@/assets/playground-decoration.png'
-import { callOpenApi, callWebExtract, isWebExtractResponse, type HashAlgorithm, type OpenApiEndpoint, type WebExtractResponse } from '@/api/openApi'
+import { callOpenApi, callWebExtract, callWebScreenshot, isWebExtractResponse, type HashAlgorithm, type OpenApiEndpoint, type WebExtractResponse } from '@/api/openApi'
 import { callShortLinkOpenApi, publicShortLinkUrl, type ShortLink, type ShortLinkOperation } from '@/api/shortLinks'
 import WebExtractPreview from './WebExtractPreview.vue'
+import ScreenshotPreview from './ScreenshotPreview.vue'
 import '@/assets/playground.css'
 
-type PlaygroundEndpoint = OpenApiEndpoint | 'shortlink' | 'web-extract'
-type Result = { status: number | null; durationMs: number | null; body: string; message: string }
+type PlaygroundEndpoint = OpenApiEndpoint | 'shortlink' | 'web-extract' | 'web-screenshot'
+type Result = { status: number | null; durationMs: number | null; body: string; message: string; invalidImage?: boolean }
 const allowedHosts = new Set(['www.douyin.com', 'v.douyin.com', 'www.xiaohongshu.com', 'weibo.com', 'm.weibo.cn'])
 const articleHosts = new Set(['blog.csdn.net', 'zhuanlan.zhihu.com'])
 const durations = [
@@ -25,7 +26,7 @@ const durations = [
 ] as const
 
 function queryEndpoint(value: unknown): PlaygroundEndpoint {
-  return value === 'uuid' || value === 'shortlink' || value === 'web-extract' ? value : 'hash'
+  return value === 'uuid' || value === 'shortlink' || value === 'web-extract' || value === 'web-screenshot' ? value : 'hash'
 }
 
 const route = useRoute()
@@ -53,6 +54,7 @@ const result = ref<Result | null>(null)
 const createdLink = ref<ShortLink | null>(null)
 const listedLinks = ref<ShortLink[] | null>(null)
 const extractedArticle = ref<WebExtractResponse | null>(null)
+const screenshot = ref<{ image: Blob; blockedResources: number | null; resourceLimitReached: boolean; cacheControl: string | null } | null>(null)
 const articleTab = ref('preview')
 let controller: AbortController | null = null
 let requestId = 0
@@ -60,6 +62,7 @@ let requestId = 0
 const docsTarget = computed(() => endpoint.value === 'shortlink' ? 'shortlink' : endpoint.value)
 const endpointPath = computed(() => {
   if (endpoint.value === 'web-extract') return 'POST /v1/web/extract'
+  if (endpoint.value === 'web-screenshot') return 'POST /v1/web/screenshot'
   if (endpoint.value === 'shortlink') {
     const method = { create: 'POST', list: 'GET', update: 'PUT', delete: 'DELETE' }[operation.value]
     return `${method} /v1/short-links${operation.value === 'delete' ? '/{id}' : ''}`
@@ -68,6 +71,13 @@ const endpointPath = computed(() => {
 })
 const sample = computed(() => {
   const host = 'http://localhost:8080'
+  if (endpoint.value === 'web-screenshot') {
+    const path = `${host}/v1/web/screenshot`
+    if (exampleTab.value === 'powershell') {
+      return `$apiKey = Read-Host '输入完整 API Key'\n$pageUrl = Read-Host '输入网页的完整 HTTPS URL'\n$body = @{ url = $pageUrl } | ConvertTo-Json -Compress\nInvoke-WebRequest -UseBasicParsing -Uri '${path}' \`\n  -Method Post -Headers @{ Authorization = "ApiKey $apiKey" } \`\n  -ContentType 'application/json; charset=utf-8' \`\n  -Body ([Text.Encoding]::UTF8.GetBytes($body)) -OutFile '.\\screenshot.png'\n# 仅在请求成功后打开 PNG；失败请查看错误正文和后端日志。`
+    }
+    return `curl --fail-with-body -X POST '${path}' \\\n  -H 'Authorization: ApiKey <完整密钥>' \\\n  -H 'Content-Type: application/json' \\\n  -d '{"url":"https://zhuanlan.zhihu.com/p/<文章ID>"}' \\\n  --output screenshot.png\n# 成功保存 PNG；失败响应仍为 JSON，请勿当作图片打开。`
+  }
   if (endpoint.value === 'web-extract') {
     const path = `${host}/v1/web/extract`
     if (exampleTab.value === 'powershell') {
@@ -113,6 +123,7 @@ function resetRequest() {
   createdLink.value = null
   listedLinks.value = null
   extractedArticle.value = null
+  screenshot.value = null
   articleTab.value = 'preview'
   formError.value = ''
 }
@@ -139,6 +150,12 @@ function resultMessage(status: number, code?: string): string {
   if (code === 'INVALID_WEB_EXTRACT_REQUEST') return '文章 URL 有误，仅支持知乎专栏和 CSDN 的 HTTPS 地址。'
   if (code === 'WEB_CONTENT_UNAVAILABLE') return '页面中没有可提取的文章正文。'
   if (code === 'WEB_PAGE_FETCH_FAILED') return '目标页面无法获取，可能发生跳转、拒绝访问或网络异常。'
+  if (code === 'INVALID_SCREENSHOT_REQUEST') return '网页 URL 有误，仅支持知乎专栏和 CSDN 的 HTTPS 地址。'
+  if (code === 'SCREENSHOT_PAGE_FETCH_FAILED') return '目标页面无法获取，可能被原站拒绝、发生跳转或 DNS/网络异常。'
+  if (code === 'SCREENSHOT_LIMIT_EXCEEDED') return '资源或 PNG 大小超过截图限制，请换一个较小的页面。'
+  if (code === 'SCREENSHOT_TIMEOUT') return '截图处理超时，请稍后重试或换一个较小的页面。'
+  if (code === 'SCREENSHOT_BUSY') return '截图服务正在处理其他请求，请稍后重试。'
+  if (code === 'SCREENSHOT_ENGINE_UNAVAILABLE') return '截图浏览器暂不可用，请检查后端 Chromium 安装及运行环境。'
   if (status === 400) return '请求参数有误，请核对输入内容与接口文档。'
   return `请求失败（HTTP ${status}），请稍后重试。`
 }
@@ -185,7 +202,7 @@ async function sendRequest() {
   formError.value = ''
   if (!key) { keyError.value = '请输入完整 API Key'; return }
   if (endpoint.value === 'hash' && byteCount.value > 4096) return
-  if (endpoint.value === 'web-extract') {
+  if (endpoint.value === 'web-extract' || endpoint.value === 'web-screenshot') {
     try {
       const target = articleUrl.value.trim()
       const url = new URL(target)
@@ -213,9 +230,24 @@ async function sendRequest() {
   createdLink.value = null
   listedLinks.value = null
   extractedArticle.value = null
+  screenshot.value = null
   articleTab.value = 'preview'
   const start = performance.now()
   try {
+    if (endpoint.value === 'web-screenshot') {
+      const response = await callWebScreenshot(key, articleUrl.value.trim(), controller.signal)
+      if (currentId !== requestId) return
+      if (response.png) screenshot.value = { image: response.png, blockedResources: response.blockedResources, resourceLimitReached: response.resourceLimitReached, cacheControl: response.cacheControl }
+      result.value = {
+        status: response.status, durationMs: Math.round(performance.now() - start),
+        body: response.body ? JSON.stringify(response.body, null, 2).replaceAll(key, '[已隐藏]') : '',
+        invalidImage: response.invalidImage,
+        message: response.png ? '截图已生成，以下是服务器返回的 PNG。'
+          : response.invalidImage ? '服务器没有返回有效的 PNG 图片，请检查后端响应。'
+            : resultMessage(response.status, response.body?.code),
+      }
+      return
+    }
     const response = endpoint.value === 'web-extract'
       ? await callWebExtract(key, articleUrl.value.trim(), controller.signal)
       : endpoint.value === 'shortlink'
@@ -263,13 +295,14 @@ onBeforeUnmount(() => { controller?.abort(); apiKey.value = '' })
 </script>
 
 <template>
-  <div class="playground-page">
+  <div class="playground-page" :class="{ 'is-screenshot': endpoint === 'web-screenshot' }">
     <header class="playground-intro"><div><p class="playground-eyebrow">NEXUS · OPEN API</p><h1>API 调试台</h1><p>快速调用开放 API，查看真实响应。</p></div><img class="playground-decoration" :src="decoration" alt="" aria-hidden="true" /></header>
     <div class="playground-endpoints" role="group" aria-label="选择开放 API">
       <el-button :class="{ 'is-active': endpoint === 'uuid' }" :aria-pressed="endpoint === 'uuid'" @click="selectEndpoint('uuid')"><el-icon aria-hidden="true"><DocumentCopy /></el-icon>生成 UUID</el-button>
       <el-button :class="{ 'is-active': endpoint === 'hash' }" :aria-pressed="endpoint === 'hash'" @click="selectEndpoint('hash')"><el-icon aria-hidden="true"><DataAnalysis /></el-icon>计算 Hash</el-button>
       <el-button :class="{ 'is-active': endpoint === 'shortlink' }" :aria-pressed="endpoint === 'shortlink'" @click="selectEndpoint('shortlink')"><el-icon aria-hidden="true"><Link /></el-icon>短链接</el-button>
       <el-button :class="{ 'is-active': endpoint === 'web-extract' }" :aria-pressed="endpoint === 'web-extract'" @click="selectEndpoint('web-extract')"><el-icon aria-hidden="true"><Document /></el-icon>网页正文提取</el-button>
+      <el-button :class="{ 'is-active': endpoint === 'web-screenshot' }" :aria-pressed="endpoint === 'web-screenshot'" @click="selectEndpoint('web-screenshot')"><el-icon aria-hidden="true"><Camera /></el-icon>网页截图</el-button>
     </div>
     <el-scrollbar v-if="endpoint === 'shortlink'" class="playground-operations"><div class="playground-operations-inner" role="group" aria-label="短链接操作">
       <el-button v-for="item in ([['create', '创建短链'], ['list', '查询列表'], ['update', '修改短链'], ['delete', '删除短链']] as const)" :key="item[0]" text :class="{ 'is-active': operation === item[0] }" :aria-pressed="operation === item[0]" @click="operation = item[0]">{{ item[1] }}</el-button>
@@ -288,16 +321,22 @@ onBeforeUnmount(() => { controller?.abort(); apiKey.value = '' })
             <div class="playground-field"><label for="playground-article-url">文章 URL</label><el-input id="playground-article-url" v-model="articleUrl" type="url" maxlength="2048" placeholder="https://zhuanlan.zhihu.com/p/…" aria-describedby="playground-article-help" @input="formError = ''" /><small id="playground-article-help">仅支持 zhuanlan.zhihu.com 和 blog.csdn.net 的 HTTPS 文章地址；不自动跟随跳转。</small></div>
             <p class="playground-extract-help">提取标题、正文和图片位置。图片由浏览器直接加载，原站限制可能导致图片无法显示。</p>
           </template>
+          <template v-else-if="endpoint === 'web-screenshot'">
+            <div class="playground-field"><label for="playground-screenshot-url">网页 URL</label><el-input id="playground-screenshot-url" v-model="articleUrl" type="url" maxlength="2048" placeholder="https://blog.csdn.net/…/article/details/…" aria-describedby="playground-screenshot-help" @input="formError = ''" /><small id="playground-screenshot-help">支持 CSDN 博客和知乎专栏的 HTTPS 地址；不自动跟随跳转。</small></div>
+            <div class="playground-screenshot-capabilities" aria-label="截图能力说明"><el-tag type="info">PNG</el-tag><el-tag type="info">1280 × 720</el-tag><el-tag type="info">关闭脚本</el-tag></div>
+            <p class="playground-extract-help">保留原站静态排版，截取当前视口，不保存截图历史；资源受限时可能返回部分截图。</p>
+          </template>
           <p v-else class="playground-uuid-help">此接口不需要请求体，每次发送都会生成一个新 UUID。</p>
           <p v-if="formError" class="playground-form-error" role="alert">{{ formError }}</p>
-          <el-button class="playground-submit" native-type="submit" type="primary" :loading="loading" :disabled="endpoint === 'hash' && byteCount > 4096">{{ loading ? '发送中…' : '发送请求' }}</el-button>
+          <el-button class="playground-submit" native-type="submit" type="primary" :loading="loading" :disabled="endpoint === 'hash' && byteCount > 4096">{{ loading ? '发送中…' : endpoint === 'web-screenshot' ? '生成截图' : '发送请求' }}</el-button>
         </el-form>
       </section>
       <section class="playground-panel playground-response" aria-labelledby="playground-response-title" aria-live="polite"><div class="playground-panel-heading"><h2 id="playground-response-title">响应</h2><div v-if="result?.status !== null && result?.status !== undefined" class="playground-response-meta"><span class="playground-status" :class="{ 'is-error': result.status >= 400 }">{{ result.status }} {{ result.status >= 200 && result.status < 300 ? 'OK' : 'ERROR' }}</span><span v-if="result.durationMs !== null">{{ result.durationMs }} ms</span></div></div>
-        <p v-if="result" class="playground-result-message" :class="{ 'is-error': result.status === null || result.status >= 400 }">{{ result.message }}</p>
+        <p v-if="result" class="playground-result-message" :class="{ 'is-error': result.status === null || result.status >= 400 || result.invalidImage }">{{ result.message }}</p>
         <div v-if="createdLink" class="playground-created-link"><p class="playground-eyebrow">SHORT LINK CREATED</p><h3>短链接已创建</h3><p>复制后即可分享；到期或禁用后将无法跳转。</p><code>{{ publicShortLinkUrl(createdLink.shortCode) }}</code><div class="playground-created-actions"><el-button type="primary" @click="copyShortUrl(createdLink.shortCode)">复制短地址</el-button><RouterLink :to="{ name: 'short-links', query: { apiKeyId: createdLink.apiKeyId } }">管理这把 Key 的短链 <el-icon aria-hidden="true"><ArrowRight /></el-icon></RouterLink></div></div>
         <div v-if="listedLinks" class="playground-link-list"><h3>这把 Key 的短链接</h3><p v-if="listedLinks.length === 0" class="playground-list-empty">这把 Key 还没有短链接。</p><div v-for="link in listedLinks" :key="link.id" class="playground-link-item"><strong>{{ link.name }}</strong><small>ID {{ link.id }} · {{ link.status === 1 ? '已禁用' : new Date(link.expiresAt).getTime() <= Date.now() ? '已到期' : '自身启用' }} · 到期 {{ new Date(link.expiresAt).toLocaleString('zh-CN') }}</small><a :href="publicShortLinkUrl(link.shortCode)" target="_blank" rel="noopener noreferrer">{{ publicShortLinkUrl(link.shortCode) }}</a><div class="playground-link-actions"><el-button size="small" @click="copyShortUrl(link.shortCode)">复制短地址</el-button><a :href="publicShortLinkUrl(link.shortCode)" target="_blank" rel="noopener noreferrer">打开短地址 <el-icon aria-hidden="true"><ArrowRight /></el-icon></a></div></div></div>
-        <div v-if="extractedArticle" class="playground-extracted-result">
+        <ScreenshotPreview v-if="screenshot" :image="screenshot.image" :blocked-resources="screenshot.blockedResources" :resource-limit-reached="screenshot.resourceLimitReached" :cache-control="screenshot.cacheControl" />
+        <div v-else-if="extractedArticle" class="playground-extracted-result">
           <h3 class="playground-article-title">{{ extractedArticle.title || '未提供标题' }}</h3>
           <el-tabs v-model="articleTab" class="playground-article-tabs" aria-label="提取结果格式">
             <el-tab-pane label="正文预览" name="preview" lazy><el-scrollbar max-height="480px" class="playground-preview-scroll"><WebExtractPreview :html="extractedArticle.contentHtml" /></el-scrollbar></el-tab-pane>
@@ -305,7 +344,7 @@ onBeforeUnmount(() => { controller?.abort(); apiKey.value = '' })
             <el-tab-pane label="JSON" name="json" lazy><div class="playground-code"><span>JSON</span><el-scrollbar max-height="480px"><pre><code>{{ result?.body }}</code></pre></el-scrollbar></div></el-tab-pane>
           </el-tabs>
         </div>
-        <div v-else-if="result?.body" class="playground-code"><span>JSON</span><el-scrollbar max-height="480px"><pre><code>{{ result.body }}</code></pre></el-scrollbar></div><div v-else class="playground-response-empty"><p v-if="loading">正在等待服务器响应…</p><p v-else-if="!result">填写 API Key 并发送请求后，结果会显示在这里。</p><p v-else>本次请求没有可显示的 JSON 响应。</p></div>
+        <div v-else-if="result?.body" class="playground-code"><span>JSON</span><el-scrollbar max-height="480px"><pre><code>{{ result.body }}</code></pre></el-scrollbar></div><div v-else class="playground-response-empty"><p v-if="loading">{{ endpoint === 'web-screenshot' ? '正在生成截图…' : '正在等待服务器响应…' }}</p><p v-else-if="!result">填写 API Key 并发送请求后，结果会显示在这里。</p><p v-else>{{ endpoint === 'web-screenshot' ? '本次请求没有可显示的 PNG 图片。' : '本次请求没有可显示的 JSON 响应。' }}</p></div>
       </section>
     </div>
     <section class="playground-panel playground-examples" aria-labelledby="playground-example-title"><div class="playground-example-heading"><el-button text class="playground-example-toggle" :aria-expanded="examplesOpen" aria-controls="playground-example-content" @click="examplesOpen = !examplesOpen"><h2 id="playground-example-title">请求示例</h2><el-icon aria-hidden="true" :class="{ 'is-open': examplesOpen }"><ArrowDown /></el-icon></el-button><RouterLink :to="{ name: 'docs-article', params: { slug: docsTarget } }">查看接口文档 <el-icon aria-hidden="true"><ArrowRight /></el-icon></RouterLink></div><div v-if="examplesOpen" id="playground-example-content"><div class="playground-example-tabs" role="group" aria-label="示例命令格式"><el-button :class="{ 'is-active': exampleTab === 'curl' }" :aria-pressed="exampleTab === 'curl'" @click="exampleTab = 'curl'">curl</el-button><el-button :class="{ 'is-active': exampleTab === 'powershell' }" :aria-pressed="exampleTab === 'powershell'" @click="exampleTab = 'powershell'">PowerShell</el-button></div><p class="playground-example-note">示例始终使用占位密钥，不会包含你在上方输入的 API Key。本地后端默认端口为 8080。</p><div class="playground-code playground-example-code"><el-button @click="copyExample">复制示例</el-button><el-scrollbar max-height="480px"><pre><code>{{ sample }}</code></pre></el-scrollbar></div></div></section>

@@ -129,6 +129,32 @@ node scripts/accept-web-extract-real.mjs
 
 若出现 502，先检查本机 DNS 结果。代理的 Fake-IP 模式可能把目标解析到 `198.18.0.0/15`；该特殊地址段会被 SSRF 策略拒绝。应让允许的文章域名使用正常公网 DNS 结果，并重启后端以免复用 DNS 缓存，不应删除 IP 检查或扩大安全白名单。切换 `application-local.yml` 到 `nexus` 后也要重启后端；Key 必须由当前连接库中的应用创建。
 
+## 7. 静态网页截图
+
+第一版接口、Chromium 安装、PNG 保存命令与能力边界见 [静态网页截图](SCREENSHOT_API.md)。截图成功是图片字节，不能按 ApiResponse JSON 解析；失败仍返回 JSON。
+
+前端调试台已有第五个“网页截图”入口和第八篇教程 `/docs/web-screenshot`。`nexus-console/e2e/screenshot.spec.ts` 的9个浏览器场景验证机器ApiKey与无Cookie、PNG字节下载、放大、部分截图与资源计数、401/403/400/422/502/503/504 JSON、非法目标、PNG签名/大小/解码与HTML/SVG不执行、请求取消/过时结果、临时URL释放和窄屏教程入口。单独执行 `npm run test:e2e -- e2e/screenshot.spec.ts e2e/docs.spec.ts`，或按第2节执行全套；这些使用模拟后端，不证明真实上游当前可用。
+
+2026-10-11 前端检查点：构建和E2E类型检查通过，定向12/12，全套75/75。首次定向10/12，修复代码Scrollbar遮挡复制按钮的真实层级问题；测试错误地强制点击弹窗背景，未实际切换API，改为正常切换与弹窗打开时浏览器后退验证卸载。ConsoleLayout与DocsLayout未改，本轮未重跑后端和真实页面联调；真实后端PowerShell证据仍见下文。
+
+2026-10-11 后续：按开发者要求，本地忽略配置已切到 `nexus_test` 和专用测试账号。新增 `nexus-server/scripts/diagnose-screenshot.ps1`，启动日志验证 schema/端口/PID 后用全新 Key 通过 PowerShell 读取 PNG 或失败 JSON；运行方法见 `SCREENSHOT_API.md`。真实 CSDN 在公网 DNS 环境复现 HTTP 422，诊断明确为 `REQUEST_COUNT observed=65 limit=64`，包括被拒绝的资源请求尝试。定向 26/26 与真实集成 3/3 通过，未放宽限制；尚无真实成功 PNG。
+
+随后开发者选择次数超限后返回部分截图：真实 PowerShell 再次请求同一文章，得到 HTTP 200、78984 字节 PNG、blocked=58、`X-Nexus-Resource-Limit-Reached: true`。观察102次资源请求（主页面1/图片86/样式15）、成功获取44、停止后续38；截图标题正文可读，部分头像图标缺失。当前定向回归42/42（含4个真实集成用例），不是全量。Application 693/Key 423 已软删除；账号/Usage 留在测试库，临时后端已停止。调用同一个诊断脚本即可复现当前行为。
+
+本地 `application-local.yml` 若已切回 `nexus` 与日常账号，数据库测试必须同时覆盖 URL、用户名和密码。仅覆盖 URL 会导致日常账号因没有 `nexus_test` 权限而初始化失败。可以在专用测试窗口设置以下环境变量，再按第 1 节生成本轮 JWT 密钥并运行 `mvn clean test`：
+
+```powershell
+$env:SPRING_DATASOURCE_URL = 'jdbc:mysql://127.0.0.1:3306/nexus_test?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8'
+$env:SPRING_DATASOURCE_USERNAME = 'nexus_test_user'
+$env:SPRING_DATASOURCE_PASSWORD = Read-Host '输入本机专用测试库账号的密码'
+$env:SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE = '2'
+$env:PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = '1'
+```
+
+不要扩大日常账号权限来让测试运行，也不要把测试库密码写进仓库或聊天。截图集成测试使用新生成的 Key；固定上游样本保留真实 Spring/HTTP/MySQL/Chromium，验证成功 PNG、认证拒绝和 Usage。真实站点的静态内容与 CDN 资源仍需另行手工验收。
+
+2026-10-11：截图后端编译、真实 Chromium 样本和非数据库场景通过后，首次全量运行因只覆盖库名、仍使用日常账号而出现 63 个上下文错误。确认本地文件保留专用测试账号后，仅在测试进程注入其设置及新的临时 JWT 密钥，`mvn clean test` 最终通过 229/229、零失败/错误/跳过；Flyway 实际 schema 为 `nexus_test`，未改日常配置或账号权限。测试覆盖静态 PNG、URL/MIME/重定向限制、真实 HTTP 请求取消、资源预算、并发许可、机器身份与 Usage，尚未验收真实知乎/CSDN 截图或新增前端界面。
+
 ## 这些测试各自证明什么
 
 | 层次 | 主要证明 | 不证明 |

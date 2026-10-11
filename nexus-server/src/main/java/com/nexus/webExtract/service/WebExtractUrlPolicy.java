@@ -3,8 +3,7 @@ package com.nexus.webExtract.service;
 import com.nexus.webExtract.exception.InvalidWebExtractRequestException;
 import org.springframework.stereotype.Component;
 
-import java.net.Inet4Address;
-import java.net.Inet6Address;
+import com.nexus.common.net.PublicIpAddresses;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -41,28 +40,6 @@ public class WebExtractUrlPolicy {
 
     /** 仅允许可在公网路由的地址；DNS 解析与连接必须使用同一次结果。 */
     public boolean isPublicAddress(InetAddress address) {
-        if (address.isAnyLocalAddress() || address.isLoopbackAddress() || address.isLinkLocalAddress()
-                || address.isSiteLocalAddress() || address.isMulticastAddress()) {
-            return false;
-        }
-        byte[] bytes = address.getAddress();
-        if (address instanceof Inet4Address) {
-            int a = Byte.toUnsignedInt(bytes[0]);
-            int b = Byte.toUnsignedInt(bytes[1]);
-            int c = Byte.toUnsignedInt(bytes[2]);
-            return a > 0 && a < 224
-                    && !(a == 100 && b >= 64 && b <= 127) // 共享地址空间
-                    && !(a == 192 && b == 0 && c == 0) // 特殊用途
-                    && !(a == 192 && b == 0 && c == 2) // 文档示例
-                    && !(a == 192 && b == 88 && c == 99) // 特殊用途
-                    && !(a == 198 && (b == 18 || b == 19)) // 基准测试网段
-                    && !(a == 198 && b == 51 && c == 100) // 文档示例
-                    && !(a == 203 && b == 0 && c == 113); // 文档示例
-        }
-        // IPv6 只接受全球单播，拒绝 ULA、链路本地、映射与文档示例地址。
-        return address instanceof Inet6Address
-                && (Byte.toUnsignedInt(bytes[0]) & 0xe0) == 0x20
-                && !(Byte.toUnsignedInt(bytes[0]) == 0x20 && Byte.toUnsignedInt(bytes[1]) == 0x01
-                && Byte.toUnsignedInt(bytes[2]) == 0x0d && Byte.toUnsignedInt(bytes[3]) == 0xb8);
+        return PublicIpAddresses.isPublic(address);
     }
 }

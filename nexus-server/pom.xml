@@ -105,6 +105,12 @@
             <artifactId>jsoup</artifactId>
             <version>1.23.2</version>
         </dependency>
+        <!-- 静态网页截图：Java 直接控制 Chromium，资源获取仍由安全 HTTP 客户端负责。 -->
+        <dependency>
+            <groupId>com.microsoft.playwright</groupId>
+            <artifactId>playwright</artifactId>
+            <version>1.63.0</version>
+        </dependency>
     </dependencies>
 
     <build>

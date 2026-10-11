@@ -4,7 +4,7 @@
 .playground-intro h1 { margin: 0 0 6px; font-family: Georgia, 'Songti SC', 'SimSun', serif; font-size: clamp(35px, 3.2vw, 48px); line-height: 1.2; }
 .playground-intro p:last-child { margin: 0; color: var(--nexus-muted); font-size: 15px; }
 .playground-decoration { display: none; }
-.playground-endpoints { display: flex; gap: 10px; margin: 0 0 20px; }
+.playground-endpoints { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 20px; }
 .playground-endpoints .el-button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-width: 180px; min-height: 46px; margin: 0; padding: 0 18px; border: 1px solid var(--nexus-line); border-radius: 9px; background: var(--nexus-surface); color: #576b64; font-size: 14px; font-weight: 650; }
 .playground-endpoints .el-button:hover { border-color: #86b7aa; }
 .playground-endpoints .el-button.is-active { border-color: var(--nexus-teal); background: #e6f2ef; color: #17685e; }
@@ -92,6 +92,21 @@
 .playground-example-code code { white-space: pre; overflow-wrap: normal; }
 .playground-example-code > .el-button { position: absolute; top: 9px; right: 10px; height: auto; padding: 5px 10px; border: 1px solid #668a80; border-radius: 5px; background: #2b4e47; color: #edf7f1; font-size: 12px; }
 .playground-example-code > .el-button:hover { background: #3b665b; }
+.playground-screenshot-capabilities { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.playground-screenshot-warning { margin-bottom: 16px; }
+.playground-screenshot-scroll { border: 1px solid var(--nexus-line); border-radius: 8px; background: #f4f7f2; }
+.playground-screenshot-image { display: block; width: 100%; aspect-ratio: 16 / 9; }
+.playground-screenshot-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 16px; color: var(--nexus-muted); font-size: 12px; }
+.playground-screenshot-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.playground-screenshot-actions .el-button { margin: 0; }
+.playground-screenshot-actions .el-icon { margin-right: 5px; }
+.playground-screenshot-note { margin: 12px 0 0; color: var(--nexus-muted); font-size: 12px; text-align: right; }
+.playground-screenshot-info .el-descriptions__label { width: 135px; }
+.playground-screenshot-info .el-descriptions__content { overflow-wrap: anywhere; }
+.playground-screenshot-dialog-scroll .el-image { display: block; width: 100%; }
+.playground-page.is-screenshot .playground-example-code { background: #edf4ef; color: #274e43; }
+.playground-page.is-screenshot .playground-example-code > .el-button { border-color: #b8cec4; background: white; color: #276b5c; }
+.playground-example-code > .el-button { z-index: 2; }
 @media (max-width: 960px) {
   .playground-workspace { grid-template-columns: minmax(0, 1fr); }
   .playground-uuid-help { min-height: 80px; }
@@ -112,6 +127,8 @@
   .playground-panel-heading code { font-size: 11px; }
   .playground-code pre { font-size: 12px; }
   .playground-example-heading a { font-size: 12px; }
+  .playground-screenshot-actions { margin-left: 0; width: 100%; }
+  .playground-screenshot-note { text-align: left; }
 }
 @media (prefers-reduced-motion: reduce) {
   .playground-example-toggle .el-icon { transition: none; }

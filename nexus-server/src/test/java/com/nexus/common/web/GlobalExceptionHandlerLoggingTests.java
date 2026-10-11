@@ -2,6 +2,7 @@ package com.nexus.common.web;
 
 import com.nexus.auth.exception.InvalidAccessTokenException;
 import com.nexus.shortlink.exception.ShortCodeExhaustedException;
+import com.nexus.screenshot.exception.ScreenshotException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.test.system.CapturedOutput;
@@ -51,6 +52,19 @@ class GlobalExceptionHandlerLoggingTests {
         return text.split(fragment, -1).length - 1;
     }
 
+    @Test
+    void screenshotLimitLogsSafeCountsOnceWithoutStackOrCredentials(CapturedOutput output) throws Exception {
+        mvc.perform(get("/api/test-logging/screenshot-limit?url=never-log-url")
+                        .header("Authorization", "ApiKey never-log-this-key"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("SCREENSHOT_LIMIT_EXCEEDED"));
+        String log = output.getOut();
+        assertEquals(1, occurrences(log, "请求被拒绝"));
+        assertTrue(log.contains("reason=REQUEST_COUNT, observed=65, limit=64"));
+        assertFalse(log.contains("never-log"));
+        assertFalse(log.contains("\tat com.nexus."));
+    }
+
     @RestController
     static class FailureController {
         @GetMapping("/api/test-logging/invalid-token")
@@ -61,6 +75,12 @@ class GlobalExceptionHandlerLoggingTests {
         @GetMapping("/api/test-logging/no-short-code")
         void noShortCode() {
             throw new ShortCodeExhaustedException();
+        }
+
+        @GetMapping("/api/test-logging/screenshot-limit")
+        void screenshotLimit() {
+            throw new ScreenshotException(ScreenshotException.Kind.LIMIT_EXCEEDED,
+                    ScreenshotException.DiagnosticReason.REQUEST_COUNT, 65, 64);
         }
     }
 }

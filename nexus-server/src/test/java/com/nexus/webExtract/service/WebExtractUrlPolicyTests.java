@@ -1,6 +1,7 @@
 package com.nexus.webExtract.service;
 
 import com.nexus.webExtract.exception.InvalidWebExtractRequestException;
+import com.nexus.common.net.PublicWebDnsResolver;
 import org.junit.jupiter.api.Test;
 
 import java.net.InetAddress;
@@ -38,13 +39,13 @@ class WebExtractUrlPolicyTests {
 
     @Test
     void dnsResolverRejectsUnlistedHostBeforeLookup() {
-        PublicWebDnsResolver resolver = new PublicWebDnsResolver(policy);
+        PublicWebDnsResolver resolver = new PublicWebDnsResolver(policy::isAllowedHost);
         assertThrows(UnknownHostException.class, () -> resolver.resolve("localhost"));
     }
 
     @Test
     void dnsResolverRejectsPrivateResultForAllowedHost() throws Exception {
-        PublicWebDnsResolver resolver = new PublicWebDnsResolver(policy,
+        PublicWebDnsResolver resolver = new PublicWebDnsResolver(policy::isAllowedHost,
                 host -> new InetAddress[]{InetAddress.getByName("127.0.0.1")});
         assertThrows(UnknownHostException.class, () -> resolver.resolve("blog.csdn.net"));
     }

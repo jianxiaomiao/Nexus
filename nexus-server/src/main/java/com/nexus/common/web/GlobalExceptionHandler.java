@@ -29,6 +29,7 @@ import com.nexus.usage.exception.InvalidUsagePaginationException;
 import com.nexus.webExtract.exception.InvalidWebExtractRequestException;
 import com.nexus.webExtract.exception.WebContentUnavailableException;
 import com.nexus.webExtract.exception.WebPageFetchException;
+import com.nexus.screenshot.exception.ScreenshotException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,6 +50,18 @@ import java.util.Map;
 public class GlobalExceptionHandler{
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    @ExceptionHandler(ScreenshotException.class)
+    public ResponseEntity<ApiResponse<Void>> handleScreenshot(ScreenshotException exception, HttpServletRequest request) {
+        HttpStatus status = switch (exception.kind()) {
+            case INVALID_REQUEST -> HttpStatus.BAD_REQUEST;
+            case PAGE_FETCH_FAILED -> HttpStatus.BAD_GATEWAY;
+            case TIMEOUT -> HttpStatus.GATEWAY_TIMEOUT;
+            case LIMIT_EXCEEDED -> HttpStatus.UNPROCESSABLE_ENTITY;
+            case BUSY, ENGINE_UNAVAILABLE -> HttpStatus.SERVICE_UNAVAILABLE;
+        };
+        return ResponseEntity.status(status).body(handled(request, exception, status, exception.code(), exception.getMessage(), null));
+    }
 
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     @ExceptionHandler(InvalidWebExtractRequestException.class)
@@ -278,15 +291,16 @@ public class GlobalExceptionHandler{
 
     private void logHandled(HttpServletRequest request, Exception exception, HttpStatus status, String code) {
         request.setAttribute(RequestFailureLoggingFilter.HANDLED_EXCEPTION_LOGGED, Boolean.TRUE);
+        Object diagnostic = exception instanceof ScreenshotException screenshot ? screenshot.diagnostic() : null;
         if (status.is5xxServerError()) {
-            log.error("请求处理失败 method={}, path={}, status={}, code={}, exception={}",
+            log.error("请求处理失败 method={}, path={}, status={}, code={}, exception={}, diagnostic={}",
                     request.getMethod(), request.getRequestURI(), status.value(), code,
-                    exception.getClass().getSimpleName(), exception);
+                    exception.getClass().getSimpleName(), diagnostic, exception);
         } else {
             // 不记录异常消息，避免将用户输入、SQL 或凭据写入日志。
-            log.info("请求被拒绝 method={}, path={}, status={}, code={}, exception={}",
+            log.info("请求被拒绝 method={}, path={}, status={}, code={}, exception={}, diagnostic={}",
                     request.getMethod(), request.getRequestURI(), status.value(), code,
-                    exception.getClass().getSimpleName());
+                    exception.getClass().getSimpleName(), diagnostic);
         }
     }
 }

@@ -59,3 +59,45 @@ export async function callWebExtract(apiKey: string, url: string, signal?: Abort
   })
   return { status: response.status, body: await response.json() as ApiResponse<unknown> }
 }
+
+export interface WebScreenshotResult extends OpenApiResult {
+  png: Blob | null
+  blockedResources: number | null
+  resourceLimitReached: boolean
+  invalidImage: boolean
+  cacheControl: string | null
+}
+
+export async function callWebScreenshot(apiKey: string, url: string, signal?: AbortSignal): Promise<WebScreenshotResult> {
+  const response = await fetch('/v1/web/screenshot', {
+    method: 'POST', cache: 'no-store', credentials: 'omit', redirect: 'error',
+    headers: { Authorization: `ApiKey ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }), signal,
+  })
+  const mediaType = response.headers.get('Content-Type')?.split(';')[0]?.trim().toLowerCase()
+  const rawBlocked = response.headers.get('X-Nexus-Blocked-Resources')
+  const blocked = rawBlocked !== null && /^\d+$/.test(rawBlocked) ? Number(rawBlocked) : null
+  const result: WebScreenshotResult = {
+    status: response.status, body: null, png: null,
+    blockedResources: blocked !== null && Number.isSafeInteger(blocked) ? blocked : null,
+    resourceLimitReached: response.headers.get('X-Nexus-Resource-Limit-Reached')?.toLowerCase() === 'true',
+    invalidImage: false,
+    cacheControl: response.headers.get('Cache-Control'),
+  }
+  if (response.ok && mediaType === 'image/png') {
+    const png = await response.blob()
+    const signature = new Uint8Array(await png.slice(0, 8).arrayBuffer())
+    const expected = [137, 80, 78, 71, 13, 10, 26, 10]
+    if (png.size <= 5 * 1024 * 1024 && signature.length === 8 && signature.every((value, index) => value === expected[index])) {
+      result.png = png
+    } else { result.invalidImage = true }
+  } else {
+    // 不将 HTML/SVG 或其他类型的成功响应当作可执行网页显示。
+    if (mediaType === 'application/json') {
+      try { result.body = await response.json() as ApiResponse<unknown> }
+      catch { /* 非法 JSON 仍保留真实 HTTP 状态，不伪装成网络失败。 */ }
+    }
+    result.invalidImage = response.ok
+  }
+  return result
+}

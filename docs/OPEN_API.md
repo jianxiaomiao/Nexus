@@ -99,6 +99,12 @@ Hash 请求体错误均返回 HTTP 400，使用同样的 `code`、`message`、`d
 
 认证失败仍按下方的 401/403 规则处理；Filter 拒绝时不会向目标网站发起请求。建议用固定 HTML 样本做自动化测试，真实知乎/CSDN 页面只作为手工验收样本。抓取遵守目标站公开访问条件，不绕过登录或限制。
 
+## 静态网页截图（第一版）
+
+`POST /v1/web/screenshot` 使用相同机器认证，接收 `{"url":"https://blog.csdn.net/<作者>/article/details/<文章ID>"}`。入口只接受知乎专栏和 CSDN 的精确 HTTPS 主机名，关闭脚本、固定 1280×720 视口，不跟随重定向、不保存历史。
+
+成功响应为 HTTP 200 的 `image/png` 二进制，**不包装成 JSON**；`Cache-Control: no-store`，`X-Nexus-Blocked-Resources` 报告被拒绝、获取失败或停止加载的次要资源数量。主 HTML 成功后资源请求次数触达上限，停止获取后续资源并返回部分 PNG，`X-Nexus-Resource-Limit-Reached: true`；false 不保证资源全部完整。错误继续使用 ApiResponse JSON：400 URL/请求错误、502 主页面获取失败、504 超时、422 大小超限、503 繁忙或浏览器不可用；认证错误仍为原有 401/403。详情、Chromium 安装与 PowerShell 示例见 [静态网页截图](SCREENSHOT_API.md)。
+
 ## 认证与错误
 
 请求到达 `/v1/*` 时，Filter 从 `Authorization` 提取完整密钥。认证器先用公开 ID 找记录，再验证 Secret 摘要，然后沿 Application 找到所有者 User，检查三层状态。成功后，仅把 `apiKeyId` 和 `applicationId` 放入本次请求，供 Controller 使用。

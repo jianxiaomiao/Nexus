@@ -2,6 +2,14 @@
 
 ## Current checkpoint
 
+2026-10-11：静态网页截图阶段进入中文提交收尾，具体提交/推送状态以 Git 记录为准。后端 `POST /v1/web/screenshot` 使用机器 ApiKey，关闭脚本、固定 1280×720、同步 PNG、不保存历史；主 HTML 成功后资源尝试超过64次停止次要资源获取并返回部分PNG，响应头说明额度及阻止数。DNS/IP 判断共享于 `common.net`，精确业务白名单独立；Java安全Fetcher获取后fulfill，浏览器离线与拒绝代理作为附加防护。字节/截止时间、单并发、Usage及安全诊断保留；公开部署仍需进程与出站网络隔离。
+
+前端第五个调试入口及第八篇 `/docs/web-screenshot` 已完成。成功PNG Blob经签名/大小检查，临时Object URL预览/放大/下载；错误JSON单独显示，过时请求丢弃，替换/切换/离开时释放地址。ApiKey不进入存储、日志或示例；教程只用占位ApiKey。Element Plus控件与Scrollbar沿用现有布局，ConsoleLayout/DocsLayout未改。独立请求控制实验在 `nexus-console/scripts/experiment-browser-routing.mjs` 与 `docs/experiments/BROWSER_REQUEST_ROUTING.md`，只演示本地样本，不是生产安全证明。
+
+验证：初始后端干净全量229/229；诊断与部分截图变更后定向42/42（含4个真实HTTP/MySQL/Chromium用例）。新Key的真实CSDN PowerShell验收得到200、78984字节PNG，102次资源尝试（HTML1/图片86/CSS15）、成功44、停止后续38、阻止总计58；标题正文可读，部分头像图标缺失。前端构建/类型检查通过，模拟响应Playwright75/75（新增9个截图场景），不是新的真实前后端联调。首轮定向的复制按钮遮挡与弹窗背景强制点击测试问题已修正。
+
+本地忽略配置按开发者要求仍为 `nexus_test` 与专用账号，日常设置保留为注释。临时测试服务已停止；诊断Application 685/686/693和对应Key 415/416/423已软删除，随机账号与Usage仍在可丢弃测试库，不应声称物理清空。下一步可用全新Key验收真实调试台PNG/下载；当前不扩大额度/域名白名单、不执行脚本，不添加Redis/MQ。
+
 2026-10-10：网页正文提取已接入前端。机器 `POST /v1/web/extract` 接收 `{url}`，返回字符串 `title`、`textContent`、`contentHtml`；只允许 HTTPS 的 `blog.csdn.net` 与 `zhuanlan.zhihu.com`。后端在实际 DNS 解析结果上限制公网地址，禁用自动重定向；Readability4J 识别正文，jsoup 净化 HTML，图片只保留 HTTPS URL、不会由后端下载。前端第七篇教程 `/docs/web-extract` 可跳转到调试台第四个入口；预览逐个重建允许的元素、只传递 HTTPS 图片地址与 alt，使用 Element Plus 图片错误提示及 Scrollbar，另有纯文本和 JSON 标签。后端提取定向测试 14/14 通过；前端构建、E2E 类型检查和完整 Playwright 66/66 通过。第一次定向运行因登录成功 toast 与字段错误都使用 alert role 而定位不唯一；限定字段 ID 后修正。第一次全套因窄屏两次坐标测量之间发生自动滚动而误判；改成同帧采样后重复 5/5、最终全套 66/66 均通过。
 
 真实后端使用新账号和新 Key：错误 Key 401、非白名单目标 400 已验证；Agent 首次真实 CSDN 验收返回 502，当时已核对 8080 的 Flyway schema 为 `nexus_test`，本机 DNS 把两站解析成 `198.18.0.41/42`，属于后端拒绝的特殊地址段。随后开发者关闭 VPN 并重启后端，确认真实文本提取成功；无需放宽 SSRF 策略。该成功是开发者反馈，本轮未重新运行 Agent 真实验收脚本，也未确认两站均成功或真实图片展示。`nexus-console/scripts/accept-web-extract-real.mjs` 保留作可重复验收；此前 Application 608 已软删除，随机测试账号仍在可丢弃的测试库。开发者可能已自行切回 `nexus`，后续自动测试须重新核实当前库。
@@ -30,8 +38,8 @@ Short links belong to the creating Key. `/v1/short-links` provides machine creat
 
 ## Next task and open checks
 
-- Before the next raw `mvn test` or real acceptance run, confirm the effective datasource and Flyway log point to `nexus_test`. The current local file has a commented-out old `nexus` URL and an active `nexus_test` URL. A test-classpath-only EnvironmentPostProcessor now rejects missing or wrong datasource/Flyway targets before a connection; explicit wrong-target testing confirmed no Hikari/Flyway initialization. Real `spring-boot:run` acceptance is not guarded by test classes, so verify its Flyway log separately.
-- Real text extraction now succeeds per developer feedback after disabling VPN and restarting the backend. The user has requested a Chinese-described GitHub commit of this feature. Next finish a small real playground check with an article containing images, then select the next business requirement. Existing build/type checks, mocked browser 66/66, and focused backend 14/14 remain the verification evidence; repeat only for a relevant change or newly observed problem. Recheck the datasource before any automatic acceptance run and never reuse or persist credentials.
+- Before the next raw `mvn test` or real acceptance run, confirm the effective datasource and Flyway log point to `nexus_test`. Local config was explicitly switched to `nexus_test` and its dedicated account during screenshot diagnosis; daily settings remain commented out. A test-classpath-only EnvironmentPostProcessor rejects missing or wrong datasource/Flyway targets before a connection; explicit wrong-target testing confirmed no Hikari/Flyway initialization. Real `spring-boot:run` acceptance is not guarded by test classes, so verify its Flyway log separately.
+- Web-extract was committed as `64a0e79`; screenshot backend/frontend are implemented and included in this submission checkpoint. The current frontend browser result is 75/75, using mocked responses; the real CSDN PNG evidence is the separate PowerShell backend acceptance. Next verify the real playground connection with a newly generated Key. Database tests must use both the dedicated `nexus_test` URL and its matching account; changing only the schema when later switching from daily settings is insufficient.
 - No additional infrastructure is justified by this checkpoint. Decide the next business feature from an explicit user problem; do not add Redis or RabbitMQ by default. The Filter → authenticator → request attribute → Controller explanation remains a learning checkpoint, not an implementation blocker.
 
 ## Relevant files
@@ -46,5 +54,6 @@ Short links belong to the creating Key. `/v1/short-links` provides machine creat
 - `nexus-console/scripts/accept-rotate-real.mjs`, `nexus-console/e2e/apiKeys.spec.ts`, `nexus-server/src/main/java/com/nexus/apikey/`
 - `nexus-server/src/main/java/com/nexus/webExtract/`, `nexus-console/src/views/WebExtractPreview.vue`, `nexus-console/src/docs/content/web-extract.md`, `nexus-console/e2e/webExtract.spec.ts`, `nexus-console/scripts/accept-web-extract-real.mjs`
 - `nexus-server/src/main/java/com/nexus/usage/`, `nexus-server/src/test/java/com/nexus/usage/`
+- `nexus-console/src/views/ScreenshotPreview.vue`, `nexus-console/e2e/screenshot.spec.ts`, `nexus-console/src/docs/content/web-screenshot.md`, `docs/SCREENSHOT_API.md`
 
 Inspect `git status` before further edits; preserve any future uncommitted work.
