@@ -83,6 +83,8 @@ GET /s/Ab7Kq2
 
 ## 常见错误
 
+只有机器端创建消耗 Application 额度：校验通过、创建执行前扣1次，之后短码重试耗尽或创建失败不退回。列表、更新、删除、JWT管理与公开跳转不消耗。额度耗尽时，创建返回429 `APPLICATION_QUOTA_EXHAUSTED`；查询及其他管理操作仍遵循原有认证和归属规则。详见 [调用配额](/docs/quota)。
+
 | HTTP | `code` | 含义 |
 | --- | --- | --- |
 | 400 | `VALIDATION_ERROR` / `INVALID_REQUEST_BODY` | 缺少字段、字段类型或 JSON 格式错误 |
@@ -91,4 +93,5 @@ GET /s/Ab7Kq2
 | 403 | `API_KEY_FORBIDDEN` | Key、Application 或账号被禁用，机器请求不可继续 |
 | 404 | `SHORT_LINK_NOT_FOUND` | 记录不存在、已删除、归属不符，或公开跳转当前不可用 |
 | 410 | `SHORT_LINK_EXPIRED` | 公开跳转的短链已过期 |
+| 429 | `APPLICATION_QUOTA_EXHAUSTED` | 创建时应用当前周期额度耗尽 |
 | 503 | `SHORT_CODE_UNAVAILABLE` | 生成短码多次冲突，请稍后重试 |

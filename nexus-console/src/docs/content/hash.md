@@ -71,6 +71,8 @@ Invoke-RestMethod -Uri 'http://localhost:8080/v1/utils/hash' `
 
 ## 错误说明
 
+通过参数、算法与UTF-8字节上限校验后，计算前消耗 Application 共享额度1次；上述校验失败不扣。额度耗尽返回 HTTP 429 `APPLICATION_QUOTA_EXHAUSTED`。详见 [调用配额](/docs/quota)。
+
 认证检查先于请求体校验：即使 JSON 有错误，若 Key 无效，也会先得到 HTTP 401 或 403。认证通过后，请求体错误按下表返回 HTTP 400：
 
 | `code` | 示例原因 | 处理方式 |

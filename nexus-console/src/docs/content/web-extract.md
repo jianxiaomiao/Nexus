@@ -85,11 +85,14 @@ $response.data | Format-List title, textContent, contentHtml
 
 ## 错误说明
 
+URL校验通过后、抓取网页前消耗 Application 额度1次；之后DNS/网络失败或无法提取正文仍计次。额度耗尽返回429 `APPLICATION_QUOTA_EXHAUSTED`，不会开始抓取。周期与恢复方式见 [调用配额](/docs/quota)。
+
 | HTTP 状态 | `code` | 原因与处理 |
 | --- | --- | --- |
 | 401 | `INVALID_API_KEY_CREDENTIAL` | Key 无效或已删除；检查完整 Key 和当前数据库 |
 | 403 | `API_KEY_FORBIDDEN` | Key、Application 或账号禁用；检查当前状态 |
 | 400 | `VALIDATION_ERROR` / `INVALID_WEB_EXTRACT_REQUEST` | URL 缺失、超长、格式错误或不在白名单内 |
+| 429 | `APPLICATION_QUOTA_EXHAUSTED` | 应用当前周期额度耗尽，不开始抓取 |
 | 422 | `WEB_CONTENT_UNAVAILABLE` | 页面可读取，但没有足够的可识别正文；改用公开文章页 |
 | 502 | `WEB_PAGE_FETCH_FAILED` | 网络失败、上游拒绝、跳转、非 HTML 或响应过大 |
 

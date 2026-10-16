@@ -160,7 +160,7 @@ test('调试台的查询、修改和删除都只携带机器 Key', async ({ page
 test('手机管理页按 Key 隔离列表，禁用的上层资源显示独立状态', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await installMockApi(page, {
-    applications: [{ id: 1, name: '示例应用', status: 1, createdAt: '2026-10-05T10:00:00', updatedAt: '2026-10-05T10:00:00' }],
+    applications: [{ id: 1, name: '示例应用', status: 1, createdAt: '2026-10-05T10:00:00', updatedAt: '2026-10-05T10:00:00', quota: { periodStart: '2026-10-05T10:00:00', periodEnd: '2026-11-04T10:00:00', quotaLimit: 1000, usedCount: 0, restCount: 1000 } }],
     keys: [sampleKey, { ...sampleKey, id: 12, name: '另一把 Key', keyPreview: 'nexus_••••9876' }],
     shortLinks: [
       { id: 1, apiKeyId: 11, name: '第一把 Key 的短链', originalUrl: 'https://weibo.com/1', shortCode: 'OnlyA1', status: 0, expiresAt: '2030-01-01T00:00:00Z', createdAt: '2026-10-05T10:00:00Z', updatedAt: '2026-10-05T10:00:00Z' },

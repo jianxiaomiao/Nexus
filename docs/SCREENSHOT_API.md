@@ -24,11 +24,15 @@ X-Nexus-Resource-Limit-Reached: false
 
 固定截图当前视口 1280×720，不是整页长图。`X-Nexus-Blocked-Resources` 是被拒绝、获取失败或停止加载的次要资源数量；大于零意味着图片、样式等可能缺失。`X-Nexus-Resource-Limit-Reached: true` 表示触达请求次数上限，后续资源已停止加载，本次为部分截图。false 只表示没有触发次数上限，不保证所有资源完整。主页面失败不会返回成功的空白截图；超时或大小超限仍会失败。
 
+URL 检查通过且取得本机截图槽位后，在启动渲染前同步消耗一次 Application 配额；额度提交后不再持有计数事务的锁。
+非法 URL、槽位繁忙和配额拒绝不扣；此后的抓取失败、超时及成功的部分 PNG 均计 1 次。任何结果都会释放槽位。
+
 所有错误仍使用统一 JSON 外层 `code`、`message`、`data`：
 
 | HTTP | code | 含义 |
 | --- | --- | --- |
 | 401 / 403 | 原有机器认证错误码 | 无效凭据 / 当前禁用 |
+| 429 | `APPLICATION_QUOTA_EXHAUSTED` | Application 当前 720 小时周期的共享调用额度耗尽，未开始渲染 |
 | 400 | `VALIDATION_ERROR` / `INVALID_REQUEST_BODY` / `INVALID_SCREENSHOT_REQUEST` | 请求体或 URL 不合要求 |
 | 502 | `SCREENSHOT_PAGE_FETCH_FAILED` | 主页面拒绝、跳转、网络错误或资源类型不符 |
 | 504 | `SCREENSHOT_TIMEOUT` | 资源获取或渲染预算超时 |

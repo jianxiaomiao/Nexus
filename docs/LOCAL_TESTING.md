@@ -53,6 +53,10 @@ mvn test
 
 ## 2. 前端构建与模拟浏览器回归
 
+2026-10-14 配额开发者文档检查点：构建、E2E类型检查通过；`npx playwright test e2e/docs.spec.ts e2e/scrollbars.spec.ts --workers=2` 定向9/9。验证九篇文档入口、配额正文链接保留内存会话、查询示例复制不发送API、手机阅读与原滚动/锚点。此次允许测试子进程正常启动和关闭，未出现清理挂起；未重跑完整前后端套件或真实接口。
+
+2026-10-14 配额页面检查点：构建、E2E类型检查通过，模拟响应完整回归82/82。配额定向可用 `npx playwright test e2e/quota.spec.ts`，覆盖列表概要、刷新失败/重试/加载、跨周期新值、更新不丢quota、零上限，以及1440px/390px和非北京时间设备。截图保存在忽略的 `test-results/quota-*/`。本轮没有写入数据库，也未完成真实页面联调。该次用例全部结束后，受限环境的测试服务清理挂起；核实命令及4173端口后仅终止本轮服务，测试最终正常退出并报告82 passed。未修改Playwright配置或跳过用例。
+
 在另一个 PowerShell 窗口运行：
 
 ```powershell
@@ -141,6 +145,20 @@ node scripts/accept-web-extract-real.mjs
 
 随后开发者选择次数超限后返回部分截图：真实 PowerShell 再次请求同一文章，得到 HTTP 200、78984 字节 PNG、blocked=58、`X-Nexus-Resource-Limit-Reached: true`。观察102次资源请求（主页面1/图片86/样式15）、成功获取44、停止后续38；截图标题正文可读，部分头像图标缺失。当前定向回归42/42（含4个真实集成用例），不是全量。Application 693/Key 423 已软删除；账号/Usage 留在测试库，临时后端已停止。调用同一个诊断脚本即可复现当前行为。
 
+## 8. Application 限流经 Nginx 的真实验收
+
+从仓库的 `nexus-server` 目录执行：
+
+```powershell
+.\scripts\accept-rate-limit-nginx.ps1
+```
+
+脚本拒绝占用中的端口，默认只使用回环地址的 Nginx `18080` 和后端 `18081`；可用 `-NginxPort 18082 -BackendPort 18083` 改为其他空闲隔离端口。它从被 Git 忽略的本地配置中选择 `nexus_test` 专用设置，只为自己启动的后端注入数据库凭据和一次性 JWT，不修改日常配置。脚本会打包并启动真实 Spring Boot、生成独立 Nginx 配置、创建随机账号/Application/两把 Key，验证认证、共享限流、排队放行、队列满/超时、Quota、JSON、PNG、代理状态和日志泄密，最后软删除 Application 并停止两个进程。随机账号仍留在可丢弃的 `nexus_test`；运行产物只保存在忽略的 `target/rate-limit-nginx-acceptance-*`。
+
+如只验证限流与 JSON，可加 `-SkipScreenshot`，避免依赖真实文章和公网。默认 PNG 验收使用公开 CSDN 样本，也可以用 `-ArticleUrl '<允许域名的公开 HTTPS 文章>'` 指定文章。脚本不会输出或持久化 JWT、完整 API Key 或密码。
+
+2026-10-16 首次生产链路验收使用隔离的 `18082 → 18083`：两把 Key 所属的同一 Application 首批 3 请求全部返回200、Quota为3；随后30个并发请求得到10个200、19个队列满429和1个等待超时429，Quota只增加10。真实截图经Nginx返回200 `image/png`、79075字节并只扣1次Quota；Nginx 20条429均与Java上游状态一致，日志未出现凭证。测试 Application 1151及两把Key已软删除，随机账号留在 `nexus_test`；所有18080–18083隔离端口均已关闭。
+
 本地 `application-local.yml` 若已切回 `nexus` 与日常账号，数据库测试必须同时覆盖 URL、用户名和密码。仅覆盖 URL 会导致日常账号因没有 `nexus_test` 权限而初始化失败。可以在专用测试窗口设置以下环境变量，再按第 1 节生成本轮 JWT 密钥并运行 `mvn clean test`：
 
 ```powershell
@@ -156,6 +174,8 @@ $env:PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = '1'
 2026-10-11：截图后端编译、真实 Chromium 样本和非数据库场景通过后，首次全量运行因只覆盖库名、仍使用日常账号而出现 63 个上下文错误。确认本地文件保留专用测试账号后，仅在测试进程注入其设置及新的临时 JWT 密钥，`mvn clean test` 最终通过 229/229、零失败/错误/跳过；Flyway 实际 schema 为 `nexus_test`，未改日常配置或账号权限。测试覆盖静态 PNG、URL/MIME/重定向限制、真实 HTTP 请求取消、资源预算、并发许可、机器身份与 Usage，尚未验收真实知乎/CSDN 截图或新增前端界面。
 
 ## 这些测试各自证明什么
+
+2026-10-16：Application 生产限流器、Servlet 异步 Filter 与失败日志接入后，先确认忽略配置的生效项仍为日常 `nexus`，再仅对本次 Maven 进程同时覆盖为保留的 `nexus_test` URL、专用账号和密码，连接池上限为 2，并生成一次性 JWT 密钥。Flyway 日志确认 schema 为 `nexus_test`、8 个迁移校验通过；`mvnw clean test` 最终通过 **382/382**，0 失败、0 错误、0 跳过，包含真实 MySQL、随机端口 HTTP、Quota/Usage 和 Chromium 截图回归。本地配置文件未修改；该结果不替代经本机 Nginx 的真实限流验收。
 
 | 层次 | 主要证明 | 不证明 |
 | --- | --- | --- |

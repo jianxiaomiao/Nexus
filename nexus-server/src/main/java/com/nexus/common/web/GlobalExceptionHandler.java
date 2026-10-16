@@ -30,6 +30,7 @@ import com.nexus.webExtract.exception.InvalidWebExtractRequestException;
 import com.nexus.webExtract.exception.WebContentUnavailableException;
 import com.nexus.webExtract.exception.WebPageFetchException;
 import com.nexus.screenshot.exception.ScreenshotException;
+import com.nexus.quota.exception.ApplicationQuotaExhaustedException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,6 +51,14 @@ import java.util.Map;
 public class GlobalExceptionHandler{
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    @ResponseStatus(HttpStatus.TOO_MANY_REQUESTS)
+    @ExceptionHandler(ApplicationQuotaExhaustedException.class)
+    public ApiResponse<Void> handleApplicationQuotaExhausted(ApplicationQuotaExhaustedException exception,
+                                                            HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.TOO_MANY_REQUESTS,
+                "APPLICATION_QUOTA_EXHAUSTED", exception.getMessage(), null);
+    }
 
     @ExceptionHandler(ScreenshotException.class)
     public ResponseEntity<ApiResponse<Void>> handleScreenshot(ScreenshotException exception, HttpServletRequest request) {

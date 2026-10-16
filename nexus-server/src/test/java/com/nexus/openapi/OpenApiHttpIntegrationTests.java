@@ -6,6 +6,8 @@ import com.nexus.apikey.dto.CreateApiKeyRequest;
 import com.nexus.apikey.entity.ApiKey;
 import com.nexus.apikey.mapper.ApiKeyMapper;
 import com.nexus.application.entity.Application;
+import com.nexus.quota.QuotaTestCleanup;
+import com.nexus.quota.mapper.ApplicationQuotaMapper;
 import com.nexus.application.mapper.ApplicationMapper;
 import com.nexus.auth.token.JwtTokenService;
 import com.nexus.openapi.dto.HashAlgorithm;
@@ -63,6 +65,8 @@ class OpenApiHttpIntegrationTests {
     @Autowired @Qualifier("usageExecutor") private Executor usageExecutor;
     @Autowired private ObjectMapper objectMapper;
 
+    @Autowired ApplicationQuotaMapper quotaMapper;
+
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private User owner;
     private Application application;
@@ -98,7 +102,10 @@ class OpenApiHttpIntegrationTests {
             UsageTestCleanup.deleteEventsAfterPendingWrites(usageExecutor, usageEventMapper, key.getId());
             apiKeyMapper.deleteById(key.getId());
         }
-        if (application != null && application.getId() != null) applicationMapper.deleteById(application.getId());
+        if (application != null && application.getId() != null) {
+            QuotaTestCleanup.deletePeriods(quotaMapper, application.getId());
+            applicationMapper.deleteById(application.getId());
+        }
         if (owner != null && owner.getId() != null) userMapper.deleteById(owner.getId());
     }
 

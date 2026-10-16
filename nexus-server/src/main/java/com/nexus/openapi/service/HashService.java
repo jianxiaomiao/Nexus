@@ -6,6 +6,8 @@ import com.nexus.openapi.exception.HashAlgorithmRequiredException;
 import com.nexus.openapi.exception.HashContentRequiredException;
 import com.nexus.openapi.exception.HashInputTooLargeException;
 import org.springframework.stereotype.Service;
+import com.nexus.auth.ApiKeyAuthenticator.ApiKeyIdentity;
+import com.nexus.quota.service.ApplicationQuotaService;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -15,8 +17,13 @@ import java.security.NoSuchAlgorithmException;
 public class HashService {
 
     private static final int MAX_UTF8_BYTE_SIZE = 4096;
+    private final ApplicationQuotaService quotaService;
 
-    public HashResponse computeHash(String content, HashAlgorithm algorithm) {
+    public HashService(ApplicationQuotaService quotaService) {
+        this.quotaService = quotaService;
+    }
+
+    public HashResponse computeHash(ApiKeyIdentity identity, String content, HashAlgorithm algorithm) {
         if (content == null) {
             throw new HashContentRequiredException();
         }
@@ -29,6 +36,7 @@ public class HashService {
             throw new HashInputTooLargeException(MAX_UTF8_BYTE_SIZE);
         }
 
+        quotaService.consumeOnce(identity);
         try {
             MessageDigest digest = MessageDigest.getInstance(algorithm.getJavaAlgorithmName());
             byte[] hashBytes = digest.digest(utf8Bytes);

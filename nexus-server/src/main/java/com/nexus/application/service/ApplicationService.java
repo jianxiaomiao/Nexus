@@ -16,6 +16,8 @@ import com.nexus.shortlink.entity.ShortLink;
 import com.nexus.shortlink.mapper.ShortLinkMapper;
 import com.nexus.common.web.ListPage;
 import com.nexus.common.web.ListPageParameters;
+import com.nexus.quota.dto.QueryQuotaResponse;
+import com.nexus.quota.service.ApplicationQuotaService;
 import lombok.AllArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -23,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.ArrayList;
 
 @Service
 @AllArgsConstructor
@@ -32,6 +35,7 @@ public class ApplicationService {
 
     private final ApiKeyMapper apiKeyMapper;
     private final ShortLinkMapper shortLinkMapper;
+    private final ApplicationQuotaService quotaService;
 
     public CreateApplicationResponse createApplication(Long userId, CreateApplicationRequest createApplicationRequest){
         //获取用户id
@@ -48,7 +52,8 @@ public class ApplicationService {
         return new CreateApplicationResponse(application.getId(),application.getName());
     }
 
-    public ListPage<ApplicationResponse> listMyApplications(Long userId, long current, long size, Long applicationId){
+    @Transactional(readOnly = true)
+    public ListPage<ApplicationListItemResponse> listMyApplications(Long userId, long current, long size, Long applicationId){
         ListPageParameters.validate(current, size);
         Page<Application> applications = applicationMapper.selectPage(new Page<>(current, size),
                 Wrappers.<Application>lambdaQuery()
@@ -58,12 +63,15 @@ public class ApplicationService {
                         .orderByDesc(Application::getCreatedAt)
                         .orderByDesc(Application::getId)
         );
-        return ListPage.map(applications, app -> new ApplicationResponse(
-                        app.getId(),
-                        app.getName(),
-                        app.getStatus(),
-                        app.getCreatedAt(),
-                        app.getUpdatedAt()));
+        List<Application> records = applications.getRecords();
+        List<QueryQuotaResponse> quotas = quotaService.queryCurrentQuotas(records);
+        List<ApplicationListItemResponse> responses = new ArrayList<>(records.size());
+        for (int index = 0; index < records.size(); index++) {
+            Application app = records.get(index);
+            responses.add(new ApplicationListItemResponse(app.getId(), app.getName(), app.getStatus(),
+                    app.getCreatedAt(), app.getUpdatedAt(), quotas.get(index)));
+        }
+        return new ListPage<>(applications.getTotal(), applications.getCurrent(), applications.getSize(), responses);
     }
 
     public ApplicationResponse updateMyApplication(Long userId, UpdateApplicationRequest updateApplicationRequest){

@@ -2,6 +2,7 @@ package com.nexus.openapi.controller;
 
 import com.nexus.common.web.GlobalExceptionHandler;
 import com.nexus.openapi.web.MachineIdentityResolver;
+import com.nexus.quota.service.ApplicationQuotaService;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -14,7 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class UuidOpenApiControllerIdentityTests {
     // 不注册认证 Filter，直接验证 Controller 自身不会把请求头当作已认证身份。
     private final MockMvc mvc = MockMvcBuilders.standaloneSetup(
-                    new UuidOpenApiController(new MachineIdentityResolver()))
+                    new UuidOpenApiController(new MachineIdentityResolver(), org.mockito.Mockito.mock(ApplicationQuotaService.class)))
             .setControllerAdvice(new GlobalExceptionHandler())
             .build();
 

@@ -22,8 +22,8 @@ public class ScreenshotOpenApiController {
     @UsageApi(ApiCode.WEB_SCREENSHOT)
     @PostMapping(value = "/screenshot", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<byte[]> capture(HttpServletRequest request, @Valid @RequestBody ScreenshotRequest body) {
-        identities.require(request);
-        var result = service.capture(body.url());
+        var identity = identities.require(request);
+        var result = service.capture(identity, body.url());
         return ResponseEntity.ok().contentType(MediaType.IMAGE_PNG)
                 .header("Cache-Control", "no-store").header("Content-Disposition", "inline; filename=\"screenshot.png\"")
                 .header("X-Nexus-Blocked-Resources", Integer.toString(result.blockedResources()))

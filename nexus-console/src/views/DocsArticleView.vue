@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onMounted, onUnmounted, ref, watch, type Ref } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import type { ScrollbarInstance } from 'element-plus'
 import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import { docs, findDoc } from '@/docs/catalog'
 import { renderMarkdown } from '@/docs/markdown'
 
 const route = useRoute()
+const router = useRouter()
 const articleBody = ref<HTMLElement | null>(null)
 const docsScrollbar = inject<Ref<ScrollbarInstance | null>>('docs-scrollbar')
 let disposed = false
@@ -48,6 +49,22 @@ async function copyCode(event: MouseEvent) {
   }
 }
 
+function handleArticleClick(event: MouseEvent) {
+  const link = (event.target as HTMLElement).closest<HTMLAnchorElement>('a[href]')
+  if (link && event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey
+      && (!link.target || link.target === '_self') && !link.hasAttribute('download')) {
+    const destination = new URL(link.href)
+    const match = /^\/docs\/([^/]+)$/.exec(destination.pathname)
+    if (destination.origin === window.location.origin && match && findDoc(match[1]!)) {
+      // Markdown 生成的 a 也走站内导航，保留内存中的登录会话。
+      event.preventDefault()
+      void router.push(destination.pathname + destination.search + destination.hash)
+      return
+    }
+  }
+  void copyCode(event)
+}
+
 watch(() => route.params.slug, async () => {
   await nextTick()
   docsScrollbar?.value?.setScrollTop(0)
@@ -79,7 +96,7 @@ onUnmounted(() => {
           <p>{{ doc.summary }}</p>
           <RouterLink v-if="doc.path" class="docs-try-link" :to="{ name: 'playground', query: { endpoint: doc.slug } }">在线试用此接口 <el-icon aria-hidden="true"><ArrowRight /></el-icon></RouterLink>
         </header>
-        <div ref="articleBody" class="docs-markdown" @click="copyCode">
+        <div ref="articleBody" class="docs-markdown" @click="handleArticleClick">
           <template v-for="(part, index) in rendered.parts" :key="index">
             <div v-if="part.kind === 'html'" v-html="part.html" />
             <el-scrollbar v-else-if="part.kind === 'table'" class="docs-table-scroll"><div v-html="part.html" /></el-scrollbar>

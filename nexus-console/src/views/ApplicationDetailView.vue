@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, CircleCheck, CircleClose, Delete, EditPen } from '@element-plus/icons-vue'
+import { ArrowLeft, CircleCheck, CircleClose, Delete, EditPen, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import brandSpark from '@/assets/icons/brand-spark.svg'
 import { deleteApplication, listApplications, updateApplication, type Application } from '@/api/applications'
 import { applicationErrorMessage } from '@/api/applicationErrors'
 import ApiKeysPanel from './ApiKeysPanel.vue'
+import { queryApplicationQuota, type ApplicationQuota } from '@/api/applicationQuota'
+import ApplicationQuotaDisplay from '@/components/ApplicationQuotaDisplay.vue'
+import { formatBeijingTime } from '@/utils/beijingTime'
 
 const route = useRoute()
 const router = useRouter()
@@ -14,6 +17,9 @@ const application = ref<Application | null>(null)
 const loading = ref(false)
 const errorMessage = ref('')
 const actionBusy = ref(false)
+const quota = ref<ApplicationQuota | null>(null)
+const quotaLoading = ref(false)
+const quotaError = ref('')
 const activeTab = computed(() => route.query.tab === 'keys' ? 'keys' : 'overview')
 let loadVersion = 0
 
@@ -21,6 +27,9 @@ async function load() {
   const version = ++loadVersion
   const id = Number(route.params.id)
   application.value = null
+  quota.value = null
+  quotaError.value = ''
+  quotaLoading.value = false
   if (!Number.isSafeInteger(id) || id <= 0) {
     errorMessage.value = '应用地址无效'
     loading.value = false
@@ -33,6 +42,7 @@ async function load() {
     const applications = await listApplications({ applicationId: id })
     if (version !== loadVersion) return
     application.value = applications.records[0] ?? null
+    quota.value = applications.records[0]?.quota ?? null
     if (!application.value) errorMessage.value = '这个应用不存在，或你没有访问权限'
   } catch (error) {
     if (version === loadVersion) errorMessage.value = applicationErrorMessage(error, '加载应用失败，请稍后重试')
@@ -42,8 +52,23 @@ async function load() {
 }
 
 function formatDate(value: string): string {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+  return formatBeijingTime(value)
+}
+
+async function refreshQuota() {
+  if (!application.value || quotaLoading.value) return
+  const version = loadVersion
+  const id = application.value.id
+  quotaLoading.value = true
+  quotaError.value = ''
+  try {
+    const result = await queryApplicationQuota(id)
+    if (version === loadVersion) quota.value = result
+  } catch (error) {
+    if (version === loadVersion) quotaError.value = applicationErrorMessage(error, '加载配额失败，请稍后重试')
+  } finally {
+    if (version === loadVersion) quotaLoading.value = false
+  }
 }
 
 async function rename() {
@@ -175,15 +200,27 @@ watch(() => route.params.id, () => { void load() })
         <RouterLink :to="{ name: 'application-detail', params: { id: application.id }, query: { tab: 'keys' } }" :class="{ 'is-current': activeTab === 'keys' }" :aria-current="activeTab === 'keys' ? 'page' : undefined">API Keys</RouterLink>
       </nav>
 
-      <div v-if="activeTab === 'overview'" class="detail-card">
-        <h2>应用信息</h2>
-        <dl>
-          <div><dt>应用名称</dt><dd>{{ application.name }}</dd></div>
-          <div><dt>状态</dt><dd>{{ application.status === 0 ? '运行中' : '已禁用' }}</dd></div>
-          <div><dt>创建时间</dt><dd>{{ formatDate(application.createdAt) }}</dd></div>
-          <div><dt>更新时间</dt><dd>{{ formatDate(application.updatedAt) }}</dd></div>
-        </dl>
-      </div>
+      <template v-if="activeTab === 'overview'">
+        <section class="detail-card quota-card" aria-labelledby="quota-title" :aria-busy="quotaLoading">
+          <div class="quota-heading">
+            <div><h2 id="quota-title">当前 30 天配额</h2><p>应用内所有 API Key 共用额度</p></div>
+            <el-button :icon="Refresh" :loading="quotaLoading" aria-label="刷新配额" @click="refreshQuota">刷新</el-button>
+          </div>
+          <el-skeleton v-if="quotaLoading" :rows="3" animated />
+          <div v-else-if="quotaError" class="quota-error" role="alert"><strong>暂时无法加载配额</strong><p>{{ quotaError }}</p><el-button @click="refreshQuota">重试配额查询</el-button></div>
+          <ApplicationQuotaDisplay v-else-if="quota" :quota="quota" />
+          <p class="quota-explanation">校验通过、实际执行前扣除额度；开始执行后即使失败，仍计入额度。</p>
+        </section>
+        <div class="detail-card">
+          <h2>应用信息</h2>
+          <dl>
+            <div><dt>应用名称</dt><dd>{{ application.name }}</dd></div>
+            <div><dt>状态</dt><dd>{{ application.status === 0 ? '运行中' : '已禁用' }}</dd></div>
+            <div><dt>创建时间</dt><dd>{{ formatDate(application.createdAt) }}</dd></div>
+            <div><dt>更新时间</dt><dd>{{ formatDate(application.updatedAt) }}</dd></div>
+          </dl>
+        </div>
+      </template>
       <ApiKeysPanel v-else :key="application.id" :application="application" />
     </template>
   </section>
@@ -214,6 +251,12 @@ h1 { overflow-wrap: anywhere; margin: 0; color: var(--nexus-ink); font-size: cla
 .status-pill.is-disabled { background: var(--nexus-warning-surface); color: var(--nexus-warning-ink); }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 .detail-card { padding: clamp(24px, 4vw, 40px); border: 1px solid var(--nexus-line); border-radius: 16px; background: var(--nexus-surface); box-shadow: var(--nexus-card-shadow); }
+.quota-card { margin-bottom: 22px; }
+.quota-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 24px; }
+.quota-heading h2 { margin-bottom: 7px; }
+.quota-heading p, .quota-explanation { margin: 0; color: var(--nexus-muted); font-size: 13px; line-height: 1.8; }
+.quota-explanation { margin-top: 18px; }
+.quota-error { color: #8a3c33; font-size: 14px; }
 h2 { margin: 0 0 24px; font-size: 20px; }
 dl { margin: 0; }
 dl > div { display: grid; grid-template-columns: minmax(150px, 32%) 1fr; gap: 24px; padding: 19px 0; border-top: 1px solid #e9eee7; }

@@ -11,11 +11,14 @@ import {
   listApplications,
   updateApplication,
   type Application,
+  type ApplicationListItem,
 } from '@/api/applications'
 import { applicationErrorMessage } from '@/api/applicationErrors'
 import ListPagination from '@/components/ListPagination.vue'
+import ApplicationQuotaDisplay from '@/components/ApplicationQuotaDisplay.vue'
+import { formatBeijingTime } from '@/utils/beijingTime'
 
-const applications = ref<Application[]>([])
+const applications = ref<ApplicationListItem[]>([])
 const current = ref(1)
 const size = ref(10)
 const total = ref(0)
@@ -147,8 +150,7 @@ async function remove(application: Application) {
 }
 
 function formatDate(value: string): string {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium' }).format(date)
+  return formatBeijingTime(value, true)
 }
 
 onMounted(() => { void load() })
@@ -194,6 +196,11 @@ onMounted(() => { void load() })
           <span class="status-dot" aria-hidden="true"></span>
           {{ application.status === 0 ? '运行中' : '已禁用' }}
         </span>
+        <section class="card-quota" :aria-label="`${application.name}的配额`">
+          <h3>当前 30 天配额</h3>
+          <p>应用内所有 API Key 共用额度</p>
+          <ApplicationQuotaDisplay :quota="application.quota" compact />
+        </section>
         <p class="card-date">创建时间 {{ formatDate(application.createdAt) }}</p>
         <div class="card-actions">
           <RouterLink class="details-link" :to="{ name: 'application-detail', params: { id: application.id } }">
@@ -256,6 +263,9 @@ h1 { margin: 0; color: var(--nexus-ink); font-family: Georgia, 'Times New Roman'
 .status-pill.is-active { background: var(--nexus-success-surface); color: var(--nexus-success-ink); }
 .status-pill.is-disabled { background: var(--nexus-warning-surface); color: var(--nexus-warning-ink); }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.card-quota { margin-top: 22px; padding-top: 20px; border-top: 1px solid #e8ece5; }
+.card-quota h3 { margin: 0; font-size: 15px; }
+.card-quota > p { margin: 7px 0 18px; color: var(--nexus-muted); font-size: 12px; line-height: 1.6; }
 .card-date { margin: auto 0 18px; padding-top: 20px; color: #7b8b82; font-size: 12px; }
 .card-actions { display: flex; align-items: center; justify-content: space-between; padding-top: 14px; border-top: 1px solid #e8ece5; }
 .card-actions :deep(.el-button) { color: var(--nexus-muted); }

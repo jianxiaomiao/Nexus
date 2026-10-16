@@ -5,6 +5,8 @@ import com.nexus.apikey.credential.GeneratedApiKey;
 import com.nexus.apikey.entity.ApiKey;
 import com.nexus.apikey.mapper.ApiKeyMapper;
 import com.nexus.application.entity.Application;
+import com.nexus.quota.QuotaTestCleanup;
+import com.nexus.quota.mapper.ApplicationQuotaMapper;
 import com.nexus.application.mapper.ApplicationMapper;
 import com.nexus.screenshot.service.ScreenshotResource;
 import com.nexus.screenshot.service.ScreenshotResourceFetcher;
@@ -54,6 +56,8 @@ class ScreenshotHttpIntegrationTests {
     private Application application;
     private ApiKey key;
     private GeneratedApiKey credential;
+    @Autowired ApplicationQuotaMapper quotaMapper;
+
     private final HttpClient http = HttpClient.newHttpClient();
 
     @BeforeEach void createFreshKey() {
@@ -67,7 +71,10 @@ class ScreenshotHttpIntegrationTests {
     }
     @AfterEach void cleanup() throws InterruptedException {
         if (key != null && key.getId() != null) { UsageTestCleanup.deleteEventsAfterPendingWrites(usageExecutor, events, key.getId()); keys.deleteById(key.getId()); }
-        if (application != null && application.getId() != null) applications.deleteById(application.getId());
+        if (application != null && application.getId() != null) {
+            QuotaTestCleanup.deletePeriods(quotaMapper, application.getId());
+            applications.deleteById(application.getId());
+        }
         if (owner != null && owner.getId() != null) users.deleteById(owner.getId());
     }
     @Test void realMachineAuthenticationReturnsPngAndRecordsUsage() throws Exception {

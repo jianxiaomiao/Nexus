@@ -1,12 +1,15 @@
 package com.nexus.common.web;
 
-import jakarta.servlet.http.HttpServletResponse;
 import com.nexus.auth.ApiKeyAuthenticator.ApiKeyAuthenticator;
 import com.nexus.openapi.web.MachineApiKeyFilter;
+import jakarta.servlet.AsyncEvent;
+import jakarta.servlet.AsyncListener;
+import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.mock.web.MockAsyncContext;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
@@ -108,15 +111,113 @@ class RequestFailureLoggingFilterTests {
     }
 
     @Test
+    void asynchronous429IsLoggedOnlyAfterCompletion(CapturedOutput output) throws Exception {
+        AsyncFixture fixture = startAsyncRequest();
+
+        assertFalse(output.getOut().contains("请求被拒绝"));
+
+        fixture.response().setStatus(429);
+        fixture.listener().onComplete(new AsyncEvent(fixture.asyncContext()));
+
+        assertEquals(1, occurrences(output.getOut(), "请求被拒绝"));
+        assertTrue(output.getOut().contains("status=429"));
+    }
+
+    @Test
+    void asynchronous503IsLoggedAsErrorOnlyAfterCompletion(CapturedOutput output)
+            throws Exception {
+        AsyncFixture fixture = startAsyncRequest();
+
+        assertFalse(output.getOut().contains("请求失败 method="));
+
+        fixture.response().setStatus(503);
+        fixture.listener().onComplete(new AsyncEvent(fixture.asyncContext()));
+
+        assertEquals(1, occurrences(output.getOut(), "请求失败 method="));
+        assertTrue(output.getOut().contains("status=503"));
+    }
+
+    @Test
+    void asynchronousErrorAndCompletionProduceOneExceptionLog(CapturedOutput output)
+            throws Exception {
+        AsyncFixture fixture = startAsyncRequest();
+        IOException failure = new IOException("asynchronous failure");
+
+        fixture.listener().onError(
+                new AsyncEvent(fixture.asyncContext(), failure));
+        fixture.response().setStatus(503);
+        fixture.listener().onComplete(
+                new AsyncEvent(fixture.asyncContext()));
+
+        assertEquals(1, occurrences(output.getOut(), "请求处理抛异常"));
+        assertEquals(0, occurrences(output.getOut(), "请求失败 method="));
+    }
+
+    @Test
+    void adviceLoggedAsynchronousFailureIsNotLoggedAgain(CapturedOutput output)
+            throws Exception {
+        AsyncFixture fixture = startAsyncRequest();
+        fixture.request().setAttribute(
+                RequestFailureLoggingFilter.HANDLED_EXCEPTION_LOGGED,
+                Boolean.TRUE);
+        fixture.response().setStatus(503);
+
+        fixture.listener().onComplete(
+                new AsyncEvent(fixture.asyncContext()));
+
+        assertFalse(output.getOut().contains("请求失败 method="));
+        assertFalse(output.getOut().contains("请求被拒绝"));
+    }
+
+    @Test
+    void listenerMovesToANewAsyncCycle() throws Exception {
+        AsyncFixture fixture = startAsyncRequest();
+        MockAsyncContext nextCycle = new MockAsyncContext(
+                fixture.request(), fixture.response());
+
+        fixture.listener().onStartAsync(
+                new AsyncEvent(nextCycle));
+
+        assertEquals(1, nextCycle.getListeners().size());
+        assertSame(fixture.listener(), nextCycle.getListeners().getFirst());
+    }
+
+    @Test
     void loggingFilterIsRegisteredForBothApiKinds() {
         var registration = new RequestFailureLoggingFilterConfig().requestFailureLoggingFilter();
 
         assertEquals(10, registration.getOrder());
         assertTrue(registration.getUrlPatterns().contains("/api/*"));
         assertTrue(registration.getUrlPatterns().contains("/v1/*"));
+        assertTrue(registration.isAsyncSupported());
+    }
+
+    private AsyncFixture startAsyncRequest() throws Exception {
+        MockHttpServletRequest request =
+                new MockHttpServletRequest("GET", "/v1/utils/uuid");
+        request.setAsyncSupported(true);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, (req, res) -> req.startAsync());
+
+        MockAsyncContext asyncContext =
+                (MockAsyncContext) request.getAsyncContext();
+        assertEquals(1, asyncContext.getListeners().size());
+        return new AsyncFixture(
+                request,
+                response,
+                asyncContext,
+                asyncContext.getListeners().getFirst());
     }
 
     private static int occurrences(String text, String fragment) {
         return text.split(fragment, -1).length - 1;
+    }
+
+    private record AsyncFixture(
+            MockHttpServletRequest request,
+            MockHttpServletResponse response,
+            MockAsyncContext asyncContext,
+            AsyncListener listener) {
     }
 }

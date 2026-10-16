@@ -3,6 +3,7 @@ package com.nexus.usage;
 import com.nexus.auth.ApiKeyAuthenticator.ApiKeyIdentity;
 import com.nexus.openapi.controller.UuidOpenApiController;
 import com.nexus.openapi.web.MachineIdentityResolver;
+import com.nexus.quota.service.ApplicationQuotaService;
 import com.nexus.usage.config.AsyncConfig;
 import com.nexus.usage.entity.UsageEvent;
 import com.nexus.usage.mapper.UsageEventMapper;
@@ -93,7 +94,7 @@ class UsageRecordingTests {
         ApiKeyIdentity identity = new ApiKeyIdentity(7L, 8L);
         request.setAttribute(MachineIdentityResolver.ATTRIBUTE_NAME, identity);
         HandlerMethod handler = new HandlerMethod(
-                new UuidOpenApiController(new MachineIdentityResolver()),
+                new UuidOpenApiController(new MachineIdentityResolver(), org.mockito.Mockito.mock(ApplicationQuotaService.class)),
                 UuidOpenApiController.class.getMethod("generateUuid", HttpServletRequest.class));
 
         assertTrue(interceptor.preHandle(request, response, handler));

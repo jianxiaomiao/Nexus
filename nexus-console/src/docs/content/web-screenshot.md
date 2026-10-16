@@ -93,11 +93,14 @@ X-Nexus-Resource-Limit-Reached: true
 
 ## 错误说明
 
+URL校验通过并取得截图执行名额后，开始执行前消耗 Application 额度1次。`SCREENSHOT_BUSY` 不扣；通过配额准入后引擎不可用、抓取/渲染失败或超时仍扣。额度耗尽返回429错误JSON，不是PNG。周期与计次说明见 [调用配额](/docs/quota)。
+
 | HTTP | code | 说明 |
 | --- | --- | --- |
 | 401 | `INVALID_API_KEY_CREDENTIAL` | Key 无效或已删除 |
 | 403 | `API_KEY_FORBIDDEN` | Key、应用或账号禁用 |
 | 400 | `VALIDATION_ERROR` / `INVALID_SCREENSHOT_REQUEST` | 请求体或 URL 不合要求 |
+| 429 | `APPLICATION_QUOTA_EXHAUSTED` | 应用当前720小时周期的额度耗尽 |
 | 422 | `SCREENSHOT_LIMIT_EXCEEDED` | 资源或 PNG 大小超限 |
 | 502 | `SCREENSHOT_PAGE_FETCH_FAILED` | 主页面获取失败、跳转或网络/DNS 异常 |
 | 503 | `SCREENSHOT_BUSY` / `SCREENSHOT_ENGINE_UNAVAILABLE` | 服务繁忙或 Chromium 不可用 |

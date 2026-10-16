@@ -1,5 +1,6 @@
 import { http, type ApiResponse } from './http'
 import type { ListPage, ListPageQuery } from './listPage'
+import type { ApplicationQuota } from './applicationQuota'
 
 export interface Application {
   id: number
@@ -7,6 +8,10 @@ export interface Application {
   status: number
   createdAt: string
   updatedAt: string
+}
+
+export interface ApplicationListItem extends Application {
+  quota: ApplicationQuota
 }
 
 export interface CreateApplicationRequest {
@@ -24,8 +29,8 @@ export interface UpdateApplicationRequest {
   status?: 0 | 1
 }
 
-export async function listApplications(query: ListPageQuery & { applicationId?: number } = {}): Promise<ListPage<Application>> {
-  const response = await http.get<ApiResponse<ListPage<Application>>>('/application', { params: query })
+export async function listApplications(query: ListPageQuery & { applicationId?: number } = {}): Promise<ListPage<ApplicationListItem>> {
+  const response = await http.get<ApiResponse<ListPage<ApplicationListItem>>>('/application', { params: query })
   return response.data.data
 }
 

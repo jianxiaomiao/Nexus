@@ -1,59 +1,43 @@
 # Nexus Session Handoff
 
-## Current checkpoint
+## 当前阶段
 
-2026-10-11：静态网页截图阶段进入中文提交收尾，具体提交/推送状态以 Git 记录为准。后端 `POST /v1/web/screenshot` 使用机器 ApiKey，关闭脚本、固定 1280×720、同步 PNG、不保存历史；主 HTML 成功后资源尝试超过64次停止次要资源获取并返回部分PNG，响应头说明额度及阻止数。DNS/IP 判断共享于 `common.net`，精确业务白名单独立；Java安全Fetcher获取后fulfill，浏览器离线与拒绝代理作为附加防护。字节/截止时间、单并发、Usage及安全诊断保留；公开部署仍需进程与出站网络隔离。
+2026-10-16，Application 级生产限流已完成当前实现与聚焦验证。限流覆盖全部 `/v1/*`，位于 API Key 认证之后、Quota 和业务之前；管理端 `/api/*` 不经过该限流器。Nginx 本机入口已经用于前期实验，但正式部署配置和“禁止外部直连 Java”仍未实施。
 
-前端第五个调试入口及第八篇 `/docs/web-screenshot` 已完成。成功PNG Blob经签名/大小检查，临时Object URL预览/放大/下载；错误JSON单独显示，过时请求丢弃，替换/切换/离开时释放地址。ApiKey不进入存储、日志或示例；教程只用占位ApiKey。Element Plus控件与Scrollbar沿用现有布局，ConsoleLayout/DocsLayout未改。独立请求控制实验在 `nexus-console/scripts/experiment-browser-routing.mjs` 与 `docs/experiments/BROWSER_REQUEST_ROUTING.md`，只演示本地样本，不是生产安全证明。
+总设计与 IP/Nginx 隔离实验记录见 `docs/RATE_LIMIT_AND_CLIENT_IP_EXPERIMENTS.md`，实验代码与证据位于 `tools/experiments/`。
 
-验证：初始后端干净全量229/229；诊断与部分截图变更后定向42/42（含4个真实HTTP/MySQL/Chromium用例）。新Key的真实CSDN PowerShell验收得到200、78984字节PNG，102次资源尝试（HTML1/图片86/CSS15）、成功44、停止后续38、阻止总计58；标题正文可读，部分头像图标缺失。前端构建/类型检查通过，模拟响应Playwright75/75（新增9个截图场景），不是新的真实前后端联调。首轮定向的复制按钮遮挡与弹窗背景强制点击测试问题已修正。
+## 已确定的业务语义
 
-本地忽略配置按开发者要求仍为 `nexus_test` 与专用账号，日常设置保留为注释。临时测试服务已停止；诊断Application 685/686/693和对应Key 415/416/423已软删除，随机账号与Usage仍在可丢弃测试库，不应声称物理清空。下一步可用全新Key验收真实调试台PNG/下载；当前不扩大额度/域名白名单、不执行脚本，不添加Redis/MQ。
+- 同一 Application 的所有 Key 和 `/v1/*` 接口共享每秒 10 次额度，平滑间隔 100ms，空闲不积攒突发额度。
+- 每 Application 最多 10 个等待请求、最长等待 1 秒；Application 队列满和等待超时返回各自的 JSON 429，并带 `Retry-After: 1`。恰好到达 1 秒期限仍可放行，超过才超时；队列为 FIFO。
+- 调用顺序为 `失败日志 → API Key 认证 → Application 限流 → Quota → 业务`。认证失败不进入限流；限流拒绝不扣 Quota；获得速率许可后发生的 Quota 或业务失败不退还速率时隙。
+- IP 只观察和记录，不作为本轮 Application 限流身份。可信客户端地址必须从实际连接对端开始，按明确的代理信任名单解析，不能无条件信任客户端传入的 XFF。
+- 生产资源边界为：每 Application 等待 10、全局等待 100、Application 状态 1000。空闲状态 TTL 10 秒，每 5 秒扫描一次；有等待者、仍有调度任务或尚在冷却的状态不能回收。
 
-2026-10-10：网页正文提取已接入前端。机器 `POST /v1/web/extract` 接收 `{url}`，返回字符串 `title`、`textContent`、`contentHtml`；只允许 HTTPS 的 `blog.csdn.net` 与 `zhuanlan.zhihu.com`。后端在实际 DNS 解析结果上限制公网地址，禁用自动重定向；Readability4J 识别正文，jsoup 净化 HTML，图片只保留 HTTPS URL、不会由后端下载。前端第七篇教程 `/docs/web-extract` 可跳转到调试台第四个入口；预览逐个重建允许的元素、只传递 HTTPS 图片地址与 alt，使用 Element Plus 图片错误提示及 Scrollbar，另有纯文本和 JSON 标签。后端提取定向测试 14/14 通过；前端构建、E2E 类型检查和完整 Playwright 66/66 通过。第一次定向运行因登录成功 toast 与字段错误都使用 alert role 而定位不唯一；限定字段 ID 后修正。第一次全套因窄屏两次坐标测量之间发生自动滚动而误判；改成同帧采样后重复 5/5、最终全套 66/66 均通过。
+## 生产实现
 
-真实后端使用新账号和新 Key：错误 Key 401、非白名单目标 400 已验证；Agent 首次真实 CSDN 验收返回 502，当时已核对 8080 的 Flyway schema 为 `nexus_test`，本机 DNS 把两站解析成 `198.18.0.41/42`，属于后端拒绝的特殊地址段。随后开发者关闭 VPN 并重启后端，确认真实文本提取成功；无需放宽 SSRF 策略。该成功是开发者反馈，本轮未重新运行 Agent 真实验收脚本，也未确认两站均成功或真实图片展示。`nexus-console/scripts/accept-web-extract-real.mjs` 保留作可重复验收；此前 Application 608 已软删除，随机测试账号仍在可丢弃的测试库。开发者可能已自行切回 `nexus`，后续自动测试须重新核实当前库。
+- `openapi.ratelimit.ApplicationRateLimiter` 管理每 Application 状态、FIFO 等待者、全局等待信号量、定时放行、超时、取消、关闭和空闲状态回收。专用单线程 `ScheduledExecutorService` 由 Spring Bean 生命周期启动和关闭。
+- `openapi.web.ApplicationRateFilter` 使用 Servlet `AsyncContext` 排队，不占用 Servlet 请求线程。结果通过请求属性带到 ASYNC 再分派，第二轮不会重复认证或再次申请限流许可。
+- Filter 注册顺序为失败日志 10、机器认证 20、Application 限流 30；三者均允许异步分派。
+- `RequestFailureLoggingFilter` 为同步与异步请求共用一次性日志标记。正常完成、异常、超时和多轮 ASYNC 分派最终只记录一次结果。
+- 429 与基础设施 503 使用稳定错误码；无效限流身份在 Filter 边界翻译为响应，不能逃逸成容器默认错误页。
 
-2026-10-10：API Key 原地轮换凭据已完成。管理端 `POST /api/apiKey/{apiKeyId}/rotate` 使用当前 `publicId` 作并发前置条件；轮换后 Key ID、状态、短链归属与 Usage 历史不变，旧完整 Key 立即失效，新完整 Key 只在成功响应中返回一次。Vue Key 详情页有轮换确认与一次性展示，连接异常提示先核对状态、不自动重试。后端全套在 `nexus_test` 上通过 189/189（含测试启动前数据库保护）；前端构建、类型检查与 60/60 Playwright 回归通过。首次前端全套曾因冲突测试在页面数据加载前修改 mock 状态而出现 1 次误判；增加“旧 Public ID 已显示”的前置等待后，该用例重复 5/5 及全套 60/60 均通过。`nexus-console/scripts/accept-rotate-real.mjs` 在真实 Chromium、Vite、Spring 与 `nexus_test` 上验收成功：旧 Key 401、新 Key 200，短链仍可跳转，Usage 历史连续；本次测试 Application 已软删除。临时前后端进程已停止。`docs/LOCAL_TESTING.md` 已补运行步骤。本地 `config/application-local.yml` 中旧 `nexus` URL 是注释，实际启用的是 `nexus_test`；不要只匹配文本中的第一个 URL 来判断测试库。
+## 验证状态
 
-Registration/Login, Application and API Key management, UUID/Hash machine APIs, and the first short-link backend are implemented. Management uses human Bearer JWT; `/v1/*` uses `Authorization: ApiKey <fullKey>`. The Vue console has Application/Key screens, Key-scoped short-link management, six Markdown-backed developer docs, and a playground for UUID/Hash and all four machine short-link operations. The developer confirmed real-backend UUID and Hash calls on 2026-10-06; do not repeat or persist the test credential.
+2026-10-16 聚焦回归通过 **103/103**：
 
-Usage recording marks authenticated machine controller methods with `@UsageApi` and asynchronously writes `usage_events` with bounded retries and one stable event UUID per request. V7 added the unique event ID to the local MySQL schema on 2026-10-08. A real HTTP/MySQL test verified one `utils.hash` event for HTTP 200 and one for HTTP 400. The management query checks Application/Key ownership and returns all-time, daily, and API-code aggregates for an `Asia/Shanghai` range; disabled parents remain readable. `GET /api/usage` now uses query parameters, with real JWT/HTTP/MySQL tests for date boundaries, zero days, invalid custom ranges, and disabled history. The API Key detail page has Key info, short-link entry, and Usage tabs. The full backend suite passed 165/165 using a fresh temporary JWT secret; the frontend build and mocked browser suite passed 44/44. On 2026-10-08, `nexus-console/scripts/accept-usage-real.mjs` passed against running Vite/Spring/MySQL with a newly created Key: UUID usage appeared in the browser, today/custom ranges worked, disabled history stayed visible while machine calls returned 403, and re-enable allowed calls again. The test Application was soft-deleted. Repeatable setup and commands are in `docs/LOCAL_TESTING.md`.
+- 限流器 53：放行、排队、精确期限、超时、取消、关闭、调度拒绝、并发竞态、状态回收与 Spring 生命周期；
+- 限流 Filter 28，身份异常 1；
+- 异步失败日志 12，全局异常日志 3；
+- 生产 HTTP 调用链 6：认证失败、立即放行、排队后放行、队列满、等待超时和三类基础设施 503。该组串起真实日志 Filter、认证 Filter、限流 Filter 与 UUID Controller，认证器、限流判定和 Quota 作为可控边界；排队用原生 Servlet ASYNC 再分派验证，确认不重复认证、限流或 Quota。
 
-Usage individual history is available at `GET /api/usage/events` with Bearer JWT and required Application/Key IDs. MyBatis-Plus pagination defaults to 10 and accepts size 1–100; the page displays `apiCode`, `httpStatusCode`, `durationMs`, `occurredAt`, with deterministic newest-first order. A real MySQL/HTTP test proves 11 records span two pages and disabled history remains readable. The prior real-browser acceptance script verifies summary and disabled history but not 11-record paging.
+2026-10-16 随后完成完整后端回归：先确认本地生效配置仍指向日常 `nexus`，再从忽略配置中读取保留的 `nexus_test` 专用账号，只对本次 Maven 进程同时覆盖 URL、用户名和密码，并设置连接池上限 2 与一次性 JWT 密钥。启动日志确认 Flyway 使用 `nexus_test`、8 个迁移校验通过；`mvnw clean test` 最终 **382/382** 通过，0 失败、0 错误、0 跳过，包含真实 MySQL、随机端口 HTTP 和 Chromium 截图用例。本地配置文件未修改。
 
-The existing Application, API Key, and short-link JWT management list queries now paginate (default 10, size 1–100) and return `{total,current,size,records}`. Their Vue lists paginate; detail views use optional ID filters on the same list queries so items beyond the first page remain directly addressable. The machine short-link list is unchanged. Real MySQL/HTTP tests prove 11 rows across pages and isolation; the full backend suite previously passed 167/167 with a fresh JWT test secret and 2-connection test pool. `docs/MANAGEMENT_PAGINATION.md` holds the new contract. Business-page native controls in Playground, Usage, and short-link management were replaced with Element Plus; the two layout components' navigation/overlay buttons remain exempt. Console, docs, auth, and nested business/document scroll regions now use Element Plus Scrollbar. The Console and Docs shells are viewport-height; their content regions scroll independently and reset on child path changes. Markdown rendering separates code/table fragments so they can use Scrollbar without losing copying or TOC anchors. `docs/ELEMENT_PLUS_AUDIT.md` records the UI choices and date-time semantics. Frontend build, E2E type check, and 56/56 mocked Playwright tests passed, including desktop/mobile scrolling, docs anchors, narrow date-popover bounds, and custom-expiry conversion. Real backend acceptance was not rerun for these UI-only changes.
+同日完成真实 Spring + MySQL + Nginx 生产链路验收。可重复脚本为 `nexus-server/scripts/accept-rate-limit-nginx.ps1`，本次使用隔离的 `18082 → 18083`。同一 Application 的两把 Key 首批3请求全部200、Quota为3；30并发得到10个200、19个队列满429、1个等待超时429，Quota只增加10。真实截图经Nginx返回200 `image/png`、79075字节并只扣1次Quota；Nginx的20条429与Java上游状态全部一致，日志未出现凭证。Application 1151及两把Key已软删除，随机账号留在可丢弃的 `nexus_test`；所有隔离端口均已关闭。
 
-The logging checkpoint uses a request-completion Filter for `/api/*` and `/v1/*`, with explicit registration order before machine authentication. `GlobalExceptionHandler` records handled MVC failures once and marks them so the outer Filter does not duplicate them. Existing asynchronous Usage terminal-failure logs now include the same event ID at queue rejection and final write failure; duplicate-key lookup failure is retained as a suppressed cause in one final error log. Spring Boot's Logback writes active `nexus.log` and daily dated archives under `../logger` when launched from `nexus-server`; `NEXUS_LOG_DIR` overrides the directory. Archives are retained 30 days. `docs/LOGGING.md` documents this. Eighteen focused non-database logging/filter/Usage tests passed; a full database suite was not run for this change.
+## 下一步
 
-Short links belong to the creating Key. `/v1/short-links` provides machine creation/list/update/delete, `/api/short-links` provides JWT management, and public `/s/{shortCode}` redirects without a credential. The API contract is in `docs/OPEN_API.md`; V5 and the short-link code/tests are under `nexus-server`. A full backend test run passed 154/154 with a newly generated temporary JWT secret. The frontend build, type checks, and mocked Playwright suite passed 39/39. On 2026-10-06 the developer reported completing short-link testing against the real backend; the individual lifecycle scenarios and results were not recorded.
+1. 限流生命周期学习检查、完整后端回归和本机 Nginx 生产路径验收均已完成。
+2. 下一阶段进入部署边界：限制 Java 后端入口，并分别验证外部直连失败、经 Nginx 成功和伪造转发头无效。Nginx 读取超时必须覆盖最长排队时间与接口执行时间，截图接口需要单独评估。
 
-## Decisions worth carrying forward
-
-- A valid API Key grants access to all `/v1/*` machine APIs; there are no Scopes. This keeps one credential model for tools and short links, at the cost of no per-API restriction. Key ownership of individual short links and independent Key disable/delete still apply.
-- A different Key in the same Application cannot view or change a link. JWT management checks the owning user and the selected Key. Full Key credentials are shown only at creation or successful rotation.
-- Public redirect uses 302 and `Cache-Control: no-store`; it checks link, Key, and Application state. Parent disablement does not rewrite link status; parent deletion soft-deletes links. Deleted short codes cannot be reused.
-- Creation accepts HTTPS and exact allowlisted hostnames only. This validates protocol and host, not destination content. Expiry is an absolute instant and equality means expired. Generated code collisions receive bounded retries.
-- Docs are login-gated; whether they should become public is undecided. The playground does not persist a Key.
-
-## Next task and open checks
-
-- Before the next raw `mvn test` or real acceptance run, confirm the effective datasource and Flyway log point to `nexus_test`. Local config was explicitly switched to `nexus_test` and its dedicated account during screenshot diagnosis; daily settings remain commented out. A test-classpath-only EnvironmentPostProcessor rejects missing or wrong datasource/Flyway targets before a connection; explicit wrong-target testing confirmed no Hikari/Flyway initialization. Real `spring-boot:run` acceptance is not guarded by test classes, so verify its Flyway log separately.
-- Web-extract was committed as `64a0e79`; screenshot backend/frontend are implemented and included in this submission checkpoint. The current frontend browser result is 75/75, using mocked responses; the real CSDN PNG evidence is the separate PowerShell backend acceptance. Next verify the real playground connection with a newly generated Key. Database tests must use both the dedicated `nexus_test` URL and its matching account; changing only the schema when later switching from daily settings is insufficient.
-- No additional infrastructure is justified by this checkpoint. Decide the next business feature from an explicit user problem; do not add Redis or RabbitMQ by default. The Filter → authenticator → request attribute → Controller explanation remains a learning checkpoint, not an implementation blocker.
-
-## Relevant files
-
-- `AGENTS.md`, `docs/LEARNING_ROADMAP.md`, `docs/OPEN_API.md`, `docs/ACCOUNT_STATUS_POLICY.md`
-- `nexus-server/src/main/java/com/nexus/shortlink/`, `nexus-server/src/main/java/com/nexus/openapi/`
-- `nexus-server/src/test/java/com/nexus/shortlink/`
-- `nexus-console/src/views/ApiPlaygroundView.vue`, `nexus-console/src/api/openApi.ts`, `nexus-console/e2e/playground.spec.ts`
-- `nexus-console/src/views/ShortLinksView.vue`, `nexus-console/src/api/shortLinks.ts`, `nexus-console/src/docs/content/shortlink.md`, `nexus-console/e2e/shortLinks.spec.ts`
-- `nexus-console/src/views/ApiKeyDetailView.vue`, `nexus-console/src/views/ApiKeyUsagePanel.vue`, `nexus-console/src/api/usage.ts`, `nexus-console/e2e/usage.spec.ts`
-- `nexus-console/scripts/accept-usage-real.mjs`, `docs/LOCAL_TESTING.md`
-- `nexus-console/scripts/accept-rotate-real.mjs`, `nexus-console/e2e/apiKeys.spec.ts`, `nexus-server/src/main/java/com/nexus/apikey/`
-- `nexus-server/src/main/java/com/nexus/webExtract/`, `nexus-console/src/views/WebExtractPreview.vue`, `nexus-console/src/docs/content/web-extract.md`, `nexus-console/e2e/webExtract.spec.ts`, `nexus-console/scripts/accept-web-extract-real.mjs`
-- `nexus-server/src/main/java/com/nexus/usage/`, `nexus-server/src/test/java/com/nexus/usage/`
-- `nexus-console/src/views/ScreenshotPreview.vue`, `nexus-console/e2e/screenshot.spec.ts`, `nexus-console/src/docs/content/web-screenshot.md`, `docs/SCREENSHOT_API.md`
-
-Inspect `git status` before further edits; preserve any future uncommitted work.
+工作区包含开发者和 Agent 的大量未提交改动；不得重置或覆盖。代码与测试是实现事实的第一来源。

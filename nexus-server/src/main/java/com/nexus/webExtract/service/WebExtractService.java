@@ -8,6 +8,8 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.safety.Safelist;
 import org.springframework.stereotype.Service;
+import com.nexus.auth.ApiKeyAuthenticator.ApiKeyIdentity;
+import com.nexus.quota.service.ApplicationQuotaService;
 
 import java.net.URI;
 
@@ -16,14 +18,17 @@ public class WebExtractService {
     private static final int MIN_TEXT_CHARS = 80;
     private final WebExtractUrlPolicy urlPolicy;
     private final WebPageFetcher pageFetcher;
+    private final ApplicationQuotaService quotaService;
 
-    public WebExtractService(WebExtractUrlPolicy urlPolicy, WebPageFetcher pageFetcher) {
+    public WebExtractService(WebExtractUrlPolicy urlPolicy, WebPageFetcher pageFetcher, ApplicationQuotaService quotaService) {
         this.urlPolicy = urlPolicy;
         this.pageFetcher = pageFetcher;
+        this.quotaService = quotaService;
     }
 
-    public WebExtractResponse extract(String rawUrl) {
+    public WebExtractResponse extract(ApiKeyIdentity identity, String rawUrl) {
         URI uri = urlPolicy.requireAllowedUrl(rawUrl);
+        quotaService.consumeOnce(identity);
         String html = pageFetcher.fetch(uri);
         Article article = new Readability4JExtended(uri.toString(), html).parse();
         if (article == null || article.getContent() == null || article.getTextContent() == null

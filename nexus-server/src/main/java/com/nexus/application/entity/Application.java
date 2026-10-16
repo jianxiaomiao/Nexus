@@ -21,6 +21,8 @@ public class Application {
 
     String name;
 
+    Integer quota;
+
     Integer status;
 
     Integer isDeleted;

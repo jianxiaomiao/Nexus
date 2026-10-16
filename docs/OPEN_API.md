@@ -8,6 +8,44 @@
 
 当前一枚有效 API Key 可以调用全部 `/v1/*` 机器接口，包括工具和短链接口，不按 Scope 分权。这样客户端只需管理一种机器凭证；代价是无法把某枚 Key 限制为“只用工具”或“只管短链”。不同 Key 仍分别拥有自己的短链，持有一枚 Key 不代表可以操作另一枚 Key 的资源；每枚 Key 也可以单独禁用或删除。
 
+### Application 30 天配额
+
+每个 Application 默认每期 1000 次，旗下所有 Key 共用；新建或轮换 Key 不重置额度。
+从 Application 创建时刻起每连续 720 小时为一期，不是自然月；到周期结束时刻进入下一期。
+UUID、Hash、短链创建、网页正文提取和截图各消耗 1 次；短链列表/更新/删除、JWT 管理接口及公开短链跳转不扣。
+认证或输入校验失败不扣。实际业务执行前同步扣减并提交；此后的抓取、渲染或短码生成失败也计次，截图部分 PNG 仍只计 1 次。
+截图槽位繁忙时尚未进入执行，不扣额度。
+
+耗尽返回 HTTP 429，例如：
+
+```json
+{"code":"APPLICATION_QUOTA_EXHAUSTED","message":"应用当前720小时周期的调用额度已耗尽","data":null}
+```
+
+拒绝时不执行实际业务，不新增消费次数；数据库故障与额度耗尽区分处理。
+Usage 记录与配额计数职责不同，Usage 仍保留原有成功及失败事件。实现理由见 [配额设计](QUOTA_DESIGN.md)。
+
+管理端配额查询为 `GET /api/application/{applicationId}/quota`，使用 Bearer JWT，检查应用归属；不消耗或创建配额记录。禁用应用仍可查，其他用户或已删除应用返回404。成功的 `data` 包含 `periodStart`、`periodEnd`、`quotaLimit`、`usedCount`、`restCount`；两个无偏移时间字符串按北京时间解释，周期结束时刻属于下一期。Application详情概览已接入，支持单独刷新。
+
+Application 分页列表 `GET /api/application?current=1&size=10` 的 `data` 仍为 `{total,current,size,records}`，每个记录保留 `id/name/status/createdAt/updatedAt`，并新增嵌套 `quota`，字段与上述详情查询相同。后端只批量查询本页所属用户应用的各自当前周期，再按原排序组装；无记录显示零用量，不写库。已有周期取额度快照，没有周期才取应用配置。查询故障不会伪装为零用量。创建和更新响应保持原字段；列表页面直接展示嵌套quota，不逐卡请求。
+
+开发者教程已接入控制台 `/docs/quota`，源文档见 [调用配额](../nexus-console/src/docs/content/quota.md)，包含各接口计次范围、失败阶段、查询示例和429排查；快速开始、认证、五篇接口参考及错误码文档均有对应说明。
+
+### Application 请求速率
+
+所有 `/v1/*` 在 API Key 认证成功后按 Application 限速。同一 Application 的所有 Key 和接口共享每秒 10 次额度，按 100ms 平滑放行；空闲不会积攒突发令牌。每个 Application 最多等待 10 个请求，最长等待 1 秒。认证失败不进入该队列；限流拒绝不扣 Application Quota。
+
+| HTTP 状态 | `code` | 含义 |
+| --- | --- | --- |
+| 429 | `APPLICATION_RATE_QUEUE_FULL` | 此 Application 已有 10 个请求等待；响应带 `Retry-After: 1`。 |
+| 429 | `APPLICATION_RATE_WAIT_TIMEOUT` | 请求等待许可超过 1 秒；响应带 `Retry-After: 1`。 |
+| 503 | `RATE_LIMIT_GLOBAL_QUEUE_FULL` | 当前所有 Application 的总等待量已达到服务保护上限。 |
+| 503 | `RATE_LIMIT_STATE_CAPACITY_REACHED` | 限流状态容量已满，当前没有可安全回收的空闲状态。 |
+| 503 | `RATE_LIMITER_UNAVAILABLE` | 限流调度器正在关闭或无法继续调度。 |
+| 503 | `RATE_LIMIT_WAIT_CANCELLED` | HTTP 异步等待已取消。 |
+
+客户端收到 429 或 503 后应遵守 `Retry-After`（若存在），并使用有上限的退避重试；不要立即并发重放。已经获得速率许可后，Quota 耗尽或业务执行失败不会退还本次速率时隙。
+
 ### 管理端轮换 API Key 凭据
 
 拥有该 Key 的用户可用 Bearer JWT 调用 `POST /api/apiKey/{apiKeyId}/rotate`，请求体为 `{"expectedPublicId":"<当前列表中的 publicId>"}`。不提交旧完整 Key。成功响应的 `data` 包含原 `id`、`applicationId`、`name`、新 `publicId`、`keyPreview`、完整 `apiKey`、原 `status` 和 `updatedAt`；完整 Key 只返回这一次，数据库只保存 Secret 摘要。Key ID 和状态不变，已有短链接与 Usage 历史仍归这枚 Key。

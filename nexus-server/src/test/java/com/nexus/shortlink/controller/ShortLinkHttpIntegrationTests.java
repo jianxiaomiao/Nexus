@@ -5,6 +5,8 @@ import com.nexus.apikey.credential.GeneratedApiKey;
 import com.nexus.apikey.entity.ApiKey;
 import com.nexus.apikey.mapper.ApiKeyMapper;
 import com.nexus.application.entity.Application;
+import com.nexus.quota.QuotaTestCleanup;
+import com.nexus.quota.mapper.ApplicationQuotaMapper;
 import com.nexus.application.mapper.ApplicationMapper;
 import com.nexus.auth.token.JwtTokenService;
 import com.nexus.shortlink.dto.CreateShortLinkRequest;
@@ -69,6 +71,8 @@ class ShortLinkHttpIntegrationTests {
     @Autowired @Qualifier("usageExecutor") Executor usageExecutor;
     @Autowired ObjectMapper objectMapper;
 
+    @Autowired ApplicationQuotaMapper quotaMapper;
+
     private final HttpClient client = HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.NEVER).build();
     private User owner;
@@ -107,7 +111,10 @@ class ShortLinkHttpIntegrationTests {
             UsageTestCleanup.deleteEventsAfterPendingWrites(usageExecutor, usageEventMapper, key.getId());
             apiKeyMapper.deleteById(key.getId());
         }
-        if (app != null && app.getId() != null) applicationMapper.deleteById(app.getId());
+        if (app != null && app.getId() != null) {
+            QuotaTestCleanup.deletePeriods(quotaMapper, app.getId());
+            applicationMapper.deleteById(app.getId());
+        }
         if (owner != null && owner.getId() != null) userMapper.deleteById(owner.getId());
     }
 

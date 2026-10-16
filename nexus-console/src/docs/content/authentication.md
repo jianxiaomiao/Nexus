@@ -36,3 +36,7 @@ Authorization: ApiKey <完整密钥>
 无效凭证统一返回 401，不会告诉调用方“Key 是否存在”或“是哪一段出错”。401 响应还带有 `WWW-Authenticate: ApiKey realm="nexus-openapi"`。
 
 禁用 Application 或账号不会改写子 Key 的状态；重新启用后，原本仍启用且未删除的 Key 可以继续使用。**删除**与**禁用**不是同一状态，删除后的 Key 不会因为重新启用父级而恢复。需要排查时，从 Key、Application、账号三个层级检查。
+
+## 认证通过后仍需检查额度
+
+有效且启用的 Key 仍可能遇到 HTTP 429 `APPLICATION_QUOTA_EXHAUSTED`。每个 Application 内所有 Key 共用当前30天额度，新建、轮换或重新启用 Key 不会重置计数。周期、计次范围与查看方式见 [调用配额](/docs/quota)。

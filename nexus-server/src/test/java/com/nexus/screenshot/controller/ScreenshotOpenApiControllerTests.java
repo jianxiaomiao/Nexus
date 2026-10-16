@@ -32,7 +32,7 @@ class ScreenshotOpenApiControllerTests {
     @Test
     void successIsUnwrappedPngWithNoStoreAndBlockedResourceCount() throws Exception {
         byte[] png = {(byte) 137, 80, 78, 71, 13, 10, 26, 10};
-        when(service.capture(URL)).thenReturn(new ScreenshotResult(png, 2));
+        when(service.capture(new ApiKeyIdentity(1L, 2L), URL)).thenReturn(new ScreenshotResult(png, 2));
         mvc.perform(post("/v1/web/screenshot").contentType(MediaType.APPLICATION_JSON).content("{\"url\":\"" + URL + "\"}")
                         .requestAttr(MachineIdentityResolver.ATTRIBUTE_NAME, new ApiKeyIdentity(1L, 2L)))
                 .andExpect(status().isOk()).andExpect(content().contentType(MediaType.IMAGE_PNG)).andExpect(content().bytes(png))
@@ -41,7 +41,7 @@ class ScreenshotOpenApiControllerTests {
     }
     @Test
     void partialPngIs200WithExplicitQuotaHeader() throws Exception {
-        when(service.capture(URL)).thenReturn(new ScreenshotResult(new byte[]{1, 2}, 7, true));
+        when(service.capture(new ApiKeyIdentity(1L, 2L), URL)).thenReturn(new ScreenshotResult(new byte[]{1, 2}, 7, true));
         mvc.perform(post("/v1/web/screenshot").contentType(MediaType.APPLICATION_JSON).content("{\"url\":\"" + URL + "\"}")
                         .requestAttr(MachineIdentityResolver.ATTRIBUTE_NAME, new ApiKeyIdentity(1L, 2L)))
                 .andExpect(status().isOk()).andExpect(content().contentType(MediaType.IMAGE_PNG))
@@ -61,7 +61,7 @@ class ScreenshotOpenApiControllerTests {
         int[] statuses = {400, 502, 504, 422, 503, 503};
         for (int index = 0; index < kinds.length; index++) {
             var error = new ScreenshotException(kinds[index]);
-            doThrow(error).when(service).capture(URL);
+            doThrow(error).when(service).capture(new ApiKeyIdentity(1L, 2L), URL);
             mvc.perform(post("/v1/web/screenshot").contentType(MediaType.APPLICATION_JSON).content("{\"url\":\"" + URL + "\"}")
                             .requestAttr(MachineIdentityResolver.ATTRIBUTE_NAME, new ApiKeyIdentity(1L, 2L)))
                     .andExpect(status().is(statuses[index])).andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))

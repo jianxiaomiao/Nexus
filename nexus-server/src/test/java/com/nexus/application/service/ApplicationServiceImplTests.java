@@ -5,6 +5,9 @@ import com.nexus.apikey.mapper.ApiKeyMapper;
 import com.nexus.application.dto.CreateApplicationRequest;
 import com.nexus.application.dto.CreateApplicationResponse;
 import com.nexus.application.dto.ApplicationResponse;
+import com.nexus.application.dto.ApplicationListItemResponse;
+import com.nexus.quota.dto.QueryQuotaResponse;
+import com.nexus.quota.service.ApplicationQuotaService;
 import com.nexus.application.dto.UpdateApplicationRequest;
 import com.nexus.application.entity.Application;
 import com.nexus.application.exception.ApplicationNameAlreadyExistsException;
@@ -57,6 +60,9 @@ class ApplicationServiceImplTests {
     @Mock
     private ShortLinkMapper shortLinkMapper;
 
+    @Mock
+    private ApplicationQuotaService quotaService;
+
     private ApplicationService applicationService;
 
     @BeforeAll
@@ -79,7 +85,7 @@ class ApplicationServiceImplTests {
 
     @BeforeEach
     void setUp() {
-        applicationService = new ApplicationService(applicationMapper, apiKeyMapper, shortLinkMapper);
+        applicationService = new ApplicationService(applicationMapper, apiKeyMapper, shortLinkMapper, quotaService);
     }
 
     @Test
@@ -155,13 +161,17 @@ class ApplicationServiceImplTests {
         page.setTotal(2);
         page.setRecords(List.of(enabled, disabled));
         when(applicationMapper.selectPage(any(), any())).thenReturn(page);
+        QueryQuotaResponse firstQuota = new QueryQuotaResponse(createdAt, createdAt.plusHours(720), 1000, 350, 650);
+        QueryQuotaResponse secondQuota = new QueryQuotaResponse(createdAt, createdAt.plusHours(720), 1000, 0, 1000);
+        when(quotaService.queryCurrentQuotas(List.of(enabled, disabled))).thenReturn(List.of(firstQuota, secondQuota));
 
         var responses = applicationService.listMyApplications(42L, 1, 10, null);
 
         assertEquals(List.of(
-                new ApplicationResponse(100L, "enabled-app", 0, createdAt, updatedAt),
-                new ApplicationResponse(101L, "disabled-app", 1, createdAt, updatedAt)
+                new ApplicationListItemResponse(100L, "enabled-app", 0, createdAt, updatedAt, firstQuota),
+                new ApplicationListItemResponse(101L, "disabled-app", 1, createdAt, updatedAt, secondQuota)
         ), responses.records());
+        verify(quotaService).queryCurrentQuotas(List.of(enabled, disabled));
         verify(applicationMapper).selectPage(any(), org.mockito.ArgumentMatchers.argThat(wrapper -> {
             if (!(wrapper instanceof LambdaQueryWrapper<?> query)) {
                 return false;

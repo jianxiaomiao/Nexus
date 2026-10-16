@@ -5,6 +5,8 @@ import com.nexus.apikey.entity.ApiKey;
 import com.nexus.apikey.mapper.ApiKeyMapper;
 import com.nexus.apikey.service.ApiKeyService;
 import com.nexus.application.entity.Application;
+import com.nexus.quota.QuotaTestCleanup;
+import com.nexus.quota.mapper.ApplicationQuotaMapper;
 import com.nexus.application.mapper.ApplicationMapper;
 import com.nexus.auth.ApiKeyAuthenticator.ApiKeyIdentity;
 import com.nexus.openapi.service.ShortLinkOpenApiService;
@@ -51,6 +53,7 @@ class ShortLinkFlowIntegrationTests {
     @Autowired ShortLinkService shortLinkService;
     @Autowired ApiKeyService apiKeyService;
     @Autowired ShortLinkMapper shortLinkMapper;
+    @Autowired ApplicationQuotaMapper quotaMapper;
     @Autowired ApiKeyMapper apiKeyMapper;
     @Autowired ApplicationMapper applicationMapper;
     @Autowired UserMapper userMapper;
@@ -103,6 +106,7 @@ class ShortLinkFlowIntegrationTests {
         } finally {
             if (shortLinkId != null) shortLinkMapper.deleteById(shortLinkId);
             apiKeyMapper.deleteById(key.getId());
+            QuotaTestCleanup.deletePeriods(quotaMapper, app.getId());
             applicationMapper.deleteById(app.getId());
             userMapper.deleteById(owner.getId());
         }

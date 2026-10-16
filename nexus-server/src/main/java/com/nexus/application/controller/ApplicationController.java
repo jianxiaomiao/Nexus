@@ -38,7 +38,7 @@ public class ApplicationController {
     }
 
     @GetMapping
-    public ApiResponse<ListPage<ApplicationResponse>> listMine(
+    public ApiResponse<ListPage<ApplicationListItemResponse>> listMine(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestParam(defaultValue = "1") long current,
             @RequestParam(defaultValue = "10") long size,

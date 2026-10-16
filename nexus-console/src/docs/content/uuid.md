@@ -59,4 +59,6 @@ HTTP 200 的 JSON 响应：
 
 ## 错误说明
 
+每次生成前消耗 Application 共享额度1次，额度耗尽返回 HTTP 429 `APPLICATION_QUOTA_EXHAUSTED`，本次不再生成 UUID。周期和恢复方式见 [调用配额](/docs/quota)。
+
 在执行业务前会先验证 API Key。缺失、格式错误或无效的 Key 返回 HTTP 401、`INVALID_API_KEY_CREDENTIAL`；Key 正确但 Key、应用或账号被禁用时返回 HTTP 403、`API_KEY_FORBIDDEN`。详情见左侧 **错误码与排查**。

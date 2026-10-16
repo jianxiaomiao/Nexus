@@ -26,8 +26,8 @@ public class WebExtractOpenApiController {
     @PostMapping("/extract")
     public ApiResponse<WebExtractResponse> extract(HttpServletRequest request, @Valid @RequestBody WebExtractRequest webExtractRequest) {
         // 显式要求机器身份，避免绕过 Filter 配置时误执行接口。
-        machineIdentityResolver.require(request);
-        WebExtractResponse result = webExtractService.extract(webExtractRequest.url());
+        var identity = machineIdentityResolver.require(request);
+        WebExtractResponse result = webExtractService.extract(identity, webExtractRequest.url());
 
         return new ApiResponse<>(
                 "SUCCESS",

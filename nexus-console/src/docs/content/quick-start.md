@@ -51,6 +51,12 @@ Invoke-RestMethod -Uri 'http://localhost:8080/v1/utils/uuid' `
 
 每次请求会生成新的 UUID，示例值不会固定。PowerShell 的 `Invoke-RestMethod` 会直接显示解析后的响应对象。
 
+## 4. 查看调用配额
+
+每个 Application 默认 1000 次 / 30 天，所有 Key 共用；每期从应用创建时刻起连续720小时。生成 UUID 会消耗1次，调试台调用也遵循同样规则。新建或轮换 Key 不会重置额度。
+
+打开 **应用详情 → 概览** 查看已用、剩余和恢复时间；调用后点击「刷新」核对变化。校验失败不扣，开始执行后的失败仍计次。详细范围见 [调用配额](/docs/quota)。
+
 ## 如果没有成功
 
 | 现象 | 先检查什么 |
@@ -58,5 +64,6 @@ Invoke-RestMethod -Uri 'http://localhost:8080/v1/utils/uuid' `
 | 无法连接 | 后端是否启动、端口是否正确；若在手机或另一台电脑请求，不要使用 `localhost` |
 | HTTP 401 | 是否用了完整 Key，以及 `Authorization: ApiKey <完整密钥>` 格式是否正确 |
 | HTTP 403 | Key、所属 Application 或账号是否处于禁用状态 |
+| HTTP 429，`APPLICATION_QUOTA_EXHAUSTED` | 应用当前周期额度已耗尽；到应用详情查看剩余和恢复时间，停止反复重试 |
 
 接着可以阅读左侧的 **API Key 与认证**、**生成 UUID**、**计算 Hash** 和 **短链接**。开放 API 的具体错误码也收录在 **错误码与排查**。

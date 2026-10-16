@@ -36,7 +36,7 @@ class WebExtractOpenApiControllerTests {
 
     @Test
     void authenticatedRequestReturnsTextAndHtml() throws Exception {
-        when(service.extract(URL)).thenReturn(new WebExtractResponse("标题", "正文", "<p>正文</p>"));
+        when(service.extract(new ApiKeyIdentity(1L, 2L), URL)).thenReturn(new WebExtractResponse("标题", "正文", "<p>正文</p>"));
         mvc.perform(post("/v1/web/extract")
                         .requestAttr(MachineIdentityResolver.ATTRIBUTE_NAME, new ApiKeyIdentity(1L, 2L))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -48,7 +48,7 @@ class WebExtractOpenApiControllerTests {
 
     @Test
     void upstreamFailureHasStableApiError() throws Exception {
-        when(service.extract(URL)).thenThrow(new WebPageFetchException("目标页面暂时无法访问"));
+        when(service.extract(new ApiKeyIdentity(1L, 2L), URL)).thenThrow(new WebPageFetchException("目标页面暂时无法访问"));
         mvc.perform(post("/v1/web/extract")
                         .requestAttr(MachineIdentityResolver.ATTRIBUTE_NAME, new ApiKeyIdentity(1L, 2L))
                         .contentType(MediaType.APPLICATION_JSON)

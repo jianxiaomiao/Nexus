@@ -18,10 +18,12 @@ import com.nexus.shortlink.exception.ShortLinkNotFoundException;
 import com.nexus.shortlink.mapper.ShortLinkMapper;
 import com.nexus.shortlink.service.ShortCodeGenerator;
 import com.nexus.shortlink.service.ShortLinkTargetPolicy;
-import lombok.RequiredArgsConstructor;
+import com.nexus.quota.service.ApplicationQuotaService;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -32,7 +34,6 @@ import java.util.List;
 
 /** /v1/* 机器端：身份由 MachineApiKeyFilter 提供，客户端不提交归属 ID。 */
 @Service
-@RequiredArgsConstructor
 public class ShortLinkOpenApiService {
     private static final int MAX_COLLISION_RETRIES = 3;
 
@@ -42,8 +43,23 @@ public class ShortLinkOpenApiService {
     private final ShortCodeGenerator shortCodeGenerator;
     private final ShortLinkTargetPolicy targetPolicy;
     private final Clock clock;
+    private final ApplicationQuotaService quotaService;
+    private final TransactionTemplate creationTransaction;
 
-    @Transactional
+    public ShortLinkOpenApiService(ShortLinkMapper shortLinkMapper, ApiKeyMapper apiKeyMapper,
+                                   ApplicationMapper applicationMapper, ShortCodeGenerator shortCodeGenerator,
+                                   ShortLinkTargetPolicy targetPolicy, Clock clock,
+                                   ApplicationQuotaService quotaService, PlatformTransactionManager transactionManager) {
+        this.shortLinkMapper = shortLinkMapper;
+        this.apiKeyMapper = apiKeyMapper;
+        this.applicationMapper = applicationMapper;
+        this.shortCodeGenerator = shortCodeGenerator;
+        this.targetPolicy = targetPolicy;
+        this.clock = clock;
+        this.quotaService = quotaService;
+        this.creationTransaction = new TransactionTemplate(transactionManager);
+    }
+
     public ShortLinkResponse create(ApiKeyIdentity identity, CreateShortLinkRequest request) {
         Long keyId = requireKeyId(identity);
         if (identity.applicationId() == null) {
@@ -60,6 +76,13 @@ public class ShortLinkOpenApiService {
             throw new InvalidShortLinkRequestException("到期时间必须晚于当前时间");
         }
 
+        // 免费输入检查结束；Quota 自己的短事务提交后，才开始短链写入事务。
+        quotaService.consumeOnce(identity);
+        return creationTransaction.execute(status -> createInTransaction(identity, keyId, name, request.originalUrl(), expiresAt));
+    }
+
+    private ShortLinkResponse createInTransaction(ApiKeyIdentity identity, Long keyId, String name,
+                                                  String originalUrl, Instant expiresAt) {
         // 与父级软删除串行化，固定 Application → Key 的加锁顺序。
         Application app = applicationMapper.selectOne(Wrappers.<Application>lambdaQuery()
                 .eq(Application::getId, identity.applicationId()).last("FOR UPDATE"));
@@ -76,12 +99,12 @@ public class ShortLinkOpenApiService {
             throw new ApiKeyForbiddenException();
         }
 
-        LocalDateTime createdAt = utc(now);
+        LocalDateTime createdAt = utc(clock.instant().truncatedTo(ChronoUnit.MILLIS));
         for (int attempt = 0; attempt <= MAX_COLLISION_RETRIES; attempt++) {
             ShortLink link = new ShortLink();
             link.setApiKeyId(keyId);
             link.setName(name);
-            link.setOriginalUrl(request.originalUrl());
+            link.setOriginalUrl(originalUrl);
             link.setShortCode(shortCodeGenerator.generate());
             link.setStatus(0);
             link.setIsDeleted(0);

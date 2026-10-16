@@ -23,9 +23,9 @@ public class HashOpenApiController {
     @PostMapping("/hash")
     public ApiResponse<HashResponse> generateHash(HttpServletRequest request, @Valid @RequestBody HashRequest hashRequest) {
         // 显式要求机器身份，避免绕过 Filter 配置时误执行接口。
-        machineIdentityResolver.require(request);
+        var identity = machineIdentityResolver.require(request);
         // 调用service计算hash
-        HashResponse result = hashService.computeHash(hashRequest.value(), hashRequest.algorithm());
+        HashResponse result = hashService.computeHash(identity, hashRequest.value(), hashRequest.algorithm());
 
         return new ApiResponse<HashResponse>(
                 "SUCCESS",

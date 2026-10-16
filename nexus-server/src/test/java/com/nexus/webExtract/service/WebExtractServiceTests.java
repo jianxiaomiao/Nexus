@@ -2,7 +2,10 @@ package com.nexus.webExtract.service;
 
 import com.nexus.webExtract.dto.WebExtractResponse;
 import com.nexus.webExtract.exception.WebContentUnavailableException;
+import com.nexus.auth.ApiKeyAuthenticator.ApiKeyIdentity;
+import com.nexus.quota.service.ApplicationQuotaService;
 import org.junit.jupiter.api.Test;
+import static org.mockito.Mockito.*;
 
 import java.net.URI;
 
@@ -13,7 +16,9 @@ import static org.mockito.Mockito.when;
 
 class WebExtractServiceTests {
     private final WebPageFetcher fetcher = mock(WebPageFetcher.class);
-    private final WebExtractService service = new WebExtractService(new WebExtractUrlPolicy(), fetcher);
+    private final ApplicationQuotaService quota = mock(ApplicationQuotaService.class);
+    private final ApiKeyIdentity identity = new ApiKeyIdentity(1L, 2L);
+    private final WebExtractService service = new WebExtractService(new WebExtractUrlPolicy(), fetcher, quota);
 
     @Test
     void extractsChineseArticleAndKeepsImageInSanitizedHtml() {
@@ -26,7 +31,7 @@ class WebExtractServiceTests {
                 + "<p>" + paragraph + "</p></article><aside>推荐内容</aside></body></html>";
         when(fetcher.fetch(any(URI.class))).thenReturn(html);
 
-        WebExtractResponse result = service.extract("https://blog.csdn.net/user/article/details/123");
+        WebExtractResponse result = service.extract(identity, "https://blog.csdn.net/user/article/details/123");
 
         assertTrue(result.textContent().contains("用于测试网页正文提取"));
         assertTrue(result.contentHtml().contains("https://blog.csdn.net/images/diagram.png"));
@@ -34,6 +39,9 @@ class WebExtractServiceTests {
         assertFalse(result.contentHtml().contains("onerror"));
         assertFalse(result.contentHtml().contains("data:image"));
         assertFalse(result.contentHtml().contains("<script"));
+        var order = inOrder(quota, fetcher);
+        order.verify(quota).consumeOnce(identity);
+        order.verify(fetcher).fetch(any(URI.class));
     }
 
     @Test
@@ -41,6 +49,20 @@ class WebExtractServiceTests {
         when(fetcher.fetch(any(URI.class)))
                 .thenReturn("<html><head><title>搜索结果</title></head><body><nav>首页 搜索 图片</nav></body></html>");
         assertThrows(WebContentUnavailableException.class,
-                () -> service.extract("https://blog.csdn.net/search"));
+                () -> service.extract(identity, "https://blog.csdn.net/search"));
+        verify(quota).consumeOnce(identity);
+    }
+
+    @Test void invalidUrlDoesNotConsumeOrFetch() {
+        assertThrows(com.nexus.webExtract.exception.InvalidWebExtractRequestException.class,
+                () -> service.extract(identity, "https://127.0.0.1/private"));
+        verifyNoInteractions(quota, fetcher);
+    }
+
+    @Test void exhaustedQuotaPreventsFetch() {
+        doThrow(new com.nexus.quota.exception.ApplicationQuotaExhaustedException()).when(quota).consumeOnce(identity);
+        assertThrows(com.nexus.quota.exception.ApplicationQuotaExhaustedException.class,
+                () -> service.extract(identity, "https://blog.csdn.net/search"));
+        verifyNoInteractions(fetcher);
     }
 }

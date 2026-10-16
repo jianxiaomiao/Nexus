@@ -3,6 +3,8 @@ package com.nexus.application.controller;
 import com.nexus.application.dto.CreateApplicationRequest;
 import com.nexus.application.dto.CreateApplicationResponse;
 import com.nexus.application.dto.ApplicationResponse;
+import com.nexus.application.dto.ApplicationListItemResponse;
+import com.nexus.quota.dto.QueryQuotaResponse;
 import com.nexus.application.dto.UpdateApplicationRequest;
 import com.nexus.application.exception.ApplicationNameAlreadyExistsException;
 import com.nexus.application.exception.ApplicationNotFoundException;
@@ -119,8 +121,10 @@ class ApplicationControllerTests {
         LocalDateTime updatedAt = LocalDateTime.of(2026, 9, 26, 11, 0);
         when(bearerUserIdResolver.resolve("Bearer valid-token")).thenReturn(42L);
         when(applicationService.listMyApplications(42L, 1, 10, null)).thenReturn(new com.nexus.common.web.ListPage<>(2, 1, 10, List.of(
-                new ApplicationResponse(100L, "appA", 0, createdAt, updatedAt),
-                new ApplicationResponse(101L, "appB", 1, createdAt, updatedAt))));
+                new ApplicationListItemResponse(100L, "appA", 0, createdAt, updatedAt,
+                        new QueryQuotaResponse(createdAt, createdAt.plusHours(720), 1000, 350, 650)),
+                new ApplicationListItemResponse(101L, "appB", 1, createdAt, updatedAt,
+                        new QueryQuotaResponse(createdAt, createdAt.plusHours(720), 1000, 0, 1000)))));
 
         mockMvc.perform(get("/api/application")
                         .header("Authorization", "Bearer valid-token"))
@@ -134,6 +138,8 @@ class ApplicationControllerTests {
                 .andExpect(jsonPath("$.data.records[0].status").value(0))
                 .andExpect(jsonPath("$.data.records[0].createdAt").value("2026-09-26T10:30:00"))
                 .andExpect(jsonPath("$.data.records[0].updatedAt").value("2026-09-26T11:00:00"))
+                .andExpect(jsonPath("$.data.records[0].quota.usedCount").value(350))
+                .andExpect(jsonPath("$.data.records[0].quota.restCount").value(650))
                 .andExpect(jsonPath("$.data.records[1].id").value(101))
                 .andExpect(jsonPath("$.data.records[1].name").value("appB"))
                 .andExpect(jsonPath("$.data.records[1].status").value(1));

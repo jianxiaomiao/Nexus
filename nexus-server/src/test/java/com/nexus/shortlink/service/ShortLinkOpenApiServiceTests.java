@@ -19,6 +19,8 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DuplicateKeyException;
+import com.nexus.quota.service.ApplicationQuotaService;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -29,6 +31,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @ExtendWith(MockitoExtension.class)
 class ShortLinkOpenApiServiceTests {
@@ -38,6 +42,8 @@ class ShortLinkOpenApiServiceTests {
     @Mock ShortCodeGenerator shortCodeGenerator;
     @Mock ShortLinkTargetPolicy targetPolicy;
     @Mock Clock clock;
+    @Mock ApplicationQuotaService quotaService;
+    @Mock PlatformTransactionManager transactionManager;
     @InjectMocks
     ShortLinkOpenApiService service;
 
@@ -81,5 +87,29 @@ class ShortLinkOpenApiServiceTests {
         assertEquals("FreshCode123", result.shortCode());
         assertEquals("demo", result.name());
         verify(targetPolicy).validate("https://www.douyin.com/video/1");
+        var order = inOrder(quotaService, transactionManager, shortCodeGenerator);
+        order.verify(quotaService).consumeOnce(new ApiKeyIdentity(7L, 3L));
+        order.verify(transactionManager).getTransaction(any());
+        order.verify(shortCodeGenerator, times(2)).generate();
+        verify(quotaService, times(1)).consumeOnce(new ApiKeyIdentity(7L, 3L));
+    }
+
+    @Test void invalidExpirationDoesNotConsumeOrStartTransaction() {
+        when(clock.instant()).thenReturn(Instant.parse("2026-10-06T00:00:00Z"));
+        assertThrows(com.nexus.shortlink.exception.InvalidShortLinkRequestException.class,
+                () -> service.create(new ApiKeyIdentity(7L, 3L),
+                        new CreateShortLinkRequest("demo", "https://www.douyin.com/video/1",
+                                OffsetDateTime.parse("2026-10-06T00:00:00Z"))));
+        verifyNoInteractions(quotaService, transactionManager, applicationMapper, apiKeyMapper, shortLinkMapper);
+    }
+
+    @Test void exhaustedQuotaDoesNotStartCreationTransaction() {
+        when(clock.instant()).thenReturn(Instant.parse("2026-10-06T00:00:00Z"));
+        doThrow(new com.nexus.quota.exception.ApplicationQuotaExhaustedException()).when(quotaService).consumeOnce(any());
+        assertThrows(com.nexus.quota.exception.ApplicationQuotaExhaustedException.class,
+                () -> service.create(new ApiKeyIdentity(7L, 3L),
+                        new CreateShortLinkRequest("demo", "https://www.douyin.com/video/1",
+                                OffsetDateTime.parse("2026-10-06T00:01:00Z"))));
+        verifyNoInteractions(transactionManager, applicationMapper, apiKeyMapper, shortCodeGenerator, shortLinkMapper);
     }
 }
