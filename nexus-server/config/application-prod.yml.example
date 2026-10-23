@@ -1,0 +1,35 @@
+# Copy this file to <deployment-root>/config/application-prod.yml.
+# Keep the copied file and all real values outside Git.
+
+server:
+  address: 127.0.0.1
+  port: 8080
+
+spring:
+  datasource:
+    url: ${NEXUS_DB_URL}
+    username: ${NEXUS_DB_USERNAME}
+    password: ${NEXUS_DB_PASSWORD}
+    hikari:
+      maximum-pool-size: ${NEXUS_DB_POOL_MAX_SIZE}
+      minimum-idle: ${NEXUS_DB_POOL_MIN_IDLE}
+  flyway:
+    user: ${NEXUS_FLYWAY_USERNAME}
+    password: ${NEXUS_FLYWAY_PASSWORD}
+
+nexus:
+  auth:
+    jwt:
+      issuer: nexus
+      access-token-ttl: 30m
+      secret: ${NEXUS_JWT_SECRET}
+  screenshot-jobs:
+    result-directory: ${NEXUS_SCREENSHOT_JOB_RESULT_DIR}
+
+# Use an absolute deployment-host path, such as /opt/nexus/logs on Linux.
+logging:
+  file:
+    name: ${NEXUS_LOG_DIR}/nexus.log
+  logback:
+    rollingpolicy:
+      file-name-pattern: ${NEXUS_LOG_DIR}/nexus.%d{yyyy-MM-dd}.%i.log.gz

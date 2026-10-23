@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$StartupLogPath,
     [string]$BaseUri = 'http://127.0.0.1:18080',
-    [string]$ArticleUrl = 'https://blog.csdn.net/qq_46429858/article/details/115696591'
+    [string]$ArticleUrl = 'https://blog.csdn.net/qq_46429858/article/details/115696591',
+    [switch]$RequireSuccess
 )
 
 $ErrorActionPreference = 'Stop'
@@ -51,7 +52,14 @@ function Send-Request([string]$Path, [string]$Method = 'GET', $Body = $null, [st
             if ($response.Headers.Contains('X-Nexus-Resource-Limit-Reached')) {
                 $limitReached = ($response.Headers.GetValues('X-Nexus-Resource-Limit-Reached') -join ',')
             }
-            return [pscustomobject]@{ Status = [int]$response.StatusCode; Json = $json; Bytes = $bytes; Blocked = $blocked; LimitReached = $limitReached }
+            return [pscustomobject]@{
+                Status = [int]$response.StatusCode
+                MediaType = $response.Content.Headers.ContentType.MediaType
+                Json = $json
+                Bytes = $bytes
+                Blocked = $blocked
+                LimitReached = $limitReached
+            }
         } finally { $response.Dispose() }
     } finally { $request.Dispose() }
 }
@@ -82,6 +90,9 @@ try {
     $result = Send-Request '/v1/web/screenshot' 'POST' @{ url = $ArticleUrl } ('ApiKey ' + $fullKey)
     Write-Output "Screenshot HTTP $($result.Status)"
     if ($result.Status -eq 200) {
+        if ($result.MediaType -ne 'image/png') {
+            throw "Successful screenshot has unexpected media type: $($result.MediaType)"
+        }
         $pngSignature = @(137, 80, 78, 71, 13, 10, 26, 10)
         if ($result.Bytes.Length -lt 8) { throw 'The response is not a PNG.' }
         for ($index = 0; $index -lt 8; $index++) {
@@ -93,6 +104,9 @@ try {
     } elseif ($null -ne $result.Json) {
         # Non-2xx bodies are read normally; no dependence on PowerShell ErrorDetails/OutFile behavior.
         Write-Output "code=$($result.Json.code); message=$($result.Json.message)"
+        if ($RequireSuccess) {
+            throw "Screenshot acceptance requires HTTP 200 but received $($result.Status)."
+        }
     } else { throw 'The failure response was not JSON.' }
     Get-Content -LiteralPath $StartupLogPath | Select-Object -Skip $logOffset |
         Where-Object { $_ -match 'path=/v1/web/screenshot, status=|截图资源统计' } | ForEach-Object { Write-Output $_ }

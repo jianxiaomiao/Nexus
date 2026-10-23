@@ -1,8 +1,6 @@
 spring:
   application:
     name: nexus-server
-  config:
-    import: optional:file:./config/application-local.yml
   flyway:
     enabled: true
     locations: classpath:db/migration
@@ -19,3 +17,7 @@ logging:
       file-name-pattern: ${NEXUS_LOG_DIR:../logger}/nexus.%d{yyyy-MM-dd}.%i.log.gz
       max-file-size: 10MB
       max-history: 30
+
+nexus:
+  screenshot-jobs:
+    result-directory: ${NEXUS_SCREENSHOT_JOB_RESULT_DIR:../data/screenshot-jobs}

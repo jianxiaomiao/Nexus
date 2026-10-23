@@ -12,16 +12,24 @@ GRANT ALL PRIVILEGES ON nexus_test.* TO 'nexus_test_user'@'127.0.0.1';
 
 后端测试 classpath 另有启动前保护：`mvn test` 的 Spring 上下文只接受最终生效的 MySQL schema 为 `nexus_test`，并检查单独设置的 Hikari/Flyway URL 和 Flyway schema；缺失或不匹配时，在连接数据库前拒绝启动。这个保护不随正式应用打包，但运行真实后端验收时仍须人工确认启动日志中的 Flyway schema。本机配置可能保留注释掉的旧 `nexus` URL；判断生效值时不要只搜索文件里的第一个 JDBC URL。
 
-## 1. 配置测试库与临时 JWT 密钥
+## 1. 显式选择 local Profile，配置测试库与临时 JWT 密钥
+
+公共 `application.yml` 不再导入本地文件。每次启动本地后端或运行后端测试，都必须显式设置 `SPRING_PROFILES_ACTIVE=local`；没有 Profile 时不能静默回退到本地数据库。完整边界及生产模板见 [部署配置边界](DEPLOYMENT_CONFIGURATION.md)。
 
 在 `nexus-server/config/application-local.yml` 配置测试库连接。该文件已被 Git 忽略，不提交真实密码；至少需要以下属性：
 
 ```yaml
+server:
+  address: 127.0.0.1
+  port: 8080
 spring:
   datasource:
     url: jdbc:mysql://127.0.0.1:3306/nexus_test?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8
     username: <本机测试库用户>
     password: <本机测试库密码>
+    hikari:
+      maximum-pool-size: <按本机资源设置>
+      minimum-idle: <按本机资源设置>
 nexus:
   auth:
     jwt:
@@ -34,6 +42,7 @@ nexus:
 
 ```powershell
 Set-Location D:\Nexus\nexus-server
+$env:SPRING_PROFILES_ACTIVE = 'local'
 $jwtBytes = [byte[]]::new(32)
 [Security.Cryptography.RandomNumberGenerator]::Fill($jwtBytes)
 $env:NEXUS_JWT_SECRET = [Convert]::ToBase64String($jwtBytes)
@@ -46,6 +55,7 @@ mvn test
 
 ```powershell
 $env:SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE = '2'
+$env:SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE = '1'
 mvn test
 ```
 
@@ -76,6 +86,7 @@ Playwright 测试自行启动 `127.0.0.1:4173` 的 Vite 服务，使用模拟的
 
 ```powershell
 # 窗口 A：在 nexus-server，配置并生成本次运行的 NEXUS_JWT_SECRET 后
+$env:SPRING_PROFILES_ACTIVE = 'local'
 mvn spring-boot:run
 ```
 
@@ -166,6 +177,8 @@ $env:SPRING_DATASOURCE_URL = 'jdbc:mysql://127.0.0.1:3306/nexus_test?useSSL=fals
 $env:SPRING_DATASOURCE_USERNAME = 'nexus_test_user'
 $env:SPRING_DATASOURCE_PASSWORD = Read-Host '输入本机专用测试库账号的密码'
 $env:SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE = '2'
+$env:SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE = '1'
+$env:SPRING_PROFILES_ACTIVE = 'local'
 $env:PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = '1'
 ```
 
@@ -173,7 +186,21 @@ $env:PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = '1'
 
 2026-10-11：截图后端编译、真实 Chromium 样本和非数据库场景通过后，首次全量运行因只覆盖库名、仍使用日常账号而出现 63 个上下文错误。确认本地文件保留专用测试账号后，仅在测试进程注入其设置及新的临时 JWT 密钥，`mvn clean test` 最终通过 229/229、零失败/错误/跳过；Flyway 实际 schema 为 `nexus_test`，未改日常配置或账号权限。测试覆盖静态 PNG、URL/MIME/重定向限制、真实 HTTP 请求取消、资源预算、并发许可、机器身份与 Usage，尚未验收真实知乎/CSDN 截图或新增前端界面。
 
+## 9. Spring Boot 回环监听边界
+
+从仓库根目录执行：
+
+```powershell
+& .\tools\experiments\deploy-1-loopback\run.ps1
+```
+
+脚本使用真实 Nexus JAR、真实 `nexus_test` 和隔离 Nginx `18080 → 18081`。Java 通过本次进程参数绑定 `127.0.0.1:18081`，不会修改日常 `application.yml`、忽略配置、正式 Nginx 或 80/8080。它验证直接回环和代理请求都到达机器认证 Filter、本机非回环 IPv4 不能直连 Java、Nginx 上下游状态一致，以及日常监听快照未变化。请求不带凭证并停在401，因此不创建用户、Application、Key、Usage 或 Quota 数据。完整预测、运行约束、首次脚本错误与 2026-10-17 通过证据见 [DEPLOY-1](../tools/experiments/deploy-1-loopback/README.md)。
+
+本机结果只证明 Spring Socket 没有绑定非回环本地地址。云端仍须同时检查实际监听、阿里云安全组和 Windows 防火墙，并从外部节点分别验证直连 Java 失败、经 Nginx 成功。
+
 ## 这些测试各自证明什么
+
+2026-10-18：移除公共配置对 `application-local.yml` 的固定导入后，清空 Profile 和外部数据源/JWT 变量执行负向启动，应用使用 `default` 并因缺少 datasource URL 在建连前退出。随后显式激活 `local`，仅对测试进程覆盖专用 `nexus_test` URL/账号/密码、Hikari 1..2 与一次性 JWT；完整后端回归 **382/382** 通过，0 失败、0 错误、0 跳过，启动日志确认 `local`、`nexus_test` 和 8 个 Flyway 迁移。DEPLOY-1 同轮复验通过，日常 80/8080 未改变。
 
 2026-10-16：Application 生产限流器、Servlet 异步 Filter 与失败日志接入后，先确认忽略配置的生效项仍为日常 `nexus`，再仅对本次 Maven 进程同时覆盖为保留的 `nexus_test` URL、专用账号和密码，连接池上限为 2，并生成一次性 JWT 密钥。Flyway 日志确认 schema 为 `nexus_test`、8 个迁移校验通过；`mvnw clean test` 最终通过 **382/382**，0 失败、0 错误、0 跳过，包含真实 MySQL、随机端口 HTTP、Quota/Usage 和 Chromium 截图回归。本地配置文件未修改；该结果不替代经本机 Nginx 的真实限流验收。
 

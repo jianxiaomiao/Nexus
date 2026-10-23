@@ -311,10 +311,12 @@ $password = ''
 $passed = $false
 $previousEnvironment = @{}
 $environmentNames = @(
+    'SPRING_PROFILES_ACTIVE',
     'SPRING_DATASOURCE_URL',
     'SPRING_DATASOURCE_USERNAME',
     'SPRING_DATASOURCE_PASSWORD',
     'SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE',
+    'SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE',
     'NEXUS_JWT_SECRET',
     'NEXUS_LOG_DIR')
 foreach ($name in $environmentNames) {
@@ -322,10 +324,12 @@ foreach ($name in $environmentNames) {
 }
 
 try {
+    $env:SPRING_PROFILES_ACTIVE = 'local'
     $env:SPRING_DATASOURCE_URL = $database.Url
     $env:SPRING_DATASOURCE_USERNAME = $database.Username
     $env:SPRING_DATASOURCE_PASSWORD = $database.Password
     $env:SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE = '4'
+    $env:SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE = '1'
     $env:NEXUS_JWT_SECRET = New-RandomSecret 32
     $env:NEXUS_LOG_DIR = (Join-Path $runtimePath 'application-logs')
 

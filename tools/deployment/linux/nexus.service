@@ -1,0 +1,50 @@
+[Unit]
+Description=Nexus Developer API Platform
+After=network-online.target mysql.service
+Wants=network-online.target
+Requires=mysql.service
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=nexus
+Group=nexus
+SupplementaryGroups=nexus-readers
+WorkingDirectory=/var/lib/nexus
+
+EnvironmentFile=/etc/nexus/nexus.env
+Environment="SPRING_PROFILES_ACTIVE=prod"
+Environment="SPRING_CONFIG_ADDITIONAL_LOCATION=file:/etc/nexus/"
+Environment="PLAYWRIGHT_BROWSERS_PATH=/opt/nexus/browsers/playwright-1.63.0"
+Environment="HOME=/var/lib/nexus"
+Environment="TMPDIR=/var/lib/nexus/tmp"
+
+ExecStart=/usr/lib/jvm/java-21-openjdk-amd64/bin/java -Xms128m -Xmx512m -Djava.io.tmpdir=/var/lib/nexus/tmp -jar /opt/nexus/current/server/nexus-server.jar
+
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=120s
+TimeoutStopSec=60s
+KillSignal=SIGTERM
+SuccessExitStatus=143
+KillMode=control-group
+UMask=0027
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/nexus /etc/nexus
+ReadWritePaths=/var/lib/nexus /var/log/nexus
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictRealtime=true
+
+[Install]
+WantedBy=multi-user.target

@@ -31,6 +31,16 @@ import com.nexus.webExtract.exception.WebContentUnavailableException;
 import com.nexus.webExtract.exception.WebPageFetchException;
 import com.nexus.screenshot.exception.ScreenshotException;
 import com.nexus.quota.exception.ApplicationQuotaExhaustedException;
+import com.nexus.job.dto.ScreenshotJobFailureResponse;
+import com.nexus.job.dto.ScreenshotJobNotReadyResponse;
+import com.nexus.job.exception.ScreenshotJobCreationException;
+import com.nexus.job.exception.ScreenshotJobFailedException;
+import com.nexus.job.exception.ScreenshotJobNotFoundException;
+import com.nexus.job.exception.ScreenshotJobNotReadyException;
+import com.nexus.job.exception.ScreenshotJobQueueFullException;
+import com.nexus.job.exception.ScreenshotJobResultExpiredException;
+import com.nexus.job.exception.ScreenshotJobSubmissionUnavailableException;
+import com.nexus.job.store.ScreenshotResultStoreException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -70,6 +80,74 @@ public class GlobalExceptionHandler{
             case BUSY, ENGINE_UNAVAILABLE -> HttpStatus.SERVICE_UNAVAILABLE;
         };
         return ResponseEntity.status(status).body(handled(request, exception, status, exception.code(), exception.getMessage(), null));
+    }
+
+    @ExceptionHandler(ScreenshotJobQueueFullException.class)
+    public ResponseEntity<ApiResponse<Void>> handleScreenshotJobQueueFull(
+            ScreenshotJobQueueFullException exception, HttpServletRequest request) {
+        HttpStatus status = HttpStatus.SERVICE_UNAVAILABLE;
+        return ResponseEntity.status(status)
+                .header(HttpHeaders.RETRY_AFTER, "5")
+                .body(handled(request, exception, status,
+                        "SCREENSHOT_JOB_QUEUE_FULL", exception.getMessage(), null));
+    }
+
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    @ExceptionHandler(ScreenshotJobNotFoundException.class)
+    public ApiResponse<Void> handleScreenshotJobNotFound(
+            ScreenshotJobNotFoundException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.NOT_FOUND,
+                "SCREENSHOT_JOB_NOT_FOUND", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.CONFLICT)
+    @ExceptionHandler(ScreenshotJobNotReadyException.class)
+    public ApiResponse<ScreenshotJobNotReadyResponse> handleScreenshotJobNotReady(
+            ScreenshotJobNotReadyException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.CONFLICT,
+                "SCREENSHOT_JOB_NOT_READY", exception.getMessage(),
+                new ScreenshotJobNotReadyResponse(exception.status()));
+    }
+
+    @ResponseStatus(HttpStatus.CONFLICT)
+    @ExceptionHandler(ScreenshotJobFailedException.class)
+    public ApiResponse<ScreenshotJobFailureResponse> handleScreenshotJobFailed(
+            ScreenshotJobFailedException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.CONFLICT,
+                "SCREENSHOT_JOB_FAILED", exception.getMessage(),
+                new ScreenshotJobFailureResponse(exception.failureCode()));
+    }
+
+    @ResponseStatus(HttpStatus.GONE)
+    @ExceptionHandler(ScreenshotJobResultExpiredException.class)
+    public ApiResponse<Void> handleScreenshotJobResultExpired(
+            ScreenshotJobResultExpiredException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.GONE,
+                "SCREENSHOT_JOB_RESULT_EXPIRED", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
+    @ExceptionHandler(ScreenshotJobSubmissionUnavailableException.class)
+    public ApiResponse<Void> handleScreenshotJobSubmissionUnavailable(
+            ScreenshotJobSubmissionUnavailableException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.SERVICE_UNAVAILABLE,
+                "SCREENSHOT_JOB_SUBMISSION_UNAVAILABLE", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    @ExceptionHandler(ScreenshotJobCreationException.class)
+    public ApiResponse<Void> handleScreenshotJobCreation(
+            ScreenshotJobCreationException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.INTERNAL_SERVER_ERROR,
+                "SCREENSHOT_JOB_CREATE_FAILED", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    @ExceptionHandler(ScreenshotResultStoreException.class)
+    public ApiResponse<Void> handleScreenshotJobResultUnavailable(
+            ScreenshotResultStoreException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.INTERNAL_SERVER_ERROR,
+                "SCREENSHOT_JOB_RESULT_UNAVAILABLE", "截图任务结果文件不可用", null);
     }
 
     @ResponseStatus(HttpStatus.BAD_REQUEST)

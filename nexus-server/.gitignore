@@ -34,3 +34,4 @@ build/
 
 ### Local-only application configuration ###
 /config/application-local.yml
+/config/application-prod.yml

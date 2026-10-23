@@ -31,6 +31,8 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 @Service
@@ -112,6 +114,15 @@ public class ApplicationQuotaService {
 
     /** 校验完成后、业务事务和实际执行开始前调用；返回时额度事务已提交。 */
     public void consumeOnce(ApiKeyIdentity identity) {
+        consumeOnceAndCommit(identity, () -> null);
+    }
+
+    /**
+     * 在配额短事务中执行一项必要的准入写入，使配额增加与该写入共同提交或回滚。
+     * admittedWork 必须是当前线程中的短数据库操作，不能包含网络、文件或其他长耗时工作。
+     */
+    public <T> T consumeOnceAndCommit(ApiKeyIdentity identity, Supplier<T> admittedWork) {
+        Objects.requireNonNull(admittedWork, "admittedWork");
         if (identity == null || identity.applicationId() == null || identity.applicationId() <= 0
                 || identity.apiKeyId() == null || identity.apiKeyId() <= 0) {
             throw new InvalidApiKeyCredentialException();
@@ -120,7 +131,7 @@ public class ApplicationQuotaService {
         if (TransactionSynchronizationManager.isActualTransactionActive()) {
             throw new IllegalTransactionStateException("Quota must be consumed before the business transaction");
         }
-        quotaTransaction.executeWithoutResult(status -> {
+        return quotaTransaction.execute(status -> {
             // 与现有父级删除保持 Application -> Key 加锁顺序；锁仅持有到这次准入提交。
             Application application = applicationMapper.selectOne(Wrappers.<Application>lambdaQuery()
                     .eq(Application::getId, identity.applicationId()).last("FOR UPDATE"));
@@ -146,6 +157,7 @@ public class ApplicationQuotaService {
             if (changed != 1) {
                 throw new IllegalStateException("Quota update must affect exactly one period");
             }
+            return admittedWork.get();
         });
     }
 

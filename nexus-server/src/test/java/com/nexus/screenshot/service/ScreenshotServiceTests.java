@@ -15,7 +15,8 @@ class ScreenshotServiceTests {
     private final ScreenshotRenderer renderer = mock(ScreenshotRenderer.class);
     private final ApplicationQuotaService quota = mock(ApplicationQuotaService.class);
     private final ApiKeyIdentity identity = new ApiKeyIdentity(1L, 2L);
-    private final ScreenshotService service = new ScreenshotService(new ScreenshotUrlPolicy(), renderer, quota);
+    private final ScreenshotService service = new ScreenshotService(
+            new ScreenshotUrlPolicy(), renderer, quota, new ScreenshotExecutionGate());
     private static final String URL = "https://blog.csdn.net/article";
     @Test
     void invalidEntryNeverStartsBrowser() {

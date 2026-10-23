@@ -1,6 +1,6 @@
-# 静态网页截图：第一版
+# 静态网页截图
 
-已确认的需求：关闭网页 JavaScript、同步返回 PNG、不保存截图历史。截图模块位于 `nexus-server/src/main/java/com/nexus/screenshot/`。
+同步接口仍保持关闭网页 JavaScript、直接返回 PNG、不保存历史。异步接口复用同一安全渲染器，把任务状态持久化到 MySQL，并把成功 PNG 暂存在服务器文件系统。渲染模块位于 `nexus-server/src/main/java/com/nexus/screenshot/`，异步任务模块位于 `nexus-server/src/main/java/com/nexus/job/`。
 
 ## HTTP 契约
 
@@ -41,6 +41,39 @@ URL 检查通过且取得本机截图槽位后，在启动渲染前同步消耗�
 | 503 | `SCREENSHOT_ENGINE_UNAVAILABLE` | Chromium 缺失、启动或运行异常 |
 
 机器身份通过 Controller 检查后，成功和失败仍由 `@UsageApi` 记录为 `web.screenshot`；Filter 拒绝的 401/403 不进入 Usage。
+
+## 持久化异步接口
+
+异步接口适合不希望让一次 HTTP 连接等待 Chromium 的调用方。三个端点都使用 `Authorization: ApiKey <完整密钥>`；任务归属于创建它的 API Key，其他 Key 即使属于同一 Application 也得到 404，避免通过 `jobId` 越权读取。
+
+```http
+POST /v1/web/screenshot-jobs
+GET  /v1/web/screenshot-jobs/{jobId}
+GET  /v1/web/screenshot-jobs/{jobId}/result
+```
+
+提交请求体仍为 `{"url":"https://..."}`。成功返回 HTTP 201、`Location: /v1/web/screenshot-jobs/{jobId}`，响应 `data` 包含 `jobId`、`status=QUEUED`、`attemptCount`、`createdAt` 和 `updatedAt`。只有提交接口消耗一次 Application 配额并记录一次 `web.screenshot` Usage；查询状态和下载结果不重复扣减或记录。配额增加与 QUEUED 记录插入位于同一个事务中，任一失败都会共同回滚。
+
+状态查询对已归属任务统一返回 HTTP 200。`data.status` 为 `QUEUED`、`RUNNING`、`SUCCEEDED`、`FAILED` 或 `EXPIRED`，并按状态返回尝试次数、结果大小/SHA-256、阻止资源数、资源上限标记、失败码、结果到期时间及各阶段时间。时间使用 UTC 偏移；成功结果即使清理任务尚未把数据库状态改成 EXPIRED，只要已超过 `resultExpiresAt`，查询也会立即显示 EXPIRED。
+
+结果端点只在 SUCCEEDED 且未过期时返回原始 `image/png` 字节，带 `Cache-Control: no-store` 和内联文件名；不会暴露服务器文件路径或返回 Base64。错误合同为：
+
+| HTTP | code | 含义 |
+| --- | --- | --- |
+| 404 | `SCREENSHOT_JOB_NOT_FOUND` | 任务不存在或不属于当前 Key |
+| 409 | `SCREENSHOT_JOB_NOT_READY` | 仍在 QUEUED/RUNNING，`data.status` 给出当前状态 |
+| 409 | `SCREENSHOT_JOB_FAILED` | 执行失败，`data.failureCode` 给出稳定失败码 |
+| 410 | `SCREENSHOT_JOB_RESULT_EXPIRED` | 一小时结果保留期已过 |
+| 503 | `SCREENSHOT_JOB_QUEUE_FULL` | 全局未完成任务已达 10，带 `Retry-After: 5` |
+| 503 | `SCREENSHOT_JOB_SUBMISSION_UNAVAILABLE` | 提交所需数据库/事务暂不可用 |
+| 500 | `SCREENSHOT_JOB_CREATE_FAILED` | 插入未满足必须新增一行的不变量 |
+| 500 | `SCREENSHOT_JOB_RESULT_UNAVAILABLE` | 成功元数据存在但 PNG 文件不可读取 |
+
+全局最多 10 个 QUEUED/RUNNING 任务。Worker 每秒检查最早的 QUEUED 记录，先通过短事务和行锁写入 RUNNING、随机 `runToken`、30 秒租约及尝试次数，再在事务外渲染；成功或失败更新必须匹配同一个 `runToken`，防止旧执行者覆盖租约恢复后的新执行结果。租约过期且尝试少于 2 次的任务重新入队，已耗尽的任务变为 FAILED。成功 PNG 保留 1 小时，完成任务元数据保留 24 小时。
+
+同步与异步渲染共用公平的单许可 Gate。异步 Worker 已经等待时，后来到达的同步请求不能插队；任务尚未被 Worker 观察到的最长一秒轮询窗口不承诺同步请求与数据库记录之间的严格全局时间排序。
+
+渲染内部预算为 20 秒，执行租约为 30 秒，给浏览器关闭、文件发布和状态提交留下 10 秒余量。普通超时由 Renderer 明确失败并立即释放 Gate；若浏览器驱动发生无法响应中断的进程级卡死，租约恢复仍会使旧 `runToken` 失效，阻止迟到结果覆盖新状态，但同一 JVM 的 Gate 要等原执行线程退出才能再次使用。第一版依靠单机服务进程重启处理这种极端失活，不在本轮引入浏览器进程池或分布式 Worker。
 
 ## 调用链与安全边界
 
@@ -151,3 +184,7 @@ Set-Location D:\Nexus\nexus-server
 使用 `nexus_test`、独立 18080 后端和全新 Key 的真实 PowerShell 结果：HTTP 200，PNG 78984 字节，1280×720，`blocked=58`、`limitReached=true`。浏览器统计 `observed=102, fetched=44, blocked=58, truncated=38, byType={document=1, image=86, stylesheet=15}`。前 64 次中成功获取 44、拒绝/获取失败 20，随后 38 次停止获取。视觉核对标题和正文可读，头像及部分图标缺失；这不是完整页面的承诺。首次真实文章成功 PNG 已确认。
 
 截图相关、共享 DNS、日志/Filter 的定向回归共 42/42（含真实 HTTP/MySQL/Chromium 的 4 个集成用例），不是全量回归。测试验证超额允许资源不再 fetch、超额拒绝资源返回 PNG、资源大小超限仍失败、响应头及部分截图 Usage 200。Application 693 与 Key 423 已软删除，随机账号及 Usage 留在测试库；临时后端已停止。配额、白名单和 DNS 安全判断均未放宽。
+
+2026-10-19 的部署路径验收又验证了一层不同边界：从 `D:\NexusDeploy\current` 启动 release Java，并设置固定 `PLAYWRIGHT_BROWSERS_PATH` 后，真实请求返回 78689 字节 PNG；请求期间观察到实际执行文件来自 `D:\NexusDeploy\browsers\playwright-1.63.0\chromium_headless_shell-1243\chrome-headless-shell-win64\chrome-headless-shell.exe`。这证明部署目录中的浏览器可被 release 使用，不等同于只检查文件存在。首次尝试被虚拟网卡的 `198.18.0.0/15` Fake-IP DNS 安全拒绝；关闭虚拟网卡、DNS 恢复公网地址后才通过，未放宽 DNS 防护。
+
+2026-10-23 的异步状态机复核增加了 4 个真实 MySQL 测试：第一次过期租约重新排队、第二次过期租约耗尽失败、旧 `runToken` 无法覆盖第二次认领、结果到期先删 PNG 再按 24 小时规则删元数据，以及配额增加与 QUEUED 插入在回调异常时共同回滚。测试类主动替换 Scheduler，避免后台轮询与受控状态转换竞争，并在执行前同时断言 schema 和专用测试账号。使用 `nexus_test`、Hikari 2/1、临时 JWT 和允许 Chromium 子进程的执行边界完成后端全量回归 **414/414**，0 失败、0 错误、0 跳过。

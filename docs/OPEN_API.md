@@ -143,6 +143,10 @@ Hash 请求体错误均返回 HTTP 400，使用同样的 `code`、`message`、`d
 
 成功响应为 HTTP 200 的 `image/png` 二进制，**不包装成 JSON**；`Cache-Control: no-store`，`X-Nexus-Blocked-Resources` 报告被拒绝、获取失败或停止加载的次要资源数量。主 HTML 成功后资源请求次数触达上限，停止获取后续资源并返回部分 PNG，`X-Nexus-Resource-Limit-Reached: true`；false 不保证资源全部完整。错误继续使用 ApiResponse JSON：400 URL/请求错误、502 主页面获取失败、504 超时、422 大小超限、503 繁忙或浏览器不可用；认证错误仍为原有 401/403。详情、Chromium 安装与 PowerShell 示例见 [静态网页截图](SCREENSHOT_API.md)。
 
+## 异步网页截图任务
+
+`POST /v1/web/screenshot-jobs` 创建持久化任务并返回 HTTP 201；`GET /v1/web/screenshot-jobs/{jobId}` 查询 `QUEUED/RUNNING/SUCCEEDED/FAILED/EXPIRED` 状态；`GET /v1/web/screenshot-jobs/{jobId}/result` 在成功且未过期时返回原始 PNG。任务按 API Key 隔离，查询和下载不重复扣配额；结果保留 1 小时、元数据保留 24 小时，全局最多 10 个未完成任务。完整字段、状态恢复和错误码见 [静态网页截图](SCREENSHOT_API.md#持久化异步接口)。
+
 ## 认证与错误
 
 请求到达 `/v1/*` 时，Filter 从 `Authorization` 提取完整密钥。认证器先用公开 ID 找记录，再验证 Secret 摘要，然后沿 Application 找到所有者 User，检查三层状态。成功后，仅把 `apiKeyId` 和 `applicationId` 放入本次请求，供 Controller 使用。
