@@ -28,7 +28,7 @@ export const docs: DocPage[] = [
   { slug: 'hash', title: '计算 Hash', group: 'API 参考', summary: '计算文本的 SHA-256 或 SHA-512 摘要。', method: 'POST', path: '/v1/utils/hash', markdown: hash },
   { slug: 'shortlink', title: '短链接', group: 'API 参考', summary: '创建、管理并公开访问有期限的短链接。', method: 'POST', path: '/v1/short-links', markdown: shortlink },
   { slug: 'web-extract', title: '网页正文提取', group: 'API 参考', summary: '提取知乎专栏或 CSDN 文章的标题、正文与配图。', method: 'POST', path: '/v1/web/extract', markdown: webExtract },
-  { slug: 'web-screenshot', title: '网页截图', group: 'API 参考', summary: '保留公开网页静态排版，同步获取 PNG 截图。', method: 'POST', path: '/v1/web/screenshot', markdown: webScreenshot },
+  { slug: 'web-screenshot', title: '网页截图', group: 'API 参考', summary: '同步获取 PNG，或提交可恢复的异步截图任务。', method: 'POST', path: '/v1/web/screenshot', markdown: webScreenshot },
   { slug: 'errors', title: '错误码与排查', group: '帮助', summary: '区分认证、禁用和请求参数错误。', markdown: errors },
 ]
 

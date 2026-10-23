@@ -1,14 +1,15 @@
 ## 概览
 
-`POST /v1/web/screenshot` 获取公开网页的静态截图，保留原站 HTML 排版，不改成阅读模式。成功返回 PNG 图片字节，不是 JSON 或 Base64；失败返回统一错误 JSON。
+网页截图提供两种调用方式：同步接口在一次请求内等待 PNG，异步接口先创建任务，再查询状态并在成功后获取 PNG。两种方式都保留原站 HTML 排版，不改成阅读模式。
 
 | 项目 | 值 |
 | --- | --- |
 | 认证 | `Authorization: ApiKey <完整密钥>` |
 | 请求内容类型 | `application/json` |
-| 成功响应 | HTTP 200，`image/png` |
+| 同步接口 | `POST /v1/web/screenshot`，成功返回 HTTP 200 `image/png` |
+| 异步接口 | `POST /v1/web/screenshot-jobs`，成功创建返回 HTTP 201 JSON |
 | 截图范围 | 当前视口 1280 × 720，不是整页长图 |
-| 脚本与历史 | 不执行网页 JavaScript，不保存截图历史 |
+| 脚本与留存 | 不执行网页 JavaScript；异步 PNG 保留 1 小时，完成元数据保留 24 小时 |
 
 调试台中的 Key 和图片仅在当前页面内存使用；重新请求、切换 API 或离开页面会清除旧图片，离开调试台清除 Key。
 
@@ -20,7 +21,7 @@
 
 只接受 `blog.csdn.net` 和 `zhuanlan.zhihu.com` 的精确 HTTPS 主机名。不能包含登录信息、非标准端口或 `#` 片段，不跟随重定向，不绕过原站登录、验证码或访问限制。Key 必须来自当前后端连接的数据库。
 
-## 请求示例
+## 同步请求示例
 
 原始 HTTP 请求：
 
@@ -67,6 +68,34 @@ try {
 
 本地后端默认端口为 `8080`。只在请求成功后打开图片；错误响应也可能写入输出文件，需查看 JSON 错误码和后端日志。
 
+## 异步任务
+
+异步模式包含三个端点：
+
+| 操作 | 方法与路径 | 成功响应 |
+| --- | --- | --- |
+| 创建任务 | `POST /v1/web/screenshot-jobs` | 201，返回 `jobId`、状态和时间 |
+| 查询状态 | `GET /v1/web/screenshot-jobs/{jobId}` | 200，返回当前状态与结果元数据 |
+| 获取结果 | `GET /v1/web/screenshot-jobs/{jobId}/result` | 仅 `SUCCEEDED` 且未过期时返回 PNG |
+
+任务依次处于 `QUEUED`、`RUNNING`，最终进入 `SUCCEEDED`、`FAILED` 或 `EXPIRED`。提交时消耗一次 Application 配额；状态查询和 PNG 下载不重复计费。任务只能由创建它的 API Key 查询，其他 Key 得到 404，避免暴露任务是否存在。
+
+调试台默认选择异步模式。创建成功后先立即查询一次；仍在排队或执行时，会在本次查询完成后等待约 2 秒再查询。它不会重叠发送多个状态请求，并在成功、失败、过期、网络错误、切换 API 或离开页面时停止。成功后只获取一次 PNG；网络错误会保留 Job ID，可手动“继续查询”。这只是当前页面内的任务展示，不是任务历史列表。
+
+```bash
+curl --fail-with-body -X POST 'http://localhost:8080/v1/web/screenshot-jobs' \
+  -H 'Authorization: ApiKey <完整密钥>' \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://zhuanlan.zhihu.com/p/<文章ID>"}'
+
+curl -i 'http://localhost:8080/v1/web/screenshot-jobs/<Job ID>' \
+  -H 'Authorization: ApiKey <完整密钥>'
+
+# 状态为 SUCCEEDED 后下载
+curl --fail-with-body 'http://localhost:8080/v1/web/screenshot-jobs/<Job ID>/result' \
+  -H 'Authorization: ApiKey <完整密钥>' --output screenshot.png
+```
+
 ## 成功与部分截图
 
 ```http
@@ -93,7 +122,7 @@ X-Nexus-Resource-Limit-Reached: true
 
 ## 错误说明
 
-URL校验通过并取得截图执行名额后，开始执行前消耗 Application 额度1次。`SCREENSHOT_BUSY` 不扣；通过配额准入后引擎不可用、抓取/渲染失败或超时仍扣。额度耗尽返回429错误JSON，不是PNG。周期与计次说明见 [调用配额](/docs/quota)。
+同步模式在 URL 校验通过并取得截图执行名额后、开始执行前消耗 Application 额度 1 次。`SCREENSHOT_BUSY` 不扣；通过配额准入后引擎不可用、抓取/渲染失败或超时仍扣。异步模式只在成功创建任务时消耗 1 次，后续失败、查询和下载不再次消耗。额度耗尽返回 429 错误 JSON，不是 PNG。周期与计次说明见 [调用配额](/docs/quota)。
 
 | HTTP | code | 说明 |
 | --- | --- | --- |
@@ -105,6 +134,8 @@ URL校验通过并取得截图执行名额后，开始执行前消耗 Applicatio
 | 502 | `SCREENSHOT_PAGE_FETCH_FAILED` | 主页面获取失败、跳转或网络/DNS 异常 |
 | 503 | `SCREENSHOT_BUSY` / `SCREENSHOT_ENGINE_UNAVAILABLE` | 服务繁忙或 Chromium 不可用 |
 | 504 | `SCREENSHOT_TIMEOUT` | 截图超时 |
+
+异步接口还会返回：队列已满 503 `SCREENSHOT_JOB_QUEUE_FULL`（附 `Retry-After: 5`）；任务不存在或不属于当前 Key 的 404 `SCREENSHOT_JOB_NOT_FOUND`；结果未就绪 409 `SCREENSHOT_JOB_NOT_READY`；执行失败 409 `SCREENSHOT_JOB_FAILED`；结果过期 410 `SCREENSHOT_JOB_RESULT_EXPIRED`；结果文件异常 500 `SCREENSHOT_JOB_RESULT_UNAVAILABLE`。
 
 若 VPN/Fake-IP 把域名解析到 `198.18.0.0/15` 等特殊地址段，后端会拒绝连接。应修正 DNS/代理配置并重启后端，不应移除公网 IP 检查。错误响应示例：
 

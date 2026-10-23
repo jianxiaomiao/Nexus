@@ -68,12 +68,75 @@ export interface WebScreenshotResult extends OpenApiResult {
   cacheControl: string | null
 }
 
-export async function callWebScreenshot(apiKey: string, url: string, signal?: AbortSignal): Promise<WebScreenshotResult> {
-  const response = await fetch('/v1/web/screenshot', {
-    method: 'POST', cache: 'no-store', credentials: 'omit', redirect: 'error',
-    headers: { Authorization: `ApiKey ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url }), signal,
-  })
+export type ScreenshotJobStatus = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'EXPIRED'
+
+export interface CreatedScreenshotJob {
+  jobId: string
+  status: ScreenshotJobStatus
+  attemptCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ScreenshotJob extends CreatedScreenshotJob {
+  resultSizeBytes: number | null
+  resultSha256: string | null
+  blockedResources: number | null
+  resourceLimitReached: boolean | null
+  resultExpiresAt: string | null
+  failureCode: string | null
+  startedAt: string | null
+  completedAt: string | null
+}
+
+export interface ScreenshotJobApiResult<T> extends OpenApiResult {
+  data: T | null
+}
+
+const screenshotJobStatuses = new Set<ScreenshotJobStatus>(['QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'EXPIRED'])
+
+function isScreenshotJobStatus(value: unknown): value is ScreenshotJobStatus {
+  return typeof value === 'string' && screenshotJobStatuses.has(value as ScreenshotJobStatus)
+}
+
+function isCreatedScreenshotJob(value: unknown): value is CreatedScreenshotJob {
+  if (!value || typeof value !== 'object') return false
+  const job = value as Record<string, unknown>
+  return typeof job.jobId === 'string' && job.jobId.length > 0
+    && isScreenshotJobStatus(job.status)
+    && Number.isSafeInteger(job.attemptCount) && Number(job.attemptCount) >= 0
+    && typeof job.createdAt === 'string' && typeof job.updatedAt === 'string'
+}
+
+function nullableNumber(value: unknown): boolean {
+  return value === null || (typeof value === 'number' && Number.isFinite(value))
+}
+
+function nullableString(value: unknown): boolean {
+  return value === null || typeof value === 'string'
+}
+
+function isScreenshotJob(value: unknown): value is ScreenshotJob {
+  if (!isCreatedScreenshotJob(value)) return false
+  const job = value as unknown as Record<string, unknown>
+  return nullableNumber(job.resultSizeBytes)
+    && nullableString(job.resultSha256)
+    && nullableNumber(job.blockedResources)
+    && (job.resourceLimitReached === null || typeof job.resourceLimitReached === 'boolean')
+    && nullableString(job.resultExpiresAt)
+    && nullableString(job.failureCode)
+    && nullableString(job.startedAt)
+    && nullableString(job.completedAt)
+}
+
+async function readJsonResponse(response: Response): Promise<ApiResponse<unknown> | null> {
+  const mediaType = response.headers.get('Content-Type')?.split(';')[0]?.trim().toLowerCase()
+  if (mediaType !== 'application/json') return null
+  try { return await response.json() as ApiResponse<unknown> }
+  catch { return null }
+}
+
+async function readScreenshotResponse(response: Response): Promise<WebScreenshotResult> {
   const mediaType = response.headers.get('Content-Type')?.split(';')[0]?.trim().toLowerCase()
   const rawBlocked = response.headers.get('X-Nexus-Blocked-Resources')
   const blocked = rawBlocked !== null && /^\d+$/.test(rawBlocked) ? Number(rawBlocked) : null
@@ -93,11 +156,64 @@ export async function callWebScreenshot(apiKey: string, url: string, signal?: Ab
     } else { result.invalidImage = true }
   } else {
     // 不将 HTML/SVG 或其他类型的成功响应当作可执行网页显示。
-    if (mediaType === 'application/json') {
-      try { result.body = await response.json() as ApiResponse<unknown> }
-      catch { /* 非法 JSON 仍保留真实 HTTP 状态，不伪装成网络失败。 */ }
-    }
+    result.body = await readJsonResponse(response)
     result.invalidImage = response.ok
   }
   return result
+}
+
+export async function callWebScreenshot(apiKey: string, url: string, signal?: AbortSignal): Promise<WebScreenshotResult> {
+  const response = await fetch('/v1/web/screenshot', {
+    method: 'POST', cache: 'no-store', credentials: 'omit', redirect: 'error',
+    headers: { Authorization: `ApiKey ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }), signal,
+  })
+  return readScreenshotResponse(response)
+}
+
+export async function submitScreenshotJob(
+  apiKey: string,
+  url: string,
+  signal?: AbortSignal,
+): Promise<ScreenshotJobApiResult<CreatedScreenshotJob>> {
+  const response = await fetch('/v1/web/screenshot-jobs', {
+    method: 'POST', cache: 'no-store', credentials: 'omit', redirect: 'error',
+    headers: { Authorization: `ApiKey ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }), signal,
+  })
+  const body = await readJsonResponse(response)
+  return {
+    status: response.status,
+    body,
+    data: isCreatedScreenshotJob(body?.data) ? body.data : null,
+  }
+}
+
+export async function getScreenshotJob(
+  apiKey: string,
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<ScreenshotJobApiResult<ScreenshotJob>> {
+  const response = await fetch(`/v1/web/screenshot-jobs/${encodeURIComponent(jobId)}`, {
+    method: 'GET', cache: 'no-store', credentials: 'omit', redirect: 'error',
+    headers: { Authorization: `ApiKey ${apiKey}` }, signal,
+  })
+  const body = await readJsonResponse(response)
+  return {
+    status: response.status,
+    body,
+    data: isScreenshotJob(body?.data) ? body.data : null,
+  }
+}
+
+export async function getScreenshotJobResult(
+  apiKey: string,
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<WebScreenshotResult> {
+  const response = await fetch(`/v1/web/screenshot-jobs/${encodeURIComponent(jobId)}/result`, {
+    method: 'GET', cache: 'no-store', credentials: 'omit', redirect: 'error',
+    headers: { Authorization: `ApiKey ${apiKey}` }, signal,
+  })
+  return readScreenshotResponse(response)
 }
