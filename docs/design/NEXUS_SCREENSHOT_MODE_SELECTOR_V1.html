@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nexus 网页截图模式选择视觉稿</title>
+  <style>
+    :root {
+      --paper: #faf9f4;
+      --surface: #fffefb;
+      --sage: #eef2e8;
+      --ink: #203b37;
+      --muted: #687970;
+      --teal: #247b70;
+      --teal-dark: #17685e;
+      --teal-soft: #e6f2ed;
+      --gold: #e7bd58;
+      --line: #dce4dd;
+      --line-strong: #c9d7ce;
+      --warning: #9a6a21;
+      --warning-bg: #fff8e8;
+      --shadow: 0 14px 36px rgba(41, 66, 58, .07);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 88% 8%, rgba(231, 189, 88, .08), transparent 19%),
+        linear-gradient(135deg, #f9faf4 0%, var(--paper) 42%, #fbfaf5 100%);
+      font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    button, input { font: inherit; }
+    button { color: inherit; }
+
+    .shell { display: grid; grid-template-columns: 256px minmax(0, 1fr); min-height: 100vh; }
+    .sidebar {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      padding: 28px 16px 22px;
+      border-right: 1px solid var(--line);
+      background: linear-gradient(165deg, #f2f5ec 0%, #eef3e9 56%, #f7f6ee 100%);
+      overflow: hidden;
+    }
+    .sidebar::after {
+      content: "";
+      position: absolute;
+      width: 190px;
+      height: 190px;
+      left: -95px;
+      bottom: 26px;
+      border: 1px solid rgba(36, 123, 112, .14);
+      border-radius: 50%;
+    }
+    .brand { padding: 0 20px 34px; font: 700 27px/1 Georgia, "Songti SC", serif; letter-spacing: -.4px; }
+    .brand-star { margin-left: 7px; color: var(--gold); font-size: 22px; }
+    .nav { display: grid; gap: 8px; }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      min-height: 48px;
+      padding: 0 17px;
+      border-radius: 10px;
+      color: #4f6259;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .nav-item.active { color: var(--teal-dark); background: rgba(223, 235, 226, .92); box-shadow: inset 3px 0 var(--teal); }
+    .nav-icon { width: 22px; text-align: center; font-size: 18px; }
+    .sidebar-bottom { margin-top: auto; padding: 20px; color: #74827b; font-size: 13px; }
+
+    .main { min-width: 0; }
+    .topbar {
+      height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 38px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 254, 251, .83);
+      backdrop-filter: blur(12px);
+    }
+    .breadcrumb { display: flex; align-items: center; gap: 12px; color: #6e7d75; font-size: 14px; }
+    .breadcrumb strong { color: var(--ink); font-weight: 700; }
+    .top-actions { display: flex; align-items: center; gap: 19px; }
+    .orbit { width: 112px; height: 22px; position: relative; border-top: 1px solid #d8ca99; border-radius: 50%; transform: rotate(-12deg); }
+    .orbit::before { content: "✦"; position: absolute; left: 29px; top: -13px; color: var(--gold); font-size: 18px; }
+    .orbit::after { content: ""; position: absolute; right: 5px; top: -2px; width: 7px; height: 7px; background: var(--teal); border-radius: 50%; }
+    .avatar { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: #f0f2ee; font-weight: 750; }
+
+    .page { max-width: 1450px; margin: 0 auto; padding: 34px 38px 50px; }
+    .page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 21px; }
+    .eyebrow { margin-bottom: 8px; color: var(--teal); font-size: 11px; font-weight: 800; letter-spacing: 1.4px; }
+    h1 { margin: 0; font: 700 42px/1.12 Georgia, "Songti SC", serif; letter-spacing: -.8px; }
+    .lead { margin: 8px 0 0; color: var(--muted); font-size: 14px; }
+    .mock-label { padding: 8px 11px; border: 1px solid #e8dfc3; border-radius: 8px; color: #807552; background: #fffdf2; font-size: 11px; white-space: nowrap; }
+
+    .api-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+    .api-tab { min-height: 42px; padding: 0 17px; border: 1px solid var(--line); border-radius: 9px; background: rgba(255, 254, 251, .82); color: #607068; font-size: 13px; font-weight: 650; }
+    .api-tab.active { border-color: #4e9a90; color: var(--teal-dark); background: linear-gradient(180deg, #f8fffb, #e7f3ee); box-shadow: inset 0 0 0 1px rgba(36, 123, 112, .08); }
+
+    .workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: stretch; }
+    .panel { border: 1px solid var(--line); border-radius: 14px; background: rgba(255, 254, 251, .96); box-shadow: var(--shadow); }
+    .panel-inner { padding: 23px; }
+    .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 19px; }
+    .panel-head h2 { margin: 0; font-size: 19px; }
+    .endpoint { padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; background: #f6f8f4; color: #567067; font: 600 11px Consolas, monospace; }
+
+    .label-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 9px; }
+    .field-label { font-size: 13px; font-weight: 750; }
+    .label-note { color: #829087; font-size: 11px; }
+    .mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
+    .mode-card {
+      position: relative;
+      min-height: 120px;
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: #fff;
+      text-align: left;
+      cursor: pointer;
+    }
+    .mode-card:hover { border-color: #9abfb5; }
+    .mode-card.active { border-color: var(--teal); background: linear-gradient(145deg, #f6fcf8, #e8f3ee); box-shadow: inset 0 0 0 1px rgba(36, 123, 112, .13); }
+    .mode-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .mode-title { display: flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 800; }
+    .mode-symbol { display: grid; place-items: center; width: 29px; height: 29px; border-radius: 8px; color: var(--teal-dark); background: var(--teal-soft); font-size: 15px; }
+    .radio { width: 16px; height: 16px; border: 1px solid #aebeb5; border-radius: 50%; background: #fff; box-shadow: inset 0 0 0 4px #fff; }
+    .mode-card.active .radio { border-color: var(--teal); background: var(--teal); }
+    .mode-card p { margin: 10px 0 9px; color: #677970; font-size: 11px; line-height: 1.55; }
+    .mode-meta { display: flex; flex-wrap: wrap; gap: 5px; }
+    .mini-tag { padding: 4px 7px; border-radius: 999px; color: #6a786f; background: #f1f4f0; font-size: 9px; font-weight: 700; }
+    .mode-card.active .mini-tag { color: var(--teal-dark); background: #dcece5; }
+
+    .field { margin-bottom: 15px; }
+    .field label { display: block; margin-bottom: 7px; font-size: 13px; font-weight: 700; }
+    .input { width: 100%; height: 43px; padding: 0 13px; border: 1px solid #cfd9d2; border-radius: 8px; outline: 0; color: #304a44; background: #fff; font-size: 13px; }
+    .input.mono { font-family: Consolas, "SFMono-Regular", monospace; }
+    .input:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(36, 123, 112, .1); }
+    .help { margin: 6px 0 0; color: #7a8981; font-size: 10px; line-height: 1.45; }
+    .capabilities { display: flex; flex-wrap: wrap; gap: 7px; margin: 4px 0 16px; }
+    .capability { padding: 5px 8px; border: 1px solid #dbe5de; border-radius: 7px; color: #5d7066; background: #f7f9f5; font-size: 10px; }
+    .submit { width: 100%; height: 44px; border: 0; border-radius: 9px; color: #fff; background: linear-gradient(90deg, #247b70, #2e8b7f); font-size: 14px; font-weight: 800; box-shadow: 0 8px 18px rgba(36, 123, 112, .16); }
+
+    .response-panel { display: flex; flex-direction: column; }
+    .response-panel .panel-inner { display: flex; flex: 1; flex-direction: column; }
+    .response-meta { display: flex; align-items: center; gap: 10px; color: #718178; font-size: 11px; }
+    .http-status { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; border-radius: 999px; color: #17685e; background: #e3f2e8; font-weight: 800; }
+    .http-status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #248d70; }
+
+    .result-card { padding: 19px; border: 1px solid #cfe2d7; border-radius: 12px; background: linear-gradient(150deg, #f8fcf8, #edf5ee); }
+    .result-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+    .result-head h3 { margin: 3px 0 5px; font-size: 18px; }
+    .result-head p { margin: 0; color: #687970; font-size: 11px; line-height: 1.55; }
+    .status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; border-radius: 999px; color: var(--warning); background: #fff1c8; font-size: 10px; font-weight: 800; white-space: nowrap; }
+    .status-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #d59b2c; box-shadow: 0 0 0 4px rgba(213, 155, 44, .11); }
+    .job-id { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 15px; padding: 11px 12px; border: 1px solid #d8e4dc; border-radius: 8px; background: #fff; }
+    .job-id span { color: #829087; font-size: 10px; }
+    .job-id code { color: #2d6259; font: 700 12px Consolas, monospace; }
+
+    .timeline { display: grid; grid-template-columns: repeat(4, 1fr); margin: 21px 0 18px; }
+    .step { position: relative; padding-top: 25px; text-align: center; color: #89958e; font-size: 10px; }
+    .step::before { content: ""; position: absolute; z-index: 2; top: 3px; left: calc(50% - 7px); width: 13px; height: 13px; border: 2px solid #cbd6cf; border-radius: 50%; background: #fff; }
+    .step::after { content: ""; position: absolute; top: 10px; left: 50%; width: 100%; height: 2px; background: #dbe3dd; }
+    .step:last-child::after { display: none; }
+    .step.done { color: var(--teal-dark); font-weight: 750; }
+    .step.done::before { border-color: var(--teal); background: var(--teal); box-shadow: inset 0 0 0 3px #eaf4ef; }
+    .step.current { color: var(--warning); font-weight: 750; }
+    .step.current::before { border-color: #d6a345; background: #fff6dd; box-shadow: 0 0 0 4px rgba(214, 163, 69, .11); }
+    .step.done::after { background: #7fb4a7; }
+
+    .detail-list { margin-top: 2px; border-top: 1px solid #e5ebe6; }
+    .detail-row { display: grid; grid-template-columns: 116px minmax(0, 1fr); gap: 12px; padding: 12px 2px; border-bottom: 1px solid #e8ede9; font-size: 11px; }
+    .detail-row span:first-child { color: #829087; }
+    .detail-row span:last-child { color: #3d554e; overflow-wrap: anywhere; }
+    .poll-note { display: flex; gap: 10px; margin-top: 16px; padding: 12px 13px; border: 1px solid #eadfbe; border-radius: 8px; color: #796633; background: var(--warning-bg); font-size: 10px; line-height: 1.55; }
+    .poll-note strong { display: block; margin-bottom: 2px; color: #6f5925; }
+    .response-actions { display: flex; gap: 9px; margin-top: auto; padding-top: 17px; }
+    .btn { min-height: 39px; padding: 0 14px; border: 1px solid #cbd8d0; border-radius: 8px; color: var(--teal-dark); background: #fff; font-size: 11px; font-weight: 750; }
+    .btn.primary { border-color: var(--teal); color: #fff; background: var(--teal); }
+
+    .example { margin-top: 18px; padding: 18px 22px; }
+    .example-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .example-head h2 { margin: 0; font-size: 16px; }
+    .example-head span { color: var(--teal); font-size: 11px; font-weight: 700; }
+    .codebox { padding: 14px 16px; border-radius: 9px; color: #dcebe5; background: #173833; font: 11px/1.65 Consolas, monospace; white-space: pre-wrap; }
+    .codebox .green { color: #bde98d; }
+    .codebox .blue { color: #99dce3; }
+
+    @media (max-width: 900px) {
+      .shell { display: block; }
+      .sidebar { min-height: 64px; padding: 0 18px; flex-direction: row; align-items: center; border-right: 0; border-bottom: 1px solid var(--line); }
+      .brand { padding: 0; }
+      .nav, .sidebar-bottom { display: none; }
+      .topbar { display: none; }
+      .page { padding: 25px 18px 45px; }
+      .page-head { align-items: flex-start; flex-direction: column; }
+      h1 { font-size: 34px; }
+      .workspace { grid-template-columns: 1fr; }
+      .mode-grid { grid-template-columns: 1fr; }
+      .api-tabs { flex-wrap: nowrap; overflow-x: auto; }
+      .api-tab { flex: 0 0 auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">Nexus <span class="brand-star">✦</span></div>
+      <nav class="nav" aria-label="主导航">
+        <div class="nav-item"><span class="nav-icon">◇</span>Applications</div>
+        <div class="nav-item"><span class="nav-icon">▤</span>开发文档</div>
+        <div class="nav-item active"><span class="nav-icon">▣</span>API 调试台</div>
+      </nav>
+      <div class="sidebar-bottom">◀　收起导航</div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="breadcrumb"><span>Nexus</span><span>›</span><strong>API 调试台</strong><span>›</span><span>网页截图</span></div>
+        <div class="top-actions"><span class="orbit" aria-hidden="true"></span><span class="avatar">N</span></div>
+      </header>
+
+      <div class="page">
+        <div class="page-head">
+          <div><div class="eyebrow">NEXUS · OPEN API</div><h1>API 调试台</h1><p class="lead">选择调用方式，使用完整 API Key 生成受安全边界保护的网页截图。</p></div>
+          <span class="mock-label">视觉稿 · 演示数据</span>
+        </div>
+
+        <div class="api-tabs" aria-label="API 分类">
+          <button class="api-tab">◇　生成 UUID</button>
+          <button class="api-tab">＃　计算 Hash</button>
+          <button class="api-tab">↗　短链接</button>
+          <button class="api-tab">≡　正文提取</button>
+          <button class="api-tab active">▣　网页截图</button>
+        </div>
+
+        <div class="workspace">
+          <section class="panel">
+            <div class="panel-inner">
+              <div class="panel-head"><h2>请求</h2><code id="endpoint" class="endpoint">POST /v1/web/screenshot-jobs</code></div>
+
+              <div class="label-row"><span class="field-label">截图方式</span><span class="label-note">两种方式共用同一个 Chromium 执行槽</span></div>
+              <div class="mode-grid" role="radiogroup" aria-label="截图方式">
+                <button id="sync-card" class="mode-card" role="radio" aria-checked="false" data-mode="sync">
+                  <span class="mode-top"><span class="mode-title"><span class="mode-symbol">↯</span>同步截图</span><span class="radio"></span></span>
+                  <p>保持本次请求连接，生成后直接返回 PNG。</p>
+                  <span class="mode-meta"><span class="mini-tag">立即预览</span><span class="mini-tag">需持续等待</span></span>
+                </button>
+                <button id="async-card" class="mode-card active" role="radio" aria-checked="true" data-mode="async">
+                  <span class="mode-top"><span class="mode-title"><span class="mode-symbol">◷</span>异步任务</span><span class="radio"></span></span>
+                  <p>后台排队与恢复，创建后查询状态并下载结果。</p>
+                  <span class="mode-meta"><span class="mini-tag">可恢复</span><span class="mini-tag">结果保留 1 小时</span></span>
+                </button>
+              </div>
+
+              <div class="field"><label for="key">API Key</label><input id="key" class="input mono" value="••••••••••••••••••••••••" readonly /><p class="help">只在本页内存中临时使用，不写入路径、日志或视觉稿。</p></div>
+              <div class="field"><label for="url">网页 URL</label><input id="url" class="input mono" value="https://zhuanlan.zhihu.com/p/123456789" readonly /><p class="help">仅支持允许域名的 HTTPS 地址；不执行页面脚本。</p></div>
+              <div class="capabilities"><span class="capability">PNG</span><span class="capability">1280 × 720</span><span class="capability">关闭脚本</span><span class="capability">资源上限</span></div>
+              <button id="submit" class="submit">创建异步任务　→</button>
+            </div>
+          </section>
+
+          <section class="panel response-panel">
+            <div class="panel-inner">
+              <div class="panel-head"><h2>响应</h2><div class="response-meta"><span id="http-status" class="http-status">201 Created</span><span>86 ms</span></div></div>
+              <div id="async-result">
+                <div class="result-card">
+                  <div class="result-head"><div><div class="eyebrow">SCREENSHOT JOB CREATED</div><h3>任务已创建</h3><p>请求已接纳，页面会自动查询本次任务。</p></div><span class="status-pill">排队中</span></div>
+                  <div class="job-id"><span>Job ID</span><code>sj_01JAY8Q9H7K4M2N6P3RX</code></div>
+                </div>
+                <div class="timeline" aria-label="任务进度"><div class="step done">已提交</div><div class="step current">排队中</div><div class="step">生成 PNG</div><div class="step">可下载</div></div>
+                <div class="detail-list">
+                  <div class="detail-row"><span>尝试次数</span><span>0 / 2</span></div>
+                  <div class="detail-row"><span>创建时间</span><span>2026-10-23 16:08:24</span></div>
+                  <div class="detail-row"><span>结果保留</span><span>截图成功后 1 小时</span></div>
+                </div>
+                <div class="poll-note"><span>ⓘ</span><div><strong>本页每 2 秒查询一次</strong>轮询不重复消耗配额。页面只保留本次 Job ID，不虚构“历史列表”能力。</div></div>
+              </div>
+              <div id="sync-result" hidden>
+                <div class="result-card">
+                  <div class="result-head"><div><div class="eyebrow">PNG RESPONSE</div><h3>等待后直接返回</h3><p>同步模式保持连接，成功时在右侧直接预览 PNG。</p></div><span class="status-pill">未发送</span></div>
+                  <div class="job-id"><span>响应类型</span><code>image/png</code></div>
+                </div>
+                <div class="poll-note"><span>ⓘ</span><div><strong>适合当前页立即预览</strong>请求期间需持续等待；不保存历史，刷新页面后图片清除。</div></div>
+              </div>
+              <div class="response-actions"><button class="btn primary">查询当前状态</button><button class="btn">复制 Job ID</button><button class="btn">查看接口文档　↗</button></div>
+            </div>
+          </section>
+        </div>
+
+        <section class="panel example">
+          <div class="example-head"><h2>请求示例</h2><span>curl · 异步任务</span></div>
+          <div id="example" class="codebox">curl -X POST 'https://nexus.example/<span class="blue">v1/web/screenshot-jobs</span>' \
+  -H 'Authorization: ApiKey <span class="green">&lt;完整密钥&gt;</span>' \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://zhuanlan.zhihu.com/p/123456789"}'</div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const cards = [...document.querySelectorAll('.mode-card')]
+    const endpoint = document.querySelector('#endpoint')
+    const submit = document.querySelector('#submit')
+    const httpStatus = document.querySelector('#http-status')
+    const asyncResult = document.querySelector('#async-result')
+    const syncResult = document.querySelector('#sync-result')
+    const actions = document.querySelector('.response-actions')
+    const example = document.querySelector('#example')
+
+    function selectMode(mode) {
+      const asyncMode = mode === 'async'
+      cards.forEach(card => {
+        const selected = card.dataset.mode === mode
+        card.classList.toggle('active', selected)
+        card.setAttribute('aria-checked', String(selected))
+      })
+      endpoint.textContent = asyncMode ? 'POST /v1/web/screenshot-jobs' : 'POST /v1/web/screenshot'
+      submit.textContent = asyncMode ? '创建异步任务　→' : '生成同步截图　→'
+      httpStatus.textContent = asyncMode ? '201 Created' : '200 PNG'
+      asyncResult.hidden = !asyncMode
+      syncResult.hidden = asyncMode
+      actions.hidden = !asyncMode
+      example.innerHTML = asyncMode
+        ? `curl -X POST 'https://nexus.example/<span class="blue">v1/web/screenshot-jobs</span>' \\\n+  -H 'Authorization: ApiKey <span class="green">&lt;完整密钥&gt;</span>' \\\n+  -H 'Content-Type: application/json' \\\n+  -d '{"url":"https://zhuanlan.zhihu.com/p/123456789"}'`
+        : `curl --fail-with-body -X POST 'https://nexus.example/<span class="blue">v1/web/screenshot</span>' \\\n+  -H 'Authorization: ApiKey <span class="green">&lt;完整密钥&gt;</span>' \\\n+  -H 'Content-Type: application/json' \\\n+  -d '{"url":"https://zhuanlan.zhihu.com/p/123456789"}' --output screenshot.png`
+    }
+
+    cards.forEach(card => card.addEventListener('click', () => selectMode(card.dataset.mode)))
+  </script>
+</body>
+</html>
