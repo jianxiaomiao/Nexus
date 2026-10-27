@@ -1,0 +1,26 @@
+name: Nexus CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v7
+
+      - name: 安装环境
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: 安装依赖
+        working-directory: ./nexus-console
+        run: npm ci
+
+      - name: 类型检查与生产构建
+        working-directory: ./nexus-console
+        run: npm run build
