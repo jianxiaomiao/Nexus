@@ -29,6 +29,8 @@ public final class ApplicationRateLimiter implements AutoCloseable {
     private final long intervalNanos;
     private final long waitTimeoutNanos;
 
+    private final int maxGlobalWaiters;
+
     private final LongSupplier nanoTime;
     private final AtomicBoolean closing = new AtomicBoolean();
 
@@ -60,6 +62,8 @@ public final class ApplicationRateLimiter implements AutoCloseable {
         this.maxApplicationStates = maxApplicationStates;
         this.intervalNanos = interval.toNanos();
         this.waitTimeoutNanos = waitTimeout.toNanos();
+
+        this.maxGlobalWaiters = maxGlobalWaiters;
 
         this.globalWaitingSlots =
                 new Semaphore(maxGlobalWaiters);
@@ -518,5 +522,14 @@ public final class ApplicationRateLimiter implements AutoCloseable {
             // State 已被清理器删除，释放旧锁后重新查找
             state.lock.unlock();
         }
+    }
+
+    int currentWaiterCount() {
+        return maxGlobalWaiters
+                - globalWaitingSlots.availablePermits();
+    }
+
+    int currentStateCount() {
+        return states.size();
     }
 }

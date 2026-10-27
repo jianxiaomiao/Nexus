@@ -2,6 +2,7 @@ package com.nexus.usage.web;
 
 import com.nexus.auth.ApiKeyAuthenticator.ApiKeyIdentity;
 import com.nexus.usage.ApiCode;
+import com.nexus.usage.metrics.UsageRecordMetrics;
 import com.nexus.usage.service.UsageRecordService;
 import com.nexus.openapi.web.MachineIdentityResolver;
 import jakarta.servlet.http.HttpServletRequest;
@@ -26,9 +27,12 @@ public class UsageInterceptor implements HandlerInterceptor {
     private static final String START_UTC_TIME = "usage.startUtcTime";
 
     private final UsageRecordService usageRecordService;
+    private final UsageRecordMetrics metrics;
 
-    public UsageInterceptor(UsageRecordService usageRecordService) {
+    public UsageInterceptor(UsageRecordService usageRecordService,
+                            UsageRecordMetrics metrics) {
         this.usageRecordService = usageRecordService;
+        this.metrics = metrics;
     }
 
     @Override
@@ -83,7 +87,13 @@ public class UsageInterceptor implements HandlerInterceptor {
         }
 
         // 4. 拿到http状态码
-        int httpStatus = response.getStatus();
+        int httpStatus;
+
+        if (exception != null && !response.isCommitted()) {
+            httpStatus = HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+        } else {
+            httpStatus = response.getStatus();
+        }
 
         if (identity == null || startUtc == null) {
             log.warn("跳过用量记录：apiCode={}, identityPresent={}, startUtcPresent={}",
@@ -95,6 +105,7 @@ public class UsageInterceptor implements HandlerInterceptor {
         try {
             usageRecordService.record(apiCode, identity, httpStatus, costNs, startUtc, eventId);
         } catch (TaskRejectedException rejected) {
+            metrics.recordFailure(UsageRecordMetrics.FailureReason.QUEUE_REJECTED);
             // 有界队列已满时，只放弃这条统计事件，不改变原本的 API 响应。
             log.warn("用量记录队列已满，事件未提交：apiCode={}, apiKeyId={}, appId={}, eventId={}",
                     apiCode.getCode(), identity.apiKeyId(), identity.applicationId(), eventId, rejected);

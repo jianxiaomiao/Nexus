@@ -2,6 +2,9 @@ package com.nexus.openapi.web;
 
 import com.nexus.auth.ApiKeyAuthenticator.ApiKeyIdentity;
 import com.nexus.openapi.ratelimit.ApplicationRateLimiter;
+import com.nexus.openapi.ratelimit.ApplicationRateMetrics;
+import io.micrometer.core.instrument.Timer;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.servlet.FilterChain;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -27,8 +30,10 @@ class ApplicationRateFilterExceptionTests {
         ObjectMapper objectMapper = mock(ObjectMapper.class);
         when(objectMapper.writeValueAsString(any()))
                 .thenReturn("{\"code\":\"RATE_LIMIT_IDENTITY_INVALID\",\"message\":\"限流身份中的 Application ID 必须为正数\",\"data\":null}");
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
         ApplicationRateFilter filter = new ApplicationRateFilter(
-                limiter, new MachineIdentityResolver(), objectMapper);
+                limiter, new MachineIdentityResolver(), objectMapper,
+                new ApplicationRateMetrics(meterRegistry));
         MockHttpServletRequest request =
                 new MockHttpServletRequest("GET", "/v1/utils/uuid");
         request.setAttribute(MachineIdentityResolver.ATTRIBUTE_NAME,
@@ -41,5 +46,10 @@ class ApplicationRateFilterExceptionTests {
         assertEquals(500, response.getStatus());
         assertTrue(response.getContentAsString().contains("RATE_LIMIT_IDENTITY_INVALID"));
         verifyNoInteractions(chain);
+        Timer unavailable = meterRegistry.find(
+                        ApplicationRateMetrics.ADMISSION_METRIC_NAME)
+                .tag("outcome", "unavailable")
+                .timer();
+        assertEquals(1.0, unavailable.count());
     }
 }

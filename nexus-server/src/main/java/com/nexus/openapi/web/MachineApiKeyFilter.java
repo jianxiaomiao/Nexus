@@ -5,6 +5,7 @@ import com.nexus.auth.ApiKeyAuthenticator.ApiKeyIdentity;
 import com.nexus.auth.exception.ApiKeyForbiddenException;
 import com.nexus.auth.exception.InvalidApiKeyCredentialException;
 import com.nexus.common.web.ApiResponse;
+import com.nexus.common.web.RequestFailureLogContext;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -38,10 +39,16 @@ public class MachineApiKeyFilter extends OncePerRequestFilter {
         } catch (InvalidApiKeyCredentialException exception) {
             // Filter 在 DispatcherServlet 之前运行，ControllerAdvice 不会处理这里的异常。
             response.setHeader(HttpHeaders.WWW_AUTHENTICATE, "ApiKey realm=\"nexus-openapi\"");
+            RequestFailureLogContext.mark(request,
+                    RequestFailureLogContext.Category.BUSINESS_REJECTION,
+                    "INVALID_API_KEY_CREDENTIAL");
             writeError(response, HttpServletResponse.SC_UNAUTHORIZED,
                     "INVALID_API_KEY_CREDENTIAL", exception.getMessage());
             return;
         } catch (ApiKeyForbiddenException exception) {
+            RequestFailureLogContext.mark(request,
+                    RequestFailureLogContext.Category.BUSINESS_REJECTION,
+                    "API_KEY_FORBIDDEN");
             writeError(response, HttpServletResponse.SC_FORBIDDEN,
                     "API_KEY_FORBIDDEN", exception.getMessage());
             return;

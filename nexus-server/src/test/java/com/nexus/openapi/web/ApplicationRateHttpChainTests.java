@@ -7,9 +7,12 @@ import com.nexus.common.web.ApiResponse;
 import com.nexus.common.web.RequestFailureLoggingFilter;
 import com.nexus.openapi.controller.UuidOpenApiController;
 import com.nexus.openapi.ratelimit.ApplicationRateLimiter;
+import com.nexus.openapi.ratelimit.ApplicationRateMetrics;
+import com.nexus.openapi.ratelimit.InvalidRateLimitApplicationIdException;
 import com.nexus.openapi.ratelimit.QueueDecision;
 import com.nexus.openapi.ratelimit.RateLimitAdmission;
 import com.nexus.quota.service.ApplicationQuotaService;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.servlet.DispatcherType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,6 +31,7 @@ import java.util.concurrent.CompletableFuture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -115,7 +119,8 @@ class ApplicationRateHttpChainTests {
                         .value("APPLICATION_RATE_QUEUE_FULL"));
 
         verifyNoInteractions(fixture.quotaService());
-        assertEquals(1, occurrences(output.getOut(), "请求被拒绝"));
+        assertEquals(1, occurrences(output.getOut(), "请求受容量保护"));
+        assertEquals(0, occurrences(output.getOut(), "请求失败 method="));
     }
 
     @Test
@@ -143,19 +148,105 @@ class ApplicationRateHttpChainTests {
         verifyNoInteractions(fixture.quotaService());
         verify(fixture.limiter(), times(1)).acquire(20L);
         assertEquals(1, occurrences(output.getOut(), "status=429"));
+        assertEquals(1, occurrences(output.getOut(), "请求受容量保护"));
+        assertEquals(0, occurrences(output.getOut(), "请求失败 method="));
     }
 
     @Test
-    void infrastructureRejectionsReturn503WithoutQuota() throws Exception {
+    void capacityRejectionsReturn503AndWarnWithoutQuota(CapturedOutput output)
+            throws Exception {
         assertInfrastructureRejection(
                 RateLimitAdmission.RejectReason.GLOBAL_QUEUE_FULL,
                 "RATE_LIMIT_GLOBAL_QUEUE_FULL");
         assertInfrastructureRejection(
                 RateLimitAdmission.RejectReason.STATE_CAPACITY_REACHED,
                 "RATE_LIMIT_STATE_CAPACITY_REACHED");
+
+        assertEquals(2, occurrences(output.getOut(), "请求受容量保护"));
+        assertEquals(0, occurrences(output.getOut(), "请求失败 method="));
+        assertFalse(output.getOut().contains("\tat com.nexus."));
+    }
+
+    @Test
+    void limiterUnavailable503RemainsErrorWithoutQuota(CapturedOutput output)
+            throws Exception {
         assertInfrastructureRejection(
                 RateLimitAdmission.RejectReason.LIMITER_UNAVAILABLE,
                 "RATE_LIMITER_UNAVAILABLE");
+
+        assertEquals(0, occurrences(output.getOut(), "请求受容量保护"));
+        assertEquals(1, occurrences(output.getOut(), "请求失败 method="));
+        assertFalse(output.getOut().contains("\tat com.nexus."));
+    }
+
+    @Test
+    void invalidLimiterIdentityLogsOneErrorWithStackAndReturns500(CapturedOutput output)
+            throws Exception {
+        Fixture fixture = fixture();
+        when(fixture.limiter().acquire(20L))
+                .thenThrow(new InvalidRateLimitApplicationIdException());
+
+        fixture.mvc().perform(machineGet())
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.code").value("RATE_LIMIT_IDENTITY_INVALID"));
+
+        verifyNoInteractions(fixture.quotaService());
+        String log = output.getOut();
+        assertEquals(1, occurrences(log, "限流身份无效"));
+        assertEquals(0, occurrences(log, "请求失败 method="));
+        assertTrue(log.contains("category=system_failure"));
+        assertTrue(log.contains("\tat com.nexus."));
+    }
+
+    @Test
+    void asynchronousLimiterFailureLogsOneErrorWithStack(CapturedOutput output)
+            throws Exception {
+        Fixture fixture = fixture();
+        CompletableFuture<QueueDecision> completion = new CompletableFuture<>();
+        RateLimitAdmission.WaitHandle handle = waitHandle(completion);
+        when(fixture.limiter().acquire(20L)).thenReturn(
+                new RateLimitAdmission.Queued(handle));
+
+        MvcResult pending = fixture.mvc().perform(machineGet())
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        completion.completeExceptionally(new IllegalStateException("scheduler failed"));
+
+        fixture.mvc().perform(servletAsyncDispatch(pending))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("RATE_LIMITER_UNAVAILABLE"));
+
+        verifyNoInteractions(fixture.quotaService());
+        String log = output.getOut();
+        assertEquals(1, occurrences(log, "等待限流结果时发生异常"));
+        assertEquals(0, occurrences(log, "请求失败 method="));
+        assertTrue(log.contains("category=system_failure"));
+        assertTrue(log.contains("IllegalStateException: scheduler failed"));
+        assertTrue(log.contains("\tat com.nexus."));
+    }
+
+    @Test
+    void cancelledWaitIsWarnedAsKnownRequestInterruption(CapturedOutput output)
+            throws Exception {
+        Fixture fixture = fixture();
+        CompletableFuture<QueueDecision> completion = new CompletableFuture<>();
+        RateLimitAdmission.WaitHandle handle = waitHandle(completion);
+        when(fixture.limiter().acquire(20L)).thenReturn(
+                new RateLimitAdmission.Queued(handle));
+
+        MvcResult pending = fixture.mvc().perform(machineGet())
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        completion.complete(QueueDecision.CANCELLED);
+
+        fixture.mvc().perform(servletAsyncDispatch(pending))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("RATE_LIMIT_WAIT_CANCELLED"));
+
+        verifyNoInteractions(fixture.quotaService());
+        assertEquals(1, occurrences(output.getOut(), "请求已中断"));
+        assertEquals(0, occurrences(output.getOut(), "请求失败 method="));
+        assertTrue(output.getOut().contains("category=request_interrupted"));
     }
 
     private void assertInfrastructureRejection(
@@ -226,6 +317,8 @@ class ApplicationRateHttpChainTests {
         });
 
         MachineIdentityResolver identityResolver = new MachineIdentityResolver();
+        ApplicationRateMetrics rateMetrics =
+                new ApplicationRateMetrics(new SimpleMeterRegistry());
         UuidOpenApiController controller =
                 new UuidOpenApiController(identityResolver, quotaService);
         MockMvc mvc = standaloneSetup(controller)
@@ -233,7 +326,7 @@ class ApplicationRateHttpChainTests {
                         new RequestFailureLoggingFilter(),
                         new MachineApiKeyFilter(authenticator, objectMapper),
                         new ApplicationRateFilter(
-                                limiter, identityResolver, objectMapper))
+                                limiter, identityResolver, objectMapper, rateMetrics))
                 .build();
 
         return new Fixture(

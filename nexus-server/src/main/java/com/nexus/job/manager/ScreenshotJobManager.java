@@ -7,9 +7,11 @@ import com.nexus.job.store.ScreenshotResultStore;
 import com.nexus.job.store.ScreenshotResultStoreException;
 import com.nexus.job.store.StoredScreenshot;
 import com.nexus.screenshot.exception.ScreenshotException;
+import com.nexus.screenshot.metrics.ScreenshotMetrics;
 import com.nexus.screenshot.service.ScreenshotExecutionGate;
 import com.nexus.screenshot.service.ScreenshotRenderer;
 import com.nexus.screenshot.service.ScreenshotResult;
+import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -22,6 +24,10 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
+
+import static com.nexus.screenshot.metrics.ScreenshotMetrics.ExecutionMode.ASYNC;
+import static com.nexus.screenshot.metrics.ScreenshotMetrics.ExecutionOutcome.FAILED;
+import static com.nexus.screenshot.metrics.ScreenshotMetrics.ExecutionOutcome.SUCCEEDED;
 
 @Component
 public class ScreenshotJobManager {
@@ -37,6 +43,7 @@ public class ScreenshotJobManager {
     private final ScreenshotRenderer renderer;
     private final ScreenshotResultStore resultStore;
     private final ScreenshotExecutionGate executionGate;
+    private final ScreenshotMetrics metrics;
     private final Clock clock;
     private final TransactionTemplate claimTransaction;
 
@@ -44,12 +51,14 @@ public class ScreenshotJobManager {
                                 ScreenshotRenderer renderer,
                                 ScreenshotResultStore resultStore,
                                 ScreenshotExecutionGate executionGate,
+                                ScreenshotMetrics metrics,
                                 Clock clock,
                                 PlatformTransactionManager transactionManager) {
         this.jobMapper = jobMapper;
         this.renderer = renderer;
         this.resultStore = resultStore;
         this.executionGate = executionGate;
+        this.metrics = metrics;
         this.clock = clock;
         this.claimTransaction = new TransactionTemplate(transactionManager);
     }
@@ -66,25 +75,37 @@ public class ScreenshotJobManager {
             Thread.currentThread().interrupt();
             return false;
         }
+        Timer.Sample executionSample = null;
+        ScreenshotMetrics.ExecutionOutcome outcome = FAILED;
         try {
+            executionSample = metrics.startExecution();
             ScreenshotJob job = claimNextJob();
             if (job == null) {
                 return false;
             }
-            executeClaimedJob(job);
+            if (executeClaimedJob(job)) {
+                outcome = SUCCEEDED;
+            }
             return true;
         } finally {
-            executionGate.release();
+            try {
+                if (executionSample != null) {
+                    metrics.stopExecution(executionSample, ASYNC, outcome);
+                }
+            } finally {
+                executionGate.release();
+            }
         }
     }
 
     ScreenshotJob claimNextJob() {
-        return claimTransaction.execute(status -> {
+        ClaimedJob claimed = claimTransaction.execute(status -> {
             ScreenshotJob job = jobMapper.selectNextQueuedForUpdate();
             if (job == null) {
                 return null;
             }
             LocalDateTime startedAt = utcNow();
+            boolean firstStart = job.getStartedAt() == null;
             String runToken = UUID.randomUUID().toString();
             int changed = jobMapper.markRunningIfQueued(
                     job.getId(), runToken, startedAt.plusSeconds(LEASE_SECONDS), startedAt);
@@ -95,14 +116,21 @@ public class ScreenshotJobManager {
             job.setAttemptCount(job.getAttemptCount() + 1);
             job.setRunToken(runToken);
             job.setLeaseExpiresAt(startedAt.plusSeconds(LEASE_SECONDS));
-            if (job.getStartedAt() == null) {
+            if (firstStart) {
                 job.setStartedAt(startedAt);
             }
-            return job;
+            return new ClaimedJob(job, firstStart, startedAt);
         });
+        if (claimed == null) {
+            return null;
+        }
+        if (claimed.firstStart()) {
+            metrics.recordQueueDelay(claimed.job().getCreatedAt(), claimed.startedAt());
+        }
+        return claimed.job();
     }
 
-    void executeClaimedJob(ScreenshotJob job) {
+    boolean executeClaimedJob(ScreenshotJob job) {
         try {
             ScreenshotResult rendered = renderer.render(URI.create(job.getTargetUrl()));
             StoredScreenshot stored = resultStore.saveAtomically(job.getJobId(), rendered.png());
@@ -113,17 +141,22 @@ public class ScreenshotJobManager {
                     completedAt.plusHours(RESULT_RETENTION_HOURS), completedAt);
             if (changed == 0) {
                 deleteResultQuietly(job.getJobId(), "stale-success");
+                return false;
             } else if (changed != 1) {
                 throw new IllegalStateException("Screenshot job completion affected multiple rows");
             }
+            return true;
         } catch (ScreenshotException exception) {
             markKnownFailure(job, exception.code());
+            return false;
         } catch (ScreenshotResultStoreException exception) {
             markKnownFailure(job, "RESULT_STORAGE_FAILED");
+            return false;
         } catch (RuntimeException exception) {
             // 未确认数据库提交结果或未知内部故障时保留 RUNNING，由租约恢复规则接管。
             log.error("异步截图执行出现未分类故障 jobId={}, exception={}",
                     job.getJobId(), exception.getClass().getSimpleName(), exception);
+            return false;
         }
     }
 
@@ -182,5 +215,11 @@ public class ScreenshotJobManager {
 
     private LocalDateTime utcNow() {
         return LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+    }
+
+    private record ClaimedJob(
+            ScreenshotJob job,
+            boolean firstStart,
+            LocalDateTime startedAt) {
     }
 }

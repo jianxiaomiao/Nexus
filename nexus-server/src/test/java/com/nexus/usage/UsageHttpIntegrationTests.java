@@ -8,6 +8,9 @@ import com.nexus.apikey.mapper.ApiKeyMapper;
 import com.nexus.application.entity.Application;
 import com.nexus.quota.QuotaTestCleanup;
 import com.nexus.quota.mapper.ApplicationQuotaMapper;
+import com.nexus.screenshot.exception.ScreenshotException;
+import com.nexus.screenshot.service.ScreenshotRenderer;
+import com.nexus.usage.metrics.UsageRecordMetrics;
 import com.nexus.application.exception.ApplicationNotFoundException;
 import com.nexus.application.mapper.ApplicationMapper;
 import com.nexus.auth.token.JwtTokenService;
@@ -27,8 +30,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.databind.ObjectMapper;
 
 import java.net.URI;
@@ -49,8 +58,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.when;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@Import(UsageHttpIntegrationTests.UnhandledUsageController.class)
 class UsageHttpIntegrationTests {
     private static final String TEST_JWT_SECRET = Base64.getEncoder()
             .encodeToString(SecureRandom.getSeed(32));
@@ -67,11 +80,13 @@ class UsageHttpIntegrationTests {
     @Autowired private UserMapper userMapper;
     @Autowired private ApplicationMapper applicationMapper;
     @Autowired private ApiKeyMapper apiKeyMapper;
-    @Autowired private UsageEventMapper usageEventMapper;
+    @MockitoSpyBean private UsageEventMapper usageEventMapper;
     @Autowired private UsageQueryService usageQueryService;
     @Autowired private JwtTokenService jwtTokenService;
     @Autowired @Qualifier("usageExecutor") private Executor usageExecutor;
     @Autowired private ObjectMapper objectMapper;
+    @Autowired private io.micrometer.core.instrument.MeterRegistry meterRegistry;
+    @MockitoBean private ScreenshotRenderer screenshotRenderer;
 
     @Autowired ApplicationQuotaMapper quotaMapper;
 
@@ -140,6 +155,61 @@ class UsageHttpIntegrationTests {
             assertTrue(event.getDurationMs() >= 0);
             assertEquals(event.getEventId(), UUID.fromString(event.getEventId()).toString());
         }
+    }
+
+    @Test
+    void handled429And503ResponsesAreRecordedWithTheirFinalStatuses() throws Exception {
+        application.setQuota(0);
+        applicationMapper.updateById(application);
+        HttpResponse<String> exhausted = getMachine("/v1/test/usage-unhandled?mode=success");
+        assertEquals(200, exhausted.statusCode());
+
+        HttpResponse<String> quotaRejected = getMachine("/v1/utils/uuid");
+        assertEquals(429, quotaRejected.statusCode());
+        awaitEvents(2);
+
+        application.setQuota(1000);
+        applicationMapper.updateById(application);
+        when(screenshotRenderer.render(any()))
+                .thenThrow(new ScreenshotException(ScreenshotException.Kind.BUSY));
+        HttpResponse<String> unavailable = postMachine(
+                "/v1/web/screenshot", "{\"url\":\"https://blog.csdn.net/article\"}");
+        assertEquals(503, unavailable.statusCode());
+
+        List<UsageEvent> events = awaitEvents(3);
+        assertEquals(1, events.stream()
+                .filter(event -> event.getHttpStatusCode() == 200).count());
+        assertEquals(1, events.stream()
+                .filter(event -> event.getHttpStatusCode() == 429).count());
+        assertEquals(1, events.stream()
+                .filter(event -> event.getHttpStatusCode() == 503).count());
+    }
+
+    @Test
+    void unhandledExceptionIsReturnedAndRecordedAs500() throws Exception {
+        HttpResponse<String> response = getMachine("/v1/test/usage-unhandled");
+
+        assertEquals(500, response.statusCode());
+        List<UsageEvent> events = awaitEvents(1);
+        assertEquals(1, events.size());
+        assertEquals(500, events.getFirst().getHttpStatusCode());
+        assertEquals("uuid.generate", events.getFirst().getApiCode());
+    }
+
+    @Test
+    void usageWriteFailureDoesNotChangeSuccessfulHttpResponseOrCreateEvent()
+            throws Exception {
+        double failuresBefore = usageWriteFailureCount();
+        doThrow(new IllegalStateException("test-only usage write failure"))
+                .when(usageEventMapper).insert(any(UsageEvent.class));
+
+        HttpResponse<String> response = getMachine("/v1/utils/uuid");
+
+        assertEquals(200, response.statusCode());
+        awaitUsageWriteFailure(failuresBefore + 1.0);
+        assertEquals(failuresBefore + 1.0, usageWriteFailureCount());
+        assertEquals(0L, usageEventMapper.selectCount(Wrappers.<UsageEvent>lambdaQuery()
+                .eq(UsageEvent::getApiKeyId, key.getId())));
     }
 
     @Test
@@ -295,6 +365,42 @@ class UsageHttpIntegrationTests {
         return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
     }
 
+    private HttpResponse<String> getMachine(String path) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(
+                        URI.create("http://localhost:" + port + path))
+                .header("Authorization", "ApiKey " + generated.plaintextKey())
+                .GET()
+                .build();
+        return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    private HttpResponse<String> postMachine(String path, String body) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(
+                        URI.create("http://localhost:" + port + path))
+                .header("Authorization", "ApiKey " + generated.plaintextKey())
+                .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+        return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    private double usageWriteFailureCount() {
+        return meterRegistry.get(UsageRecordMetrics.FAILURE_METRIC_NAME)
+                .tag("reason", UsageRecordMetrics.FailureReason.WRITE_FAILED.tagValue())
+                .counter()
+                .count();
+    }
+
+    private void awaitUsageWriteFailure(double expected) throws InterruptedException {
+        long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (usageWriteFailureCount() < expected) {
+            if (System.nanoTime() >= deadline) {
+                assertEquals(expected, usageWriteFailureCount());
+            }
+            Thread.sleep(25);
+        }
+    }
+
     private List<UsageEvent> awaitEvents(int expected) throws InterruptedException {
         long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
         List<UsageEvent> events;
@@ -305,5 +411,17 @@ class UsageHttpIntegrationTests {
             Thread.sleep(25);
         } while (System.nanoTime() < deadline);
         return events;
+    }
+
+    @RestController
+    static class UnhandledUsageController {
+        @com.nexus.usage.web.UsageApi(ApiCode.UUID_GENERATE)
+        @GetMapping("/v1/test/usage-unhandled")
+        String invoke(jakarta.servlet.http.HttpServletRequest request) {
+            if ("success".equals(request.getParameter("mode"))) {
+                return "ok";
+            }
+            throw new IllegalStateException("test-only unhandled failure");
+        }
     }
 }

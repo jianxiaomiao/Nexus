@@ -1,5 +1,7 @@
 package com.nexus.screenshot.service;
 
+import com.nexus.screenshot.metrics.ScreenshotExecutionGateMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -11,6 +13,21 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ScreenshotExecutionGateTests {
+    @Test
+    void busyGaugeReadsTheAuthoritativeSemaphoreState() {
+        ScreenshotExecutionGate gate = new ScreenshotExecutionGate();
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        new ScreenshotExecutionGateMetrics(gate).bindTo(registry);
+        var gauge = registry.get(
+                ScreenshotExecutionGateMetrics.SLOT_BUSY_METRIC_NAME).gauge();
+
+        assertEquals(0.0, gauge.value());
+        assertTrue(gate.tryAcquireForSynchronousRequest());
+        assertEquals(1.0, gauge.value());
+        gate.release();
+        assertEquals(0.0, gauge.value());
+    }
+
     @Test
     void waitingAsynchronousJobCannotBeOvertakenByLaterSynchronousRequest() throws Exception {
         ScreenshotExecutionGate gate = new ScreenshotExecutionGate();

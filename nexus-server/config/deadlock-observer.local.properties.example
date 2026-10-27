@@ -1,0 +1,5 @@
+# Copy this file to deadlock-observer.local.properties only for the local
+# Quota/Usage deadlock experiment. The real file is ignored by Git.
+url=jdbc:mysql://127.0.0.1:3306/?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8
+username=nexus_deadlock_observer
+password=replace-with-a-temporary-local-password

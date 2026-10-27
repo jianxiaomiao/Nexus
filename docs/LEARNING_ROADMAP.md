@@ -87,7 +87,7 @@
 
 具体决定与验证边界见 [配额设计](QUOTA_DESIGN.md)。当前本地配置已回到日常 nexus；测试通过进程环境覆盖为专用测试库与账号，不改日常设置。
 
-## G. 持久化异步截图任务（当前学习单元）
+## G. 持久化异步截图任务（当前检查点完成）
 
 **要解决的问题：** 同步截图最长占用连接和唯一 Chromium 执行槽约 20 秒；客户端必须持续等待，且进程重启时没有可恢复的任务事实。异步化先只服务截图，不抽象为万能任务平台。
 
@@ -97,9 +97,30 @@
 - [x] 专用 `nexus_test` 从 V8 真实迁移到 V9；Flyway 校验 9 个迁移，聚焦 Spring 上下文测试通过。未运行完整回归，V9 尚未部署到 ECS。
 - [x] Service 与 Manager 完成：配额与 `QUEUED` 插入同事务，FIFO 原子认领使用 30 秒租约和 runToken 围栏，最多两次尝试；Renderer 在事务外执行，ResultStore 原子发布 PNG，定时任务恢复租约并按 1 小时/24 小时清理。
 - [x] Mapper 的 11 个业务 SQL 和 Service/并发/崩溃恢复测试完成；真实 MySQL 场景验证租约重排、尝试耗尽、旧 token 围栏、文件与元数据清理顺序、配额与任务插入共同回滚。
-- [x] 提交、状态、结果三个 HTTP 接口完成，同步截图保留作为对照路径。2026-10-23 专用 `nexus_test` 全量后端回归 414/414 通过；前端轮询尚未实现，下一步先确认同步/异步分类视觉稿。
+- [x] 提交、状态、结果三个 HTTP 接口完成，同步截图保留作为对照路径。2026-10-23 专用 `nexus_test` 全量后端回归 414/414 通过；同步/异步前端、2 秒串行轮询和当前 Job 展示已实现，完整模拟浏览器回归 88/88。提交 `9a9d10c` 已推送，开发者报告一次真实前端异步任务成功；V9 尚未部署 ECS。
 
 **学习检查：** 能区分数据库中的任务状态、Worker 的运行时单并发和租约恢复分别解决什么问题，并能说明进程在接纳、认领、渲染、文件发布及完成更新之间崩溃时如何收敛。
+
+## H. 最小可观测性与受控压力实验（当前检查点完成）
+
+**要解决的问题：** 现有日志和 Usage 能说明离散事件与业务调用，但不能连续回答服务是否变慢、错误是否上升、资源是否饱和、限流或截图任务是否积压。没有这些基线，压力测试只能看到结果，难以定位瓶颈。
+
+- [x] 2026-10-23 已审定[“问题 → 指标 → 指标类型 → 验证方法”表](OBSERVABILITY_BASELINE.md)，明确 Timer、Counter、Gauge 的边界、第一批指标、标签约束和验证方法。
+- [x] 2026-10-24 已实现最小 Actuator/Micrometer 指标出口；管理端点使用独立回环监听，只暴露 health/metrics/prometheus，不经 Nginx 或公网防火墙规则。
+- [x] 限流 admission/waiters/states、截图 queue-delay/execution/unfinished/busy，以及 Usage 最终记录失败已完成；固定标签不包含 API Key、JWT、jobId、用户/Application ID、原始 URL 或动态异常文本。确定性边界、Gauge 生命周期和 Actuator/Prometheus 双出口均已验证。
+- [x] 框架 HTTP、Hikari、JVM、进程、GC 和磁盘指标已通过三个受控实验验收：Filter 401/429 各计一次且使用 `uri=UNKNOWN`，Hikari 2 连接池验证 active/idle/pending/acquire 状态迁移，运行时指标单位与范围合理；GC Binder 启动即存在，但事件序列允许在未自然 GC 时尚未创建。完整后端回归 431/431 通过。
+- [x] 2026-10-24 已完成单 Application 限流受控负载实验：UUID 以均匀 5/10/12/20 RPS 各运行 15 秒，真实观察 admission/waiters/states、HTTP、Hikari、JVM、GC 与 Usage；吞吐在约 9.8 RPS 形成平台，队列和状态边界正确，数据库/JVM/Usage/客户端均未先饱和，Actuator 与 Prometheus 结果一致，隔离数据已精确清理。
+- [x] 已接受“100 ms 最小间隔、实际吞吐略低于 10 RPS”的保守上限语义，不做 9 RPS 复验或算法修改。
+- [x] 2026-10-25 多 Application 隔离实验通过：固定 A=20 RPS，以 B 单独 1/5/10 RPS control 对比 A+B treatment；B 成功率均保持 100%，B=10 treatment p95 为 control 的 102.2%，waiters 峰值 10/10/18、states 精确为 2，Hikari pending 与 Usage failure 均为 0。两种出口一致，677 条 Usage及全部隔离数据已精确清理。
+- [x] 2026-10-25 全局 waiter 容量实验完成：首次实验以确定性测试证明第 101 个等待者得到 `global_queue_full`，并在 2/2 个有效轮次触顶；失速轮次暴露的客户端共享事件循环、Quota/Usage 反向锁序和异常 Usage 200 均被拆分修复。全新环境复验中 `A + 9B` 负对照为 0，`A + 10B` 三轮分别为 32/35/41，客户端、HTTP/admission、Quota/Usage、Hikari/Tomcat/JVM 和双出口均通过判据，完成新 3/3 稳定性验收。
+- [x] 2026-10-25 Quota/Usage 独立锁序实验确认并修复死锁根因：实验观察到 Quota 的 Application X → Key X 与 Usage 外键隐式 Key S → Application S 构成闭环，MySQL 返回 1213/40001 且原始报告已保存；修复后 Usage 在独立短事务中显式按 Application S → Key S → INSERT 执行。确定性顺序测试、真实 MySQL 阻塞关系测试和完整后端 434/434 通过；临时观察权限已撤销。全事务/外键审计未发现第二条结构性反向锁序。
+- [x] 2026-10-25 Usage 最终 HTTP 状态语义已修复并验证：正常请求 200、异步截图提交 201、已处理异常 400/429/503、响应未提交时的未处理异常 500；Usage INSERT 失败不改变客户端 200，只使 `nexus.usage.record.failures{reason="write_failed"}` 增加 1 且不留下事件。定向回归 17/17、完整后端回归 438/438 通过。
+- [x] 2026-10-25 全局 waiter 客户端已拆为 A、B1–B10 和 metrics 共 12 个独立 Node Worker；统一测量开始墙钟，独立事件循环/Agent/停止判定，协调进程等待全部摘要后再判失败。无网络预检验证 12 个不同线程，50/100ms 节拍最大迟到 16ms；真实容量复验中零客户端中止，最大发送迟到 41.33ms，低于最短 50ms 间隔。
+- [x] 2026-10-25 已审定并于 2026-10-26 完成[异步截图背压与资源边界实验](SCREENSHOT_BACKPRESSURE_EXPERIMENT.md)。校准得到 `μ_gate=0.321463 job/s`、建模 `μ_worker≈0.243263 job/s`；背压断言使用 `forbidden/observe/required`，预测偏差只用于解释。`0.5/1/2/4μ_worker` 四档分别得到 4/8/15/16 个 201 和 0/0/0/14 个 503，unfinished 峰值 2/2/9/10；全部 43 个接受任务成功，Hikari pending/timeout、Usage failure、429 为 0，双出口和业务数据精确对账。Java/Chromium Working Set 峰值范围约 366–517/178–218 MiB，最高 system/process CPU 约 56.6%/9.2%，各档均完全恢复并清理。容量背压有效且本机资源在已测约 0.973 RPS、30 秒窗口下有界；最大队列等待升至 38.981 秒。
+- [x] 2026-10-27 完成预期容量拒绝日志分级：主动容量保护与请求中断为无堆栈 WARN，业务/安全/政策拒绝为 INFO，真实基础设施故障、未分类 5xx 和未知异常保持 ERROR 与一次堆栈；日志使用稳定 code/category 和路由模板，不记录凭证或请求级高基数字段。聚焦回归 77/77、完整后端 452/452 通过，处置顺序见[最小运行手册](OBSERVABILITY_RUNBOOK.md)。
+- [x] 已依据吞吐、p95、错误、CPU/内存、连接池和队列证据修复 Quota/Usage 锁序、Usage 最终状态和日志噪音；当前容量保护与保守限流语义可接受，不再做无问题驱动的优化，也不引入 Redis、MQ 或完整 Prometheus/Grafana 栈。
+
+**学习检查：** 能从一个运行问题推导指标及类型，解释采样与累计、低/高基数标签、管理端点安全边界，并区分功能正确性测试、限流验收和容量压力测试。
 
 ## 后续按具体问题引入
 

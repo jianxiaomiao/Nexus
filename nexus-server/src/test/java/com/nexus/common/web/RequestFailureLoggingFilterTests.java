@@ -68,6 +68,7 @@ class RequestFailureLoggingFilterTests {
 
         assertEquals(401, response.getStatus());
         assertEquals(1, occurrences(output.getOut(), "请求被拒绝"));
+        assertTrue(output.getOut().contains("code=INVALID_API_KEY_CREDENTIAL"));
     }
 
     @Test
@@ -93,6 +94,34 @@ class RequestFailureLoggingFilterTests {
 
         assertEquals(1, occurrences(output.getOut(), "请求失败 method="));
         assertTrue(output.getOut().contains("status=500"));
+        assertTrue(output.getOut().contains("category=system_failure"));
+    }
+
+    @Test
+    void markedCapacityFailureIsWarnedWithoutRawPathOrStack(CapturedOutput output)
+            throws Exception {
+        String jobId = "123e4567-e89b-12d3-a456-426614174000";
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST", "/v1/web/screenshot-jobs/" + jobId);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, (req, res) -> {
+            RequestFailureLogContext.mark(
+                    (MockHttpServletRequest) req,
+                    RequestFailureLogContext.Category.CAPACITY_PROTECTION,
+                    "SCREENSHOT_JOB_QUEUE_FULL");
+            ((HttpServletResponse) res).setStatus(503);
+        });
+
+        String log = output.getOut();
+        assertEquals(1, occurrences(log, "请求受容量保护"));
+        assertTrue(log.contains("route=/v1/*"));
+        assertTrue(log.contains("status=503"));
+        assertTrue(log.contains("code=SCREENSHOT_JOB_QUEUE_FULL"));
+        assertTrue(log.contains("category=capacity_protection"));
+        assertFalse(log.contains(jobId));
+        assertFalse(log.contains("\tat com.nexus."));
+        assertEquals(0, occurrences(log, "请求失败 method="));
     }
 
     @Test
@@ -108,6 +137,25 @@ class RequestFailureLoggingFilterTests {
         assertEquals(200, response.getStatus());
         assertEquals(1, occurrences(output.getOut(), "请求处理抛异常"));
         assertFalse(output.getOut().contains("请求被拒绝"));
+    }
+
+    @Test
+    void unknownRuntimeExceptionIsLoggedWithStackAndRethrown(CapturedOutput output) {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/application/99");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        IllegalStateException failure = new IllegalStateException("unexpected failure");
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                () -> filter.doFilter(request, response, (req, res) -> { throw failure; }));
+
+        assertSame(failure, thrown);
+        String log = output.getOut();
+        assertEquals(1, occurrences(log, "请求处理抛异常"));
+        assertTrue(log.contains("route=/api/*"));
+        assertTrue(log.contains("category=system_failure"));
+        assertTrue(log.contains("IllegalStateException: unexpected failure"));
+        assertTrue(log.contains("\tat com.nexus."));
+        assertFalse(log.contains("/api/application/99"));
     }
 
     @Test
@@ -135,6 +183,25 @@ class RequestFailureLoggingFilterTests {
 
         assertEquals(1, occurrences(output.getOut(), "请求失败 method="));
         assertTrue(output.getOut().contains("status=503"));
+    }
+
+    @Test
+    void asynchronousCapacity503IsWarnedOnlyAfterCompletion(CapturedOutput output)
+            throws Exception {
+        AsyncFixture fixture = startAsyncRequest();
+
+        RequestFailureLogContext.mark(
+                fixture.request(),
+                RequestFailureLogContext.Category.CAPACITY_PROTECTION,
+                "RATE_LIMIT_STATE_CAPACITY_REACHED");
+        fixture.response().setStatus(503);
+        fixture.listener().onComplete(new AsyncEvent(fixture.asyncContext()));
+
+        String log = output.getOut();
+        assertEquals(1, occurrences(log, "请求受容量保护"));
+        assertTrue(log.contains("code=RATE_LIMIT_STATE_CAPACITY_REACHED"));
+        assertEquals(0, occurrences(log, "请求失败 method="));
+        assertFalse(log.contains("\tat com.nexus."));
     }
 
     @Test

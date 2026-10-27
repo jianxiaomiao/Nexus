@@ -66,10 +66,12 @@ public class RequestFailureLoggingFilter extends OncePerRequestFilter {
                 (System.nanoTime() - startNano) / 1_000_000;
 
         log.error(
-                "请求处理抛异常 method={}, path={}, durationMs={}",
+                "请求处理抛异常 method={}, route={}, durationMs={}, category={}, exception={}",
                 request.getMethod(),
-                request.getRequestURI(),
+                RequestFailureLogContext.route(request),
                 durationMs,
+                RequestFailureLogContext.Category.SYSTEM_FAILURE.value(),
+                exception.getClass().getSimpleName(),
                 exception
         );
     }
@@ -99,20 +101,39 @@ public class RequestFailureLoggingFilter extends OncePerRequestFilter {
         long durationMs =
                 (System.nanoTime() - startNano) / 1_000_000;
 
-        if (status >= 500) {
+        RequestFailureLogContext.Category category =
+                RequestFailureLogContext.category(request);
+        String code = RequestFailureLogContext.code(request);
+        String route = RequestFailureLogContext.route(request);
+
+        if (category == RequestFailureLogContext.Category.CAPACITY_PROTECTION) {
+            log.warn(
+                    "请求受容量保护 method={}, route={}, status={}, code={}, category={}, durationMs={}",
+                    request.getMethod(), route, status, code, category.value(), durationMs
+            );
+        } else if (category == RequestFailureLogContext.Category.REQUEST_INTERRUPTED) {
+            log.warn(
+                    "请求已中断 method={}, route={}, status={}, code={}, category={}, durationMs={}",
+                    request.getMethod(), route, status, code, category.value(), durationMs
+            );
+        } else if (status >= 500) {
             log.error(
-                    "请求失败 method={}, path={}, status={}, durationMs={}",
+                    "请求失败 method={}, route={}, status={}, code={}, category={}, durationMs={}",
                     request.getMethod(),
-                    request.getRequestURI(),
+                    route,
                     status,
+                    code,
+                    RequestFailureLogContext.Category.SYSTEM_FAILURE.value(),
                     durationMs
             );
         } else {
             log.info(
-                    "请求被拒绝 method={}, path={}, status={}, durationMs={}",
+                    "请求被拒绝 method={}, route={}, status={}, code={}, category={}, durationMs={}",
                     request.getMethod(),
-                    request.getRequestURI(),
+                    route,
                     status,
+                    code,
+                    RequestFailureLogContext.Category.BUSINESS_REJECTION.value(),
                     durationMs
             );
         }

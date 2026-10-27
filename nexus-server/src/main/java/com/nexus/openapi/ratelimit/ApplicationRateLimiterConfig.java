@@ -1,5 +1,6 @@
 package com.nexus.openapi.ratelimit;
 
+import io.micrometer.core.instrument.binder.MeterBinder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -9,6 +10,12 @@ import java.util.concurrent.ScheduledExecutorService;
 
 @Configuration
 public class ApplicationRateLimiterConfig {
+
+    @Bean
+    MeterBinder applicationRateLimiterMetrics(
+            ApplicationRateLimiter rateLimiter) {
+        return new ApplicationRateLimiterMetrics(rateLimiter);
+    }
 
     @Bean(destroyMethod = "shutdown")
     ScheduledExecutorService applicationRateScheduler() {

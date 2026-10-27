@@ -29,6 +29,10 @@ public class ScreenshotExecutionGate {
         permit.release();
     }
 
+    public int currentBusySlotCount() {
+        return permit.availablePermits() == 0 ? 1 : 0;
+    }
+
     boolean hasQueuedThreads() {
         return permit.hasQueuedThreads();
     }

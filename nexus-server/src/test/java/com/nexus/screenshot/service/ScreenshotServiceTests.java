@@ -1,10 +1,16 @@
 package com.nexus.screenshot.service;
 
 import com.nexus.screenshot.exception.ScreenshotException;
+import com.nexus.screenshot.metrics.ScreenshotMetrics;
 import com.nexus.auth.ApiKeyAuthenticator.ApiKeyIdentity;
 import com.nexus.quota.service.ApplicationQuotaService;
+import io.micrometer.core.instrument.MockClock;
+import io.micrometer.core.instrument.Timer;
+import io.micrometer.core.instrument.simple.SimpleConfig;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import java.net.URI;
+import java.time.Duration;
 import java.util.concurrent.*;
 import static com.nexus.screenshot.exception.ScreenshotException.Kind.*;
 import static org.junit.jupiter.api.Assertions.*;
@@ -15,8 +21,13 @@ class ScreenshotServiceTests {
     private final ScreenshotRenderer renderer = mock(ScreenshotRenderer.class);
     private final ApplicationQuotaService quota = mock(ApplicationQuotaService.class);
     private final ApiKeyIdentity identity = new ApiKeyIdentity(1L, 2L);
+    private final MockClock meterClock = new MockClock();
+    private final SimpleMeterRegistry meterRegistry =
+            new SimpleMeterRegistry(SimpleConfig.DEFAULT, meterClock);
+    private final ScreenshotExecutionGate executionGate = new ScreenshotExecutionGate();
     private final ScreenshotService service = new ScreenshotService(
-            new ScreenshotUrlPolicy(), renderer, quota, new ScreenshotExecutionGate());
+            new ScreenshotUrlPolicy(), renderer, quota, executionGate,
+            new ScreenshotMetrics(meterRegistry));
     private static final String URL = "https://blog.csdn.net/article";
     @Test
     void invalidEntryNeverStartsBrowser() {
@@ -31,6 +42,9 @@ class ScreenshotServiceTests {
         assertThrows(ScreenshotException.class, () -> service.capture(identity, URL));
         assertSame(result, service.capture(identity, URL));
         assertSame(result, service.capture(identity, URL));
+
+        assertEquals(1, executionTimer("failed").count());
+        assertEquals(2, executionTimer("succeeded").count());
     }
     @Test
     void overlappingCaptureIsRejectedWithoutStartingAnotherBrowser() throws Exception {
@@ -46,6 +60,9 @@ class ScreenshotServiceTests {
             } finally { release.countDown(); }
             assertNotNull(first.get(3, TimeUnit.SECONDS));
         }
+
+        assertEquals(1, executionTimer("succeeded").count());
+        assertEquals(0, executionTimer("failed").count());
     }
 
     @Test void quotaRejectionReleasesSlotWithoutStartingBrowser() {
@@ -60,5 +77,30 @@ class ScreenshotServiceTests {
         var order = inOrder(quota, renderer);
         order.verify(quota, times(2)).consumeOnce(identity);
         order.verify(renderer).render(any(URI.class));
+        assertEquals(1, executionTimer("failed").count());
+        assertEquals(1, executionTimer("succeeded").count());
+    }
+
+    @Test
+    void successfulExecutionRecordsTheExactTimeHoldingTheSlot() {
+        when(renderer.render(any(URI.class))).thenAnswer(invocation -> {
+            meterClock.add(Duration.ofMillis(250));
+            return new ScreenshotResult(new byte[]{1}, 0);
+        });
+
+        service.capture(identity, URL);
+
+        Timer timer = executionTimer("succeeded");
+        assertEquals(1, timer.count());
+        assertEquals(250, timer.totalTime(TimeUnit.MILLISECONDS), 0.0001);
+    }
+
+    private Timer executionTimer(String outcome) {
+        Timer timer = meterRegistry.find(ScreenshotMetrics.EXECUTION_METRIC_NAME)
+                .tag("mode", "sync")
+                .tag("outcome", outcome)
+                .timer();
+        assertNotNull(timer);
+        return timer;
     }
 }

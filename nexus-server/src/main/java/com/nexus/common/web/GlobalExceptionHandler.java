@@ -57,6 +57,9 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import static com.nexus.common.web.RequestFailureLogContext.Category.CAPACITY_PROTECTION;
+import static com.nexus.common.web.RequestFailureLogContext.Category.SYSTEM_FAILURE;
+
 @RestControllerAdvice
 public class GlobalExceptionHandler{
 
@@ -79,7 +82,11 @@ public class GlobalExceptionHandler{
             case LIMIT_EXCEEDED -> HttpStatus.UNPROCESSABLE_ENTITY;
             case BUSY, ENGINE_UNAVAILABLE -> HttpStatus.SERVICE_UNAVAILABLE;
         };
-        return ResponseEntity.status(status).body(handled(request, exception, status, exception.code(), exception.getMessage(), null));
+        RequestFailureLogContext.Category category = exception.kind() == ScreenshotException.Kind.BUSY
+                ? CAPACITY_PROTECTION
+                : defaultCategory(status);
+        return ResponseEntity.status(status).body(handled(request, exception, status,
+                exception.code(), exception.getMessage(), null, category));
     }
 
     @ExceptionHandler(ScreenshotJobQueueFullException.class)
@@ -89,7 +96,8 @@ public class GlobalExceptionHandler{
         return ResponseEntity.status(status)
                 .header(HttpHeaders.RETRY_AFTER, "5")
                 .body(handled(request, exception, status,
-                        "SCREENSHOT_JOB_QUEUE_FULL", exception.getMessage(), null));
+                        "SCREENSHOT_JOB_QUEUE_FULL", exception.getMessage(), null,
+                        CAPACITY_PROTECTION));
     }
 
     @ResponseStatus(HttpStatus.NOT_FOUND)
@@ -237,7 +245,8 @@ public class GlobalExceptionHandler{
 
     @ExceptionHandler(InvalidApiKeyCredentialException.class)
     public ResponseEntity<ApiResponse<Void>> handleInvalidApiKeyCredential(InvalidApiKeyCredentialException exception, HttpServletRequest request) {
-        logHandled(request, exception, HttpStatus.UNAUTHORIZED, "INVALID_API_KEY_CREDENTIAL");
+        logHandled(request, exception, HttpStatus.UNAUTHORIZED, "INVALID_API_KEY_CREDENTIAL",
+                RequestFailureLogContext.Category.BUSINESS_REJECTION);
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .header(HttpHeaders.WWW_AUTHENTICATE, "ApiKey realm=\"nexus-openapi\"")
                 .body(new ApiResponse<>("INVALID_API_KEY_CREDENTIAL", exception.getMessage(), null));
@@ -372,22 +381,42 @@ public class GlobalExceptionHandler{
 
     private <T> ApiResponse<T> handled(HttpServletRequest request, Exception exception,
                                        HttpStatus status, String code, String message, T data) {
-        logHandled(request, exception, status, code);
+        return handled(request, exception, status, code, message, data,
+                defaultCategory(status));
+    }
+
+    private <T> ApiResponse<T> handled(HttpServletRequest request, Exception exception,
+                                       HttpStatus status, String code, String message, T data,
+                                       RequestFailureLogContext.Category category) {
+        logHandled(request, exception, status, code, category);
         return new ApiResponse<>(code, message, data);
     }
 
-    private void logHandled(HttpServletRequest request, Exception exception, HttpStatus status, String code) {
+    private void logHandled(HttpServletRequest request, Exception exception, HttpStatus status,
+                            String code, RequestFailureLogContext.Category category) {
         request.setAttribute(RequestFailureLoggingFilter.HANDLED_EXCEPTION_LOGGED, Boolean.TRUE);
+        RequestFailureLogContext.mark(request, category, code);
         Object diagnostic = exception instanceof ScreenshotException screenshot ? screenshot.diagnostic() : null;
-        if (status.is5xxServerError()) {
-            log.error("请求处理失败 method={}, path={}, status={}, code={}, exception={}, diagnostic={}",
-                    request.getMethod(), request.getRequestURI(), status.value(), code,
+        String route = RequestFailureLogContext.route(request);
+        if (category == CAPACITY_PROTECTION) {
+            log.warn("请求受容量保护 method={}, route={}, status={}, code={}, category={}, exception={}, diagnostic={}",
+                    request.getMethod(), route, status.value(), code, category.value(),
+                    exception.getClass().getSimpleName(), diagnostic);
+        } else if (category == SYSTEM_FAILURE) {
+            log.error("请求处理失败 method={}, route={}, status={}, code={}, category={}, exception={}, diagnostic={}",
+                    request.getMethod(), route, status.value(), code, category.value(),
                     exception.getClass().getSimpleName(), diagnostic, exception);
         } else {
             // 不记录异常消息，避免将用户输入、SQL 或凭据写入日志。
-            log.info("请求被拒绝 method={}, path={}, status={}, code={}, exception={}, diagnostic={}",
-                    request.getMethod(), request.getRequestURI(), status.value(), code,
+            log.info("请求被拒绝 method={}, route={}, status={}, code={}, category={}, exception={}, diagnostic={}",
+                    request.getMethod(), route, status.value(), code, category.value(),
                     exception.getClass().getSimpleName(), diagnostic);
         }
+    }
+
+    private static RequestFailureLogContext.Category defaultCategory(HttpStatus status) {
+        return status.is5xxServerError()
+                ? SYSTEM_FAILURE
+                : RequestFailureLogContext.Category.BUSINESS_REJECTION;
     }
 }

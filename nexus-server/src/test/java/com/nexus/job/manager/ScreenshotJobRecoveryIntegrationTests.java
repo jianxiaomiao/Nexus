@@ -10,6 +10,7 @@ import com.nexus.application.mapper.ApplicationMapper;
 import com.nexus.auth.ApiKeyAuthenticator.ApiKeyIdentity;
 import com.nexus.job.entity.ScreenshotJob;
 import com.nexus.job.mapper.ScreenshotJobMapper;
+import com.nexus.job.metrics.ScreenshotJobMetrics;
 import com.nexus.job.store.ScreenshotResultStore;
 import com.nexus.quota.QuotaTestCleanup;
 import com.nexus.quota.entity.ApplicationQuota;
@@ -24,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -62,6 +64,7 @@ class ScreenshotJobRecoveryIntegrationTests {
     @Autowired ApiKeyMapper keys;
     @Autowired ApiKeyCredentialGenerator credentials;
     @Autowired JdbcTemplate jdbc;
+    @Autowired MeterRegistry meterRegistry;
 
     private User owner;
     private Application application;
@@ -123,6 +126,32 @@ class ScreenshotJobRecoveryIntegrationTests {
                 Files.deleteIfExists(path);
             }
         }
+    }
+
+    @Test
+    void unfinishedGaugeTracksPersistedQueuedAndRunningRows() {
+        var gauge = meterRegistry.get(
+                ScreenshotJobMetrics.UNFINISHED_JOBS_METRIC_NAME).gauge();
+        double baseline = gauge.value();
+        assertFalse(Double.isNaN(baseline));
+
+        ScreenshotJob queued = queuedJob(UUID.randomUUID().toString());
+        assertEquals(1, jobs.insert(queued));
+
+        ScreenshotJob running = queuedJob(UUID.randomUUID().toString());
+        LocalDateTime startedAt = utcNow();
+        running.setStatus(1);
+        running.setAttemptCount(1);
+        running.setRunToken(UUID.randomUUID().toString());
+        running.setStartedAt(startedAt);
+        running.setLeaseExpiresAt(startedAt.plusSeconds(30));
+        assertEquals(1, jobs.insert(running));
+
+        assertEquals(baseline + 2.0, gauge.value());
+
+        assertEquals(1, jobs.deleteById(queued.getId()));
+        assertEquals(1, jobs.deleteById(running.getId()));
+        assertEquals(baseline, gauge.value());
     }
 
     @Test

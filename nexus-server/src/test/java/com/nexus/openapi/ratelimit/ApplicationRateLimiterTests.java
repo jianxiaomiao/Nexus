@@ -1,5 +1,6 @@
 package com.nexus.openapi.ratelimit;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.RepeatedTest;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
@@ -18,6 +19,210 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class ApplicationRateLimiterTests {
+
+    @Test
+    void waiterGaugeChangesFromZeroToOneAndBackToZero() {
+        ManualScheduler manual = new ManualScheduler();
+        ApplicationRateLimiter limiter = limiter(manual, 100, 1_000, 10, 20);
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+
+        try {
+            new ApplicationRateLimiterMetrics(limiter).bindTo(registry);
+
+            var waiterGauge = registry
+                    .get(ApplicationRateLimiterMetrics.WAITERS_METRIC)
+                    .gauge();
+
+            assertEquals(0.0, waiterGauge.value());
+
+            assertInstanceOf(RateLimitAdmission.Allowed.class,
+                    limiter.acquire(1L));
+            assertEquals(0.0, waiterGauge.value());
+
+            RateLimitAdmission.Queued queued =
+                    assertInstanceOf(RateLimitAdmission.Queued.class,
+                            limiter.acquire(1L));
+            assertEquals(1.0, waiterGauge.value());
+
+            manual.runNext();
+
+            assertEquals(QueueDecision.ALLOWED,
+                    queued.handle().completion().toCompletableFuture().join());
+            assertEquals(0.0, waiterGauge.value());
+        } finally {
+            registry.close();
+            limiter.close();
+        }
+    }
+
+    @Test
+    void stateGaugeGrowsWithApplicationsAndFallsAfterIdleCleanup() {
+        ManualScheduler manual = new ManualScheduler();
+        ApplicationRateLimiter limiter = limiter(manual, 100, 1_000, 10, 20);
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+
+        try {
+            limiter.start();
+            new ApplicationRateLimiterMetrics(limiter).bindTo(registry);
+
+            var stateGauge = registry
+                    .get(ApplicationRateLimiterMetrics.STATES_METRIC)
+                    .gauge();
+
+            assertEquals(0.0, stateGauge.value());
+
+            assertInstanceOf(RateLimitAdmission.Allowed.class,
+                    limiter.acquire(1L));
+            assertEquals(1.0, stateGauge.value());
+
+            assertInstanceOf(RateLimitAdmission.Allowed.class,
+                    limiter.acquire(2L));
+            assertEquals(2.0, stateGauge.value());
+
+            manual.advanceBy(Duration.ofSeconds(10).toNanos());
+            manual.runCleanup();
+
+            assertEquals(0.0, stateGauge.value());
+        } finally {
+            registry.close();
+            limiter.close();
+        }
+    }
+
+    @Test
+    void productionConfigurationAllowsOneThousandStatesAndRejectsTheNext() {
+        try (AnnotationConfigApplicationContext context =
+                     new AnnotationConfigApplicationContext(
+                             ApplicationRateLimiterConfig.class)) {
+            ApplicationRateLimiter limiter =
+                    context.getBean(ApplicationRateLimiter.class);
+
+            for (long applicationId = 1; applicationId <= 1_000; applicationId++) {
+                assertInstanceOf(RateLimitAdmission.Allowed.class,
+                        limiter.acquire(applicationId));
+            }
+
+            RateLimitAdmission.Rejected rejected =
+                    assertInstanceOf(RateLimitAdmission.Rejected.class,
+                            limiter.acquire(1_001L));
+
+            assertAll(
+                    () -> assertEquals(1_000, limiter.currentStateCount()),
+                    () -> assertEquals(
+                            RateLimitAdmission.RejectReason.STATE_CAPACITY_REACHED,
+                            rejected.reason()),
+                    () -> assertEquals(0, limiter.currentWaiterCount()));
+        }
+    }
+
+    @Test
+    void concurrentDistinctApplicationsCannotExceedStateCapacity() throws Exception {
+        int capacity = 1_000;
+        int requestCount = capacity + 1;
+        ManualScheduler manual = new ManualScheduler();
+        ApplicationRateLimiter limiter = limiter(
+                manual, 100, 1_000, 10, 20, capacity);
+        ExecutorService requests = Executors.newFixedThreadPool(32);
+        CountDownLatch ready = new CountDownLatch(32);
+        CountDownLatch start = new CountDownLatch(1);
+
+        try {
+            List<Future<RateLimitAdmission>> futures = new ArrayList<>();
+            for (long applicationId = 1; applicationId <= requestCount; applicationId++) {
+                long currentApplicationId = applicationId;
+                futures.add(requests.submit(() -> {
+                    ready.countDown();
+                    assertTrue(start.await(2, TimeUnit.SECONDS));
+                    return limiter.acquire(currentApplicationId);
+                }));
+            }
+
+            assertTrue(ready.await(2, TimeUnit.SECONDS));
+            start.countDown();
+
+            List<RateLimitAdmission> admissions = new ArrayList<>();
+            for (Future<RateLimitAdmission> future : futures) {
+                admissions.add(future.get(5, TimeUnit.SECONDS));
+            }
+
+            long allowed = admissions.stream()
+                    .filter(RateLimitAdmission.Allowed.class::isInstance)
+                    .count();
+            List<RateLimitAdmission.Rejected> rejected = admissions.stream()
+                    .filter(RateLimitAdmission.Rejected.class::isInstance)
+                    .map(RateLimitAdmission.Rejected.class::cast)
+                    .toList();
+
+            assertAll(
+                    () -> assertEquals(capacity, allowed),
+                    () -> assertEquals(1, rejected.size()),
+                    () -> assertEquals(
+                            RateLimitAdmission.RejectReason.STATE_CAPACITY_REACHED,
+                            rejected.getFirst().reason()),
+                    () -> assertEquals(capacity, limiter.currentStateCount()),
+                    () -> assertEquals(0, limiter.currentWaiterCount()));
+        } finally {
+            limiter.close();
+            requests.shutdownNow();
+        }
+    }
+
+    @Test
+    void cleanupStartsAfterFiveSecondsAndUsesFiveSecondFixedDelay() {
+        ManualScheduler manual = new ManualScheduler();
+        ApplicationRateLimiter limiter = limiter(manual, 100, 1_000, 10, 20);
+
+        try {
+            limiter.start();
+
+            verify(manual.scheduler()).scheduleWithFixedDelay(
+                    any(Runnable.class),
+                    eq(Duration.ofSeconds(5).toNanos()),
+                    eq(Duration.ofSeconds(5).toNanos()),
+                    eq(NANOSECONDS));
+        } finally {
+            limiter.close();
+        }
+    }
+
+    @Test
+    void oneHundredAndFirstGlobalWaiterIsRejectedWhenItsApplicationHasQueueSpace() {
+        ManualScheduler manual = new ManualScheduler();
+        ApplicationRateLimiter limiter = limiter(manual, 100, 1_000, 10, 100);
+
+        try {
+            for (long applicationId = 1; applicationId <= 11; applicationId++) {
+                assertInstanceOf(RateLimitAdmission.Allowed.class,
+                        limiter.acquire(applicationId));
+            }
+
+            for (long applicationId = 1; applicationId <= 10; applicationId++) {
+                for (int waiter = 0; waiter < 10; waiter++) {
+                    assertInstanceOf(RateLimitAdmission.Queued.class,
+                            limiter.acquire(applicationId));
+                }
+            }
+
+            assertEquals(100, limiter.currentWaiterCount());
+            assertEquals(11, limiter.currentStateCount());
+
+            RateLimitAdmission.Rejected globalRejection =
+                    assertInstanceOf(RateLimitAdmission.Rejected.class,
+                            limiter.acquire(11L));
+            assertEquals(RateLimitAdmission.RejectReason.GLOBAL_QUEUE_FULL,
+                    globalRejection.reason());
+            assertEquals(100, limiter.currentWaiterCount());
+
+            RateLimitAdmission.Rejected applicationRejection =
+                    assertInstanceOf(RateLimitAdmission.Rejected.class,
+                            limiter.acquire(1L));
+            assertEquals(RateLimitAdmission.RejectReason.APPLICATION_QUEUE_FULL,
+                    applicationRejection.reason());
+            assertEquals(100, limiter.currentWaiterCount());
+        } finally {
+            limiter.close();
+        }
+    }
 
     @Test
     void firstRequestIsAllowedAndQueuedRequestIsReleasedAtTheNextPermit() {

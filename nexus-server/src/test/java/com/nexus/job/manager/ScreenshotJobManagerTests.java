@@ -6,9 +6,14 @@ import com.nexus.job.mapper.ScreenshotJobMapper;
 import com.nexus.job.store.ScreenshotResultStore;
 import com.nexus.job.store.StoredScreenshot;
 import com.nexus.screenshot.exception.ScreenshotException;
+import com.nexus.screenshot.metrics.ScreenshotMetrics;
 import com.nexus.screenshot.service.ScreenshotExecutionGate;
 import com.nexus.screenshot.service.ScreenshotRenderer;
 import com.nexus.screenshot.service.ScreenshotResult;
+import io.micrometer.core.instrument.MockClock;
+import io.micrometer.core.instrument.Timer;
+import io.micrometer.core.instrument.simple.SimpleConfig;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -21,6 +26,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.concurrent.TimeUnit;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -39,8 +45,12 @@ class ScreenshotJobManagerTests {
     private final ScreenshotResultStore results = mock(ScreenshotResultStore.class);
     private final PlatformTransactionManager transactions = mock(PlatformTransactionManager.class);
     private final TransactionStatus transactionStatus = mock(TransactionStatus.class);
+    private final MockClock meterClock = new MockClock();
+    private final SimpleMeterRegistry meterRegistry =
+            new SimpleMeterRegistry(SimpleConfig.DEFAULT, meterClock);
     private final ScreenshotJobManager manager = new ScreenshotJobManager(
             jobs, renderer, results, new ScreenshotExecutionGate(),
+            new ScreenshotMetrics(meterRegistry),
             Clock.fixed(NOW, ZoneOffset.UTC), transactions);
 
     @BeforeEach
@@ -56,6 +66,9 @@ class ScreenshotJobManagerTests {
 
         verify(transactions, never()).getTransaction(any());
         verifyNoInteractions(renderer, results);
+        assertEquals(0, queueDelayTimer().count());
+        assertEquals(0, executionTimer("succeeded").count());
+        assertEquals(0, executionTimer("failed").count());
     }
 
     @Test
@@ -66,7 +79,10 @@ class ScreenshotJobManagerTests {
         when(jobs.selectNextQueuedForUpdate()).thenReturn(job);
         when(jobs.markRunningIfQueued(eq(11L), any(), eq(UTC_NOW.plusSeconds(30)), eq(UTC_NOW)))
                 .thenReturn(1);
-        when(renderer.render(URI.create(URL))).thenReturn(rendered);
+        when(renderer.render(URI.create(URL))).thenAnswer(invocation -> {
+            meterClock.add(java.time.Duration.ofMillis(125));
+            return rendered;
+        });
         when(results.saveAtomically(JOB_ID, rendered.png()))
                 .thenReturn(new StoredScreenshot(3L, "abc123"));
         when(jobs.completeSucceededIfRunTokenMatches(
@@ -93,6 +109,14 @@ class ScreenshotJobManagerTests {
         order.verify(results).saveAtomically(JOB_ID, rendered.png());
         order.verify(jobs).completeSucceededIfRunTokenMatches(
                 eq(11L), any(), eq(3L), eq("abc123"), eq(7), eq(true), any(), any());
+
+        assertEquals(1, queueDelayTimer().count());
+        assertEquals(250,
+                queueDelayTimer().totalTime(TimeUnit.MILLISECONDS), 0.0001);
+        assertEquals(1, executionTimer("succeeded").count());
+        assertEquals(125,
+                executionTimer("succeeded").totalTime(TimeUnit.MILLISECONDS), 0.0001);
+        assertEquals(0, executionTimer("failed").count());
     }
 
     @Test
@@ -111,6 +135,36 @@ class ScreenshotJobManagerTests {
         verify(jobs).markFailedIfRunTokenMatches(
                 eq(11L), eq(job.getRunToken()), eq("SCREENSHOT_TIMEOUT"), eq(UTC_NOW));
         verifyNoInteractions(results);
+        assertEquals(1, queueDelayTimer().count());
+        assertEquals(1, executionTimer("failed").count());
+        assertEquals(0, executionTimer("succeeded").count());
+    }
+
+    @Test
+    void retryClaimDoesNotRecordQueueDelayAgain() {
+        ScreenshotJob job = queuedJob();
+        job.setAttemptCount(1);
+        job.setStartedAt(UTC_NOW.minusMinutes(1));
+        when(jobs.selectNextQueuedForUpdate()).thenReturn(job);
+        when(jobs.markRunningIfQueued(eq(11L), any(), any(), any())).thenReturn(1);
+
+        ScreenshotJob claimed = manager.claimNextJob();
+
+        assertSame(job, claimed);
+        assertEquals(2, claimed.getAttemptCount());
+        assertEquals(0, queueDelayTimer().count());
+    }
+
+    @Test
+    void gateAcquisitionWithoutAClaimRecordsOneFailedExecution() {
+        when(jobs.selectCount(any(Wrapper.class))).thenReturn(1L);
+        when(jobs.selectNextQueuedForUpdate()).thenReturn(null);
+
+        assertFalse(manager.pollAndRunOne());
+
+        assertEquals(1, executionTimer("failed").count());
+        assertEquals(0, executionTimer("succeeded").count());
+        assertEquals(0, queueDelayTimer().count());
     }
 
     @Test
@@ -155,6 +209,7 @@ class ScreenshotJobManagerTests {
         job.setTargetUrl(URL);
         job.setStatus(0);
         job.setAttemptCount(0);
+        job.setCreatedAt(UTC_NOW.minusNanos(250_000_000));
         return job;
     }
 
@@ -163,5 +218,20 @@ class ScreenshotJobManagerTests {
         job.setId(id);
         job.setJobId(JOB_ID);
         return job;
+    }
+
+    private Timer queueDelayTimer() {
+        Timer timer = meterRegistry.find(ScreenshotMetrics.QUEUE_DELAY_METRIC_NAME).timer();
+        assertNotNull(timer);
+        return timer;
+    }
+
+    private Timer executionTimer(String outcome) {
+        Timer timer = meterRegistry.find(ScreenshotMetrics.EXECUTION_METRIC_NAME)
+                .tag("mode", "async")
+                .tag("outcome", outcome)
+                .timer();
+        assertNotNull(timer);
+        return timer;
     }
 }
