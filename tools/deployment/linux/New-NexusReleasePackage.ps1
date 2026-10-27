@@ -18,6 +18,11 @@ $jarSource = Join-Path $repoRoot `
     'nexus-server\target\nexus-server-0.0.1-SNAPSHOT.jar'
 $consoleSource = Join-Path $repoRoot 'nexus-console\dist'
 
+$initialGitStatus = @(& git -C $repoRoot status --porcelain=v1)
+if ($LASTEXITCODE -ne 0 -or $initialGitStatus.Count -ne 0) {
+    throw 'Create release artifacts only from a clean, committed working tree.'
+}
+
 function Assert-PathUnderOutputRoot([string]$Path) {
     $fullPath = [IO.Path]::GetFullPath($Path)
     $fullRoot = [IO.Path]::GetFullPath($outputRoot).TrimEnd(
@@ -134,6 +139,9 @@ if ($LASTEXITCODE -ne 0) {
 $gitStatus = @(& git -C $repoRoot status --porcelain=v1)
 if ($LASTEXITCODE -ne 0) {
     throw 'Could not read the Git working-tree state.'
+}
+if ($gitStatus.Count -ne 0) {
+    throw 'The working tree changed while preparing the release; refusing a dirty release.'
 }
 
 $artifacts = Get-ArtifactRecords $releasePath

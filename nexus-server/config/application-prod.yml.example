@@ -5,6 +5,15 @@ server:
   address: 127.0.0.1
   port: 8080
 
+management:
+  server:
+    address: 127.0.0.1
+    port: 8081
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus
+
 spring:
   datasource:
     url: ${NEXUS_DB_URL}

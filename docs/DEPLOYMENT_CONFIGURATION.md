@@ -2,6 +2,8 @@
 
 > 2026-10-22 平台变更已落地：ECS 当前运行 Ubuntu 24.04.5 LTS。本文后续 Windows 章节保留为已经验证的学习记录，不再代表待上线方案；跨平台仍有效的回环监听、外部配置、不可变发布、最小公网入口和可回滚原则继续保留。当前 Linux 的 systemd 身份、目录权限、UFW、不可变首个 release、固定 Chromium、Java 回环 8080 与 Nginx 回环 18080 均已实际验收；80/443、域名和 HTTPS 尚未启用。
 
+2026-10-27 V9 + OBS-1 发布准备已审定：生产模板新增独立 `127.0.0.1:8081`，只暴露 health、metrics、prometheus；业务端口仍为回环8080。Nginx两个模板对`/actuator`及其子路径明确返回404，避免Vue fallback返回HTML 200；管理端口不得经Nginx转发。现有本地CA TLS回环18443继续使用，公开HTTPS仍未启用。一次性版本化工具和逐步执行说明见[`tools/deployment/linux/v9-obs1/README.md`](../tools/deployment/linux/v9-obs1/README.md)。本条是发布准备事实，不表示ECS已升级。
+
 ## 要解决的问题
 
 Nexus 在 Java 进程启动时选择环境，不根据 `localhost`、公网域名或 HTTP `Host` 请求头推断环境。数据库连接池、JWT 和监听地址在接收请求前就必须确定，而且请求头不是可信的部署信号。
