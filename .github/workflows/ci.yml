@@ -10,7 +10,7 @@ jobs:
     steps:
       - name: 拉取代码
         uses: actions/checkout@v7
-
+        
       - name: 安装环境
         uses: actions/setup-node@v7
         with:
@@ -24,3 +24,52 @@ jobs:
       - name: 类型检查与生产构建
         working-directory: ./nexus-console
         run: npm run build
+  backend:
+    runs-on: ubuntu-latest
+    env:
+      SPRING_DATASOURCE_URL: jdbc:mysql://127.0.0.1:3306/nexus_test
+      SPRING_DATASOURCE_USERNAME: nexus_test_user
+      SPRING_DATASOURCE_PASSWORD: "@nexusTestUserPassword!"
+      NEXUS_AUTH_JWT_ISSUER: nexus_test_user
+      NEXUS_AUTH_JWT_ACCESSTOKENTTL: 30m
+      NEXUS_AUTH_JWT_SECRET: "XhrTJW2LdDmBpdGAa+W6lNjf8HJGDLkyCeComJHsvaw="
+      SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE: 2
+      SPRING_DATASOURCE_HIKARI_MINIMUMIDLE: 1
+    services:
+      mysql:
+        image: mysql:8.0
+        ports:
+          - 3306:3306
+        env:
+          MYSQL_ROOT_PASSWORD: "@xiaoMiaoRootPassword!"
+          MYSQL_DATABASE: nexus_test
+          MYSQL_USER: nexus_test_user
+          MYSQL_PASSWORD: "@nexusTestUserPassword!"
+
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+          --health-start-period=20s
+
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v7
+
+      - name: 配置java环境
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: 配置Playwright
+        working-directory: ./nexus-server
+        run: >-
+          sh ./mvnw -B exec:java 
+          -Dexec.mainClass=com.microsoft.playwright.CLI 
+          -Dexec.args="install --with-deps chromium"
+
+      - name: 运行后端测试
+        working-directory: ./nexus-server
+        run: sh ./mvnw -B clean test
