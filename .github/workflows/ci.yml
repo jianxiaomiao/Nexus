@@ -71,6 +71,23 @@ jobs:
           -Dexec.mainClass=com.microsoft.playwright.CLI 
           -Dexec.args="install --with-deps chromium"
 
+      - name: 配置 Chromium AppArmor
+        shell: bash
+        run: |
+          browser="/home/runner/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell"
+          test -x "$browser"
+
+          sudo tee /etc/apparmor.d/nexus-ci-chromium > /dev/null <<'EOF'
+          abi <abi/4.0>,
+          include <tunables/global>
+
+          profile nexus-ci-chromium /home/runner/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell flags=(unconfined) {
+            userns,
+          }
+          EOF
+
+          sudo apparmor_parser -r /etc/apparmor.d/nexus-ci-chromium
+          
       - name: 诊断 Chromium 运行环境
         shell: bash
         run: |
@@ -100,7 +117,7 @@ jobs:
             result=$?
             echo "浏览器直接启动失败，退出码：$result"
           fi
-          
+
       - name: 运行后端测试
         working-directory: ./nexus-server
         run: sh ./mvnw -B clean test
