@@ -45,6 +45,7 @@ jobs:
           MYSQL_DATABASE: nexus_test
           MYSQL_USER: nexus_test_user
           MYSQL_PASSWORD: "@nexusTestUserPassword!"
+          TZ: Asia/Shanghai
 
         options: >-
           --health-cmd="mysqladmin ping -h 127.0.0.1"
