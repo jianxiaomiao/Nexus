@@ -87,36 +87,6 @@ jobs:
           EOF
 
           sudo apparmor_parser -r /etc/apparmor.d/nexus-ci-chromium
-          
-      - name: 诊断 Chromium 运行环境
-        shell: bash
-        run: |
-          echo "当前用户："
-          id
-
-          echo "AppArmor user namespace 限制："
-          cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns || true
-
-          echo "查找 Playwright headless-shell："
-          browser="$(find "$HOME/.cache/ms-playwright" -type f -name chrome-headless-shell -print -quit)"
-          if [ -z "$browser" ]; then
-            echo "没有找到 chrome-headless-shell"
-            exit 1
-          fi
-
-          echo "浏览器路径：$browser"
-          ls -l "$browser"
-
-          echo "检查动态库："
-          ldd "$browser" | grep "not found" || echo "没有发现缺失的动态库"
-
-          echo "尝试打开空白页面："
-          if timeout 20s "$browser" --headless --dump-dom about:blank; then
-            echo "浏览器直接启动成功"
-          else
-            result=$?
-            echo "浏览器直接启动失败，退出码：$result"
-          fi
 
       - name: 运行后端测试
         working-directory: ./nexus-server
