@@ -6,6 +6,7 @@ import com.nexus.job.mapper.ScreenshotJobMapper;
 import com.nexus.job.store.ScreenshotResultStore;
 import com.nexus.job.store.ScreenshotResultStoreException;
 import com.nexus.job.store.StoredScreenshot;
+import com.nexus.webhook.mapper.WebhookOutboxMapper;
 import com.nexus.screenshot.exception.ScreenshotException;
 import com.nexus.screenshot.metrics.ScreenshotMetrics;
 import com.nexus.screenshot.service.ScreenshotExecutionGate;
@@ -16,6 +17,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.net.URI;
@@ -46,6 +48,8 @@ public class ScreenshotJobManager {
     private final ScreenshotMetrics metrics;
     private final Clock clock;
     private final TransactionTemplate claimTransaction;
+    private final TransactionTemplate completionTransaction;
+    private final WebhookOutboxMapper outboxMapper;
 
     public ScreenshotJobManager(ScreenshotJobMapper jobMapper,
                                 ScreenshotRenderer renderer,
@@ -53,6 +57,7 @@ public class ScreenshotJobManager {
                                 ScreenshotExecutionGate executionGate,
                                 ScreenshotMetrics metrics,
                                 Clock clock,
+                                WebhookOutboxMapper outboxMapper,
                                 PlatformTransactionManager transactionManager) {
         this.jobMapper = jobMapper;
         this.renderer = renderer;
@@ -60,7 +65,10 @@ public class ScreenshotJobManager {
         this.executionGate = executionGate;
         this.metrics = metrics;
         this.clock = clock;
+        this.outboxMapper = outboxMapper;
         this.claimTransaction = new TransactionTemplate(transactionManager);
+        this.completionTransaction = new TransactionTemplate(transactionManager);
+        this.completionTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     /** 没有排队任务时立即返回；有任务时公平等待共享 Chromium，但不在内存中增加第二层任务队列。 */
@@ -135,10 +143,14 @@ public class ScreenshotJobManager {
             ScreenshotResult rendered = renderer.render(URI.create(job.getTargetUrl()));
             StoredScreenshot stored = resultStore.saveAtomically(job.getJobId(), rendered.png());
             LocalDateTime completedAt = utcNow();
-            int changed = jobMapper.completeSucceededIfRunTokenMatches(
+            int changed = completionTransaction.execute(status -> {
+                int updated = jobMapper.completeSucceededIfRunTokenMatches(
                     job.getId(), job.getRunToken(), stored.sizeBytes(), stored.sha256(),
                     rendered.blockedResources(), rendered.resourceLimitReached(),
                     completedAt.plusHours(RESULT_RETENTION_HOURS), completedAt);
+                if (updated == 1) enqueueCompletion(job.getId());
+                return updated;
+            });
             if (changed == 0) {
                 deleteResultQuietly(job.getJobId(), "stale-success");
                 return false;
@@ -162,7 +174,15 @@ public class ScreenshotJobManager {
 
     public void recoverExpiredLeases() {
         LocalDateTime now = utcNow();
-        int failed = jobMapper.failExhaustedExpiredLeases(now, MAX_ATTEMPTS);
+        int failed = 0;
+        for (Long id : jobMapper.selectExhaustedExpiredIds(now, MAX_ATTEMPTS, MAINTENANCE_BATCH_SIZE)) {
+            Integer changed = completionTransaction.execute(status -> {
+                int updated = jobMapper.failExhaustedExpiredJob(id, now, MAX_ATTEMPTS);
+                if (updated == 1) enqueueCompletion(id);
+                return updated;
+            });
+            failed += changed;
+        }
         int requeued = jobMapper.requeueExpiredLeases(now, MAX_ATTEMPTS);
         if (failed > 0 || requeued > 0) {
             log.info("异步截图租约恢复 requeued={}, failed={}", requeued, failed);
@@ -196,13 +216,22 @@ public class ScreenshotJobManager {
 
     private void markKnownFailure(ScreenshotJob job, String failureCode) {
         LocalDateTime completedAt = utcNow();
-        int changed = jobMapper.markFailedIfRunTokenMatches(
-                job.getId(), job.getRunToken(), failureCode, completedAt);
+        int changed = completionTransaction.execute(status -> {
+            int updated = jobMapper.markFailedIfRunTokenMatches(
+                    job.getId(), job.getRunToken(), failureCode, completedAt);
+            if (updated == 1) enqueueCompletion(job.getId());
+            return updated;
+        });
         if (changed == 0) {
             log.info("忽略已失去执行权的截图失败结果 jobId={}", job.getJobId());
         } else if (changed != 1) {
             throw new IllegalStateException("Screenshot job failure affected multiple rows");
         }
+    }
+
+    private void enqueueCompletion(long jobId) {
+        int inserted = outboxMapper.insertScreenshotCompletion(jobId, UUID.randomUUID().toString());
+        if (inserted < 0 || inserted > 1) throw new IllegalStateException("Unexpected webhook insert count");
     }
 
     private void deleteResultQuietly(String jobId, String phase) {

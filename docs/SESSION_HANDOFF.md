@@ -2,7 +2,23 @@
 
 ## 当前阶段
 
-2026-10-27 完成“预期容量拒绝的日志分级”实现。请求失败不再仅按 HTTP 状态分级：Application 限流队列满/等待超时、全局 waiter 满、state 容量满、同步截图 busy 和异步截图队列满记录无堆栈 WARN；`RATE_LIMIT_WAIT_CANCELLED` 记录请求中断 WARN；Application 额度耗尽 429 和 403 等业务拒绝保持 INFO；限流器不可用、截图引擎/数据库/文件故障、未分类 5xx 与未知异常保持 ERROR，未知异常仍原样抛出。Filter 通过请求属性传递稳定 code/category，已经记录真实异常堆栈时抑制外层重复日志。机器认证 Filter 的 401/403 也传递稳定错误码。请求字段改用 MVC 路由模板，映射前拒绝退化为 `/api/*` 或 `/v1/*`，不再写入带资源 ID 的原始 URI。没有改变 HTTP 状态、错误码、Retry-After、Quota/Usage 或 Micrometer，也没有新增指标和执行压力实验。离线聚焦回归覆盖 Advice、同步/异步日志 Filter、机器认证 Filter、限流 Filter、截图控制器与真实 Filter 链，最终 **77/77** 通过。随后使用显式 `local`、专用 `nexus_test_user`/`nexus_test`、Hikari 2/1、一次性 JWT、离线 Maven 缓存和禁止浏览器下载的既有 Chromium 完成 `mvn clean test`，Flyway 校验 V1–V9，完整后端 **452/452** 通过，0 失败、0 错误、0 跳过；测试 JVM、Chromium 均无残留。最小排障流程已写入 `docs/OBSERVABILITY_RUNBOOK.md`，OBS-1 达到当前封板检查点。
+2026-11-04 Webhook 验收收口：隔离实例实际版本为 **MySQL 8.4.13**，端口 `13384`，连接后核验 `DATABASE()=nexus_test` 与 `CURRENT_USER()=nexus_test_user@localhost`，Flyway **V1–V13** 全部成功。此前同日在该实例完成完整后端回归 **616/616**；这是收口修改前的全量结果，本轮只重跑直接受影响的测试，不把聚焦回归写成新的全量结论。数据库及历史全量证据位于忽略目录 `data/mysql84-acceptance/evidence/full/`。
+
+本轮真实 JVM crash 测试 **1/1** 与新增防护/诊断测试 **3/3** 通过：第一个 Spring JVM 发出已验签 HTTPS 请求后被操作系统强制结束，数据库保留原 claim 至租约到期；第二个新 JVM 自动恢复并换 token。此时通过生产 `WebhookOutboxMapper.lockForCompletion → markDelivered` 在同一事务中验证旧 token 更新 **0 行**，再释放 HTTPS 响应，由第二个正常 Worker 完成投递。两次请求的 eventId/body 一致，timestamp/signature 更新且均验签通过，文件去重接收端只产生一次业务效果。这是进程崩溃后的至少一次投递与接收端去重证据，不是 exactly-once 承诺。
+
+CI 已使用规范环境变量 `NEXUS_AUTH_JWT_ACCESSTOKENTTL=30m`；子 JVM 统一使用同一名称并覆盖为 `15m`，在各自 Spring 容器启动后直接检查实际 `JwtProperties.accessTokenTtl()`，父测试等待两次检查成功。失败时输出最多 80 行/16000 字符的脱敏子进程日志尾部，随后删除临时日志/密钥；成功也清理临时目录。子 JVM、keytool、HTTPS 接收端与 executor 的关闭均置于清理路径。收口证据位于 `data/mysql84-acceptance/evidence/closeout/`。
+
+本轮 Webhook 聚焦回归 **165/165** 通过（不重复已通过的 crash 测试，包含生产 Mapper **13/13**、截图终态/Outbox 原子性 **7/7** 及上述诊断 **3/3**），0 失败、0 错误、0 跳过；离线 `compile` 与 `test-compile` 通过。首轮聚焦执行曾因默认 AppData 临时目录的清理权限出现 6 个 JUnit 收尾错误；保留失败日志后，仅为测试进程设置 `JAVA_TOOL_OPTIONS=-Djava.io.tmpdir=D:\Nexus\data\mysql84-acceptance\tmp`，相同测试集重跑通过，6 个遗留临时目录已精确清理。最终核对隔离 MySQL 已正常关闭，`13384` 监听、测试 JVM/Chromium 与 crash 临时目录均为 0；索引内容差异为 0，其余原有文件哈希保持不变。
+
+本轮只修改测试辅助代码及本文件；没有修改生产 Java、数据库迁移或 CI 行为，没有提交、推送或部署。工作区原有 staged、unstaged、untracked 改动均须保留，索引与基线文件哈希已单独保存供复核。既有截图 PNG 文件不参与数据库事务，同一 job 路径的旧 Worker 文件覆盖/删除边界仍未处理；这不属于本轮收口范围。
+
+## 历史记录
+
+### 2026-11-04 收口前的 MySQL 9.4 聚焦检查
+
+2026-11-04 Webhook 生产联动已实现，正在完成真实 MySQL 验证。截图成功、已知失败或耗尽租约失败时，同一任务的终态更新与 Outbox 插入在独立事务内提交；只有终态时已有 Webhook 配置才创建事件，禁用配置也创建待投递事件，旧终态任务不回填。成功和失败均使用 `screenshot.completed`，快照从数据库任务行读取，查询路径为相对路径；唯一 `(job_id, event_type)` 约束防重。自动调度使用独立固定延迟任务投递与恢复过期租约；恢复在事务内锁定批次并使用数据库 UTC 时间，保留既有尝试次数。停止先取消调度并有界等待，再关闭活跃 Worker；超时遗留认领依赖租约恢复。配置默认启用及其他语义见 `docs/WEBHOOK_ATTEMPT_SEMANTICS.md`。
+
+离线聚焦单测 **34/34** 通过，覆盖 Spring 自动启停、调度异常后继续、阻塞时恢复独立执行，以及 Outbox 写入失败回滚。独立源码复核未发现新阻塞。专用 `nexus_test`/`nexus_test_user` 上 MySQL 9.4.0 六类聚焦数据库回归 **50/50** 通过，0 失败、0 错误、0 跳过；覆盖终态原子性、多实例竞争、截图恢复、未来到期事件不提前投递，以及真实 HTTPS 503→200 签名重试。测试环境是 MySQL 9.4.0，未验证 MySQL 8.4；组件重建恢复测试不等于杀死并重启 JVM。既有截图 PNG 文件不参与数据库事务，同一 job 路径的旧 Worker 仍可能覆盖或删除其他执行结果，本轮未处理该文件并发边界。没有本轮完整回归或部署结论。相关实现位于 `job/manager/ScreenshotJobManager`、`job/mapper/ScreenshotJobMapper` 和 `webhook/dispatch`、`webhook/mapper/WebhookOutboxMapper`；工作区仍含既有未提交更改，不要覆盖。下一步根据当前目标决定是否进行完整后端回归或独立 JVM 重启演练。
 
 ### 新会话起点（2026-10-23）
 
@@ -165,3 +181,8 @@ release 内 `dist` 的隔离 Nginx 验收随后通过：`127.0.0.1:18080` 直接
 开发者已审定：管理端口固定127.0.0.1:8081、Nginx显式拒绝/actuator、短暂停机单JVM切换、候选命名`V2026.10.27.1__v9-obs1`，并授权仓库准备和打包、由开发者上传执行。发布工具位于`tools/deployment/linux/v9-obs1/`，上传包由`New-NexusReleasePackage.ps1`与`New-V9Obs1DeploymentBundle.ps1`生成。备份包括数据库、生产YAML、秘密环境文件和Nginx；切换前在隔离临时schema还原V8备份，回滚仅在提升前显式执行完整V8恢复。工具尚不能被描述为ECS执行通过；下一步先交付上传包并查看第一步候选安装输出，再推进切换与真实验收。不得重复既有压力实验、开放公网入口或升级Chromium/AppArmor范围。
 
 本轮本地`mvn -o package`最终452/452通过，0失败/错误/跳过，生成新JAR；测试JVM/Chromium无残留，前端build及E2E类型检查通过，离线发布工具12/12及Bash/PowerShell语法通过。前期离线缓存选择和额外Flyway覆盖/空环境变量导致的失败已定位，说明保存在发布工具README；未改业务实现或测试断言。发布工具将形成独立本地提交，之后从干净提交生成归档；没有自行推送，也未执行任何ECS写操作。
+
+
+2026-11-04 Webhook 本地验收补充：调度停止时先关闭提交入口，防止仍在数据库认领中的调度任务在 Worker 关闭后提交；强制停止后再次限时等待，并在仍未终止时记录错误（不可中断任务不能保证退出）。真实 MySQL 9.4.0 专用 `nexus_test` 回归 51/51，覆盖批量恢复第二次更新失败时两行回滚、禁用后延迟与重新启用、恢复和 503 重试真实 HTTPS eventId/HMAC、401 重签序列化 body；关闭/分发/恢复单元 25/25。禁用事件每次延迟一分钟再检查，重新启用不会立即重置等待时间。此次未部署或变更生产数据库；工作区含原有暂存及未跟踪更改，勿覆盖。
+
+2026-11-04 隔离 MySQL 8.4 最终回归：官方 8.4.13 Windows ZIP 的 MD5 与官方发布页一致，独立实例只绑定 `127.0.0.1:13384`；直接查询确认 `nexus_test`、`nexus_test_user@localhost` 和 Flyway V1–V13 全部成功。离线 `mvn -o clean test` 在允许 Chromium 子进程的执行环境下 **616/616 通过，0 失败、0 错误、0 跳过**，随后离线 `mvn -o -DskipTests compile` 通过。完整测试通过进程级强杀演练：首次 JVM 39052 在 HTTPS 接收方阻塞期间被强制结束，租约到期后新 JVM 41688 自动恢复；同一事件两次投递、时间戳和签名均更新且验证成功、令牌不同、旧令牌更新影响 0 行，接收方持久化去重后只有一次业务效果，最终状态为已投递。测试使用测试专用 HTTPS 信任和回环解析，生产网络策略未放宽。`WebhookJvmCrashIntegrationTests` 是可重复演练入口；运行时必须显式提供专用测试库连接变量、一次性 JWT 与 Webhook 加密密钥，并为 Windows 测试临时目录和 Chromium 提供可用的执行权限。全量测试关闭共享上下文中的 Webhook 调度，演练子进程单独开启。原始报告与无秘密演练 JSON 保存在忽略目录 `data/mysql84-acceptance/evidence/full/`。此前受限环境的完整回归卡在 Playwright 创建页面，已保留中断报告，不计入通过结果。

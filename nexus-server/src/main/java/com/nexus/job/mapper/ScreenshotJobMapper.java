@@ -12,6 +12,21 @@ import java.util.List;
 
 public interface ScreenshotJobMapper extends BaseMapper<ScreenshotJob> {
     @Select("""
+            SELECT id FROM screenshot_jobs WHERE status = 1 AND lease_expires_at <= #{now}
+              AND attempt_count >= #{maxAttempts} ORDER BY lease_expires_at, id LIMIT #{limit}
+            """)
+    List<Long> selectExhaustedExpiredIds(@Param("now") LocalDateTime now,
+            @Param("maxAttempts") int maxAttempts, @Param("limit") int limit);
+
+    @Update("""
+            UPDATE screenshot_jobs SET status = 3, run_token = NULL, lease_expires_at = NULL,
+                failure_code = 'WORKER_INTERRUPTED', completed_at = #{now}
+            WHERE id = #{id} AND status = 1 AND lease_expires_at <= #{now}
+              AND attempt_count >= #{maxAttempts}
+            """)
+    int failExhaustedExpiredJob(@Param("id") long id, @Param("now") LocalDateTime now,
+            @Param("maxAttempts") int maxAttempts);
+    @Select("""
             SELECT COUNT(*)
             FROM screenshot_jobs
             WHERE status IN (0, 1)
@@ -95,20 +110,6 @@ public interface ScreenshotJobMapper extends BaseMapper<ScreenshotJob> {
             """)
     int requeueExpiredLeases(@Param("now") LocalDateTime now,
                              @Param("maxAttempts") int maxAttempts);
-
-    @Update("""
-            UPDATE screenshot_jobs
-            SET status = 3,
-                run_token = NULL,
-                lease_expires_at = NULL,
-                failure_code = 'WORKER_INTERRUPTED',
-                completed_at = #{now}
-            WHERE status = 1
-              AND lease_expires_at <= #{now}
-              AND attempt_count >= #{maxAttempts}
-            """)
-    int failExhaustedExpiredLeases(@Param("now") LocalDateTime now,
-                                   @Param("maxAttempts") int maxAttempts);
 
     @Select("""
             SELECT *

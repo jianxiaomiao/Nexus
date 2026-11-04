@@ -3,6 +3,7 @@ package com.nexus.job.manager;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.nexus.job.entity.ScreenshotJob;
 import com.nexus.job.mapper.ScreenshotJobMapper;
+import com.nexus.webhook.mapper.WebhookOutboxMapper;
 import com.nexus.job.store.ScreenshotResultStore;
 import com.nexus.job.store.StoredScreenshot;
 import com.nexus.screenshot.exception.ScreenshotException;
@@ -41,6 +42,7 @@ class ScreenshotJobManagerTests {
     private static final String URL = "https://blog.csdn.net/article";
 
     private final ScreenshotJobMapper jobs = mock(ScreenshotJobMapper.class);
+    private final WebhookOutboxMapper outbox = mock(WebhookOutboxMapper.class);
     private final ScreenshotRenderer renderer = mock(ScreenshotRenderer.class);
     private final ScreenshotResultStore results = mock(ScreenshotResultStore.class);
     private final PlatformTransactionManager transactions = mock(PlatformTransactionManager.class);
@@ -51,7 +53,7 @@ class ScreenshotJobManagerTests {
     private final ScreenshotJobManager manager = new ScreenshotJobManager(
             jobs, renderer, results, new ScreenshotExecutionGate(),
             new ScreenshotMetrics(meterRegistry),
-            Clock.fixed(NOW, ZoneOffset.UTC), transactions);
+            Clock.fixed(NOW, ZoneOffset.UTC), outbox, transactions);
 
     @BeforeEach
     void transactionBoundary() {
@@ -101,7 +103,8 @@ class ScreenshotJobManagerTests {
         assertEquals(claimedToken.getValue(), completedToken.getValue());
         assertEquals(1, job.getAttemptCount());
         assertEquals(1, job.getStatus());
-        verify(transactions).commit(transactionStatus);
+        verify(transactions, times(2)).commit(transactionStatus);
+        verify(outbox).insertScreenshotCompletion(eq(11L), any());
 
         var order = inOrder(jobs, renderer, results);
         order.verify(jobs).markRunningIfQueued(eq(11L), any(), any(), any());
@@ -141,6 +144,24 @@ class ScreenshotJobManagerTests {
     }
 
     @Test
+    void outboxInsertFailureRollsBackTerminalUpdate() {
+        ScreenshotJob job = queuedJob();
+        job.setRunToken("token");
+        ScreenshotResult rendered = new ScreenshotResult(new byte[]{1}, 0, false);
+        when(renderer.render(URI.create(URL))).thenReturn(rendered);
+        when(results.saveAtomically(JOB_ID, rendered.png())).thenReturn(new StoredScreenshot(1L, "hash"));
+        when(jobs.completeSucceededIfRunTokenMatches(eq(11L), eq("token"), eq(1L), eq("hash"),
+                eq(0), eq(false), any(), any())).thenReturn(1);
+        when(outbox.insertScreenshotCompletion(eq(11L), any())).thenThrow(new IllegalStateException("insert failed"));
+
+        assertFalse(manager.executeClaimedJob(job));
+
+        verify(transactions).rollback(transactionStatus);
+        verify(transactions, never()).commit(transactionStatus);
+        verify(results, never()).deleteIfExists(JOB_ID);
+    }
+
+    @Test
     void retryClaimDoesNotRecordQueueDelayAgain() {
         ScreenshotJob job = queuedJob();
         job.setAttemptCount(1);
@@ -169,11 +190,15 @@ class ScreenshotJobManagerTests {
 
     @Test
     void leaseRecoveryFailsExhaustedJobsBeforeRequeueingRetryableJobs() {
+        when(jobs.selectExhaustedExpiredIds(UTC_NOW, 2, 100)).thenReturn(List.of(11L));
+        when(jobs.failExhaustedExpiredJob(11L, UTC_NOW, 2)).thenReturn(1);
         manager.recoverExpiredLeases();
 
         var order = inOrder(jobs);
-        order.verify(jobs).failExhaustedExpiredLeases(UTC_NOW, 2);
+        order.verify(jobs).selectExhaustedExpiredIds(UTC_NOW, 2, 100);
+        order.verify(jobs).failExhaustedExpiredJob(11L, UTC_NOW, 2);
         order.verify(jobs).requeueExpiredLeases(UTC_NOW, 2);
+        verify(outbox).insertScreenshotCompletion(eq(11L), any());
     }
 
     @Test
