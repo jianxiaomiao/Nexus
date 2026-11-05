@@ -31,6 +31,16 @@ export type ApiKey = {
   updatedAt: string
 }
 
+export type ApplicationWebhook = {
+  id: number
+  applicationId: number
+  url: string
+  status: 0 | 1
+  currentSecretVersion: number
+  createdAt: string
+  updatedAt: string
+}
+
 export type ShortLink = {
   id: number
   apiKeyId: number
@@ -59,6 +69,9 @@ export const sampleKey: ApiKey = {
 // 故意不是可用凭证；只用于检查创建后的一次性展示。
 export const oneTimeKey = 'PLAYWRIGHT_FAKE_KEY_NOT_VALID'
 export const oneTimeRotatedKey = 'PLAYWRIGHT_FAKE_ROTATED_KEY_NOT_VALID'
+// 故意不可用于任何真实签名；只验证一次性展示边界。
+export const oneTimeWebhookSecret = 'PLAYWRIGHT_FAKE_WEBHOOK_SECRET_NOT_VALID'
+export const oneTimeRotatedWebhookSecret = 'PLAYWRIGHT_FAKE_ROTATED_WEBHOOK_SECRET_NOT_VALID'
 export const sampleUsage: UsageSummary = {
   allTimeCount: 15,
   periodCount: 3,
@@ -81,9 +94,10 @@ export const sampleUsageEvents: UsageEvent[] = Array.from({ length: 11 }, (_, in
   durationMs: index + 1, occurredAt: `2026-10-08T${String(22 - index).padStart(2, '0')}:00:00+08:00`,
 }))
 
-export async function installMockApi(page: Page, initial?: { applications?: Application[]; keys?: ApiKey[]; shortLinks?: ShortLink[]; usage?: UsageSummary; usageEvents?: UsageEvent[] }) {
+export async function installMockApi(page: Page, initial?: { applications?: Application[]; keys?: ApiKey[]; webhooks?: ApplicationWebhook[]; shortLinks?: ShortLink[]; usage?: UsageSummary; usageEvents?: UsageEvent[] }) {
   const applications = structuredClone(initial?.applications ?? [sampleApplication])
   const keys = structuredClone(initial?.keys ?? [sampleKey])
+  const webhooks = structuredClone(initial?.webhooks ?? [])
   const shortLinks = structuredClone(initial?.shortLinks ?? [])
   const usage = structuredClone(initial?.usage ?? sampleUsage)
   const usageEvents = structuredClone(initial?.usageEvents ?? sampleUsageEvents)
@@ -91,6 +105,7 @@ export async function installMockApi(page: Page, initial?: { applications?: Appl
   const failures = new Map<string, Failure>()
   let nextApplicationId = 100
   let nextKeyId = 100
+  let nextWebhookId = 100
 
   await page.route((url) => url.pathname.startsWith('/api/'), async (route) => {
     const request = route.request()
@@ -143,6 +158,36 @@ export async function installMockApi(page: Page, initial?: { applications?: Appl
       const target = applications.find((item) => item.id === Number(path.split('/')[3]))
       if (!target) { await respond(null, 404, 'APPLICATION_NOT_FOUND'); return }
       await respond(target.quota)
+    } else if (/^\/api\/application\/\d+\/webhook$/.test(path) && method === 'GET') {
+      const applicationId = Number(path.split('/')[3])
+      await respond(webhooks.find((item) => item.applicationId === applicationId) ?? null)
+    } else if (/^\/api\/application\/\d+\/webhook$/.test(path) && method === 'POST') {
+      const applicationId = Number(path.split('/')[3])
+      if (webhooks.some((item) => item.applicationId === applicationId)) {
+        await respond(null, 409, 'WEBHOOK_ALREADY_EXISTS')
+        return
+      }
+      const created: ApplicationWebhook = {
+        id: nextWebhookId++, applicationId, url: String(body.url), status: 0, currentSecretVersion: 1,
+        createdAt: timestamp, updatedAt: timestamp,
+      }
+      webhooks.push(created)
+      await respond({ ...created, secret: oneTimeWebhookSecret })
+    } else if (/^\/api\/application\/\d+\/webhook$/.test(path) && method === 'PUT') {
+      const applicationId = Number(path.split('/')[3])
+      const target = webhooks.find((item) => item.applicationId === applicationId)
+      if (!target) { await respond(null, 404, 'WEBHOOK_NOT_FOUND'); return }
+      if (typeof body.url === 'string') target.url = body.url
+      if (body.status === 0 || body.status === 1) target.status = body.status
+      target.updatedAt = '2026-11-05T10:15:00'
+      await respond(target)
+    } else if (/^\/api\/application\/\d+\/webhook\/rotate-secret$/.test(path) && method === 'POST') {
+      const applicationId = Number(path.split('/')[3])
+      const target = webhooks.find((item) => item.applicationId === applicationId)
+      if (!target) { await respond(null, 404, 'WEBHOOK_NOT_FOUND'); return }
+      target.currentSecretVersion += 1
+      target.updatedAt = '2026-11-05T10:30:00'
+      await respond({ webhook: target, secret: oneTimeRotatedWebhookSecret })
     } else if (path.startsWith('/api/application/') && method === 'DELETE') {
       const index = applications.findIndex((item) => item.id === Number(path.split('/').at(-1)))
       if (index < 0) { await respond(null, 404, 'APPLICATION_NOT_FOUND'); return }
@@ -212,7 +257,7 @@ export async function installMockApi(page: Page, initial?: { applications?: Appl
     }
   })
 
-  return { applications, keys, shortLinks, calls, failures }
+  return { applications, keys, webhooks, shortLinks, calls, failures }
 }
 
 export async function signIn(page: Page) {

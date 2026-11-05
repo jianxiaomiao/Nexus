@@ -7,6 +7,7 @@ import brandSpark from '@/assets/icons/brand-spark.svg'
 import { deleteApplication, listApplications, updateApplication, type Application } from '@/api/applications'
 import { applicationErrorMessage } from '@/api/applicationErrors'
 import ApiKeysPanel from './ApiKeysPanel.vue'
+import ApplicationWebhookPanel from './ApplicationWebhookPanel.vue'
 import { queryApplicationQuota, type ApplicationQuota } from '@/api/applicationQuota'
 import ApplicationQuotaDisplay from '@/components/ApplicationQuotaDisplay.vue'
 import { formatBeijingTime } from '@/utils/beijingTime'
@@ -20,7 +21,10 @@ const actionBusy = ref(false)
 const quota = ref<ApplicationQuota | null>(null)
 const quotaLoading = ref(false)
 const quotaError = ref('')
-const activeTab = computed(() => route.query.tab === 'keys' ? 'keys' : 'overview')
+const activeTab = computed(() => {
+  if (route.query.tab === 'keys' || route.query.tab === 'webhook') return route.query.tab
+  return 'overview'
+})
 let loadVersion = 0
 
 async function load() {
@@ -195,10 +199,11 @@ watch(() => route.params.id, () => { void load() })
         </div>
       </div>
 
-      <nav class="detail-tabs" aria-label="应用详情分区">
+      <el-scrollbar class="detail-tabs"><nav class="detail-tabs-inner" aria-label="应用详情分区">
         <RouterLink :to="{ name: 'application-detail', params: { id: application.id } }" :class="{ 'is-current': activeTab === 'overview' }" :aria-current="activeTab === 'overview' ? 'page' : undefined">概览</RouterLink>
         <RouterLink :to="{ name: 'application-detail', params: { id: application.id }, query: { tab: 'keys' } }" :class="{ 'is-current': activeTab === 'keys' }" :aria-current="activeTab === 'keys' ? 'page' : undefined">API Keys</RouterLink>
-      </nav>
+        <RouterLink :to="{ name: 'application-detail', params: { id: application.id }, query: { tab: 'webhook' } }" :class="{ 'is-current': activeTab === 'webhook' }" :aria-current="activeTab === 'webhook' ? 'page' : undefined">Webhook</RouterLink>
+      </nav></el-scrollbar>
 
       <template v-if="activeTab === 'overview'">
         <section class="detail-card quota-card" aria-labelledby="quota-title" :aria-busy="quotaLoading">
@@ -221,7 +226,8 @@ watch(() => route.params.id, () => { void load() })
           </dl>
         </div>
       </template>
-      <ApiKeysPanel v-else :key="application.id" :application="application" />
+      <ApiKeysPanel v-else-if="activeTab === 'keys'" :key="application.id" :application="application" />
+      <ApplicationWebhookPanel v-else :key="application.id" :application="application" />
     </template>
   </section>
 </template>
@@ -242,8 +248,9 @@ watch(() => route.params.id, () => { void load() })
 .heading-actions :deep(.danger-action:hover) { background: #fff1ee; }
 .name-row { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; }
 h1 { overflow-wrap: anywhere; margin: 0; color: var(--nexus-ink); font-size: clamp(30px, 3vw, 42px); }
-.detail-tabs { display: flex; gap: 8px; margin-bottom: 30px; border-bottom: 1px solid var(--nexus-line); }
-.detail-tabs a { display: inline-block; padding: 0 18px 14px; border-bottom: 2px solid transparent; color: var(--nexus-muted); font-size: 15px; font-weight: 600; text-decoration: none; }
+.detail-tabs { margin-bottom: 30px; border-bottom: 1px solid var(--nexus-line); }
+.detail-tabs-inner { display: flex; gap: 8px; min-width: max-content; }
+.detail-tabs a { flex: none; display: inline-block; padding: 0 18px 14px; border-bottom: 2px solid transparent; color: var(--nexus-muted); font-size: 15px; font-weight: 600; text-decoration: none; }
 .detail-tabs a:hover { color: var(--nexus-teal); }
 .detail-tabs a.is-current { border-bottom-color: var(--nexus-teal); color: var(--nexus-teal); }
 .status-pill { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; font-size: 13px; font-weight: 650; white-space: nowrap; }

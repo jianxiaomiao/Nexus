@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
 import { RouterLink } from 'vue-router'
-import { ArrowRight, Camera, DataAnalysis, Document, DocumentCopy, HomeFilled, Key, Link, Odometer, Promotion, Right, Warning } from '@element-plus/icons-vue'
+import { ArrowRight, Bell, Camera, DataAnalysis, Document, DocumentCopy, HomeFilled, Key, Link, Odometer, Promotion, Right, Warning } from '@element-plus/icons-vue'
 import heroIllustration from '@/assets/docs-hero.png'
 import { docs, type DocSlug } from '@/docs/catalog'
 
@@ -9,6 +9,7 @@ const cardIcons: Record<DocSlug, Component> = {
   'quick-start': Promotion,
   authentication: Key,
   quota: Odometer,
+  webhooks: Bell,
   uuid: DocumentCopy,
   hash: DataAnalysis,
   shortlink: Link,

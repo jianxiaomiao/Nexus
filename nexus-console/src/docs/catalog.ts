@@ -1,6 +1,7 @@
 import quickStart from './content/quick-start.md?raw'
 import authentication from './content/authentication.md?raw'
 import quota from './content/quota.md?raw'
+import webhooks from './content/webhooks.md?raw'
 import uuid from './content/uuid.md?raw'
 import hash from './content/hash.md?raw'
 import shortlink from './content/shortlink.md?raw'
@@ -8,7 +9,7 @@ import webExtract from './content/web-extract.md?raw'
 import webScreenshot from './content/web-screenshot.md?raw'
 import errors from './content/errors.md?raw'
 
-export type DocSlug = 'quick-start' | 'authentication' | 'quota' | 'uuid' | 'hash' | 'shortlink' | 'web-extract' | 'web-screenshot' | 'errors'
+export type DocSlug = 'quick-start' | 'authentication' | 'quota' | 'webhooks' | 'uuid' | 'hash' | 'shortlink' | 'web-extract' | 'web-screenshot' | 'errors'
 
 export interface DocPage {
   slug: DocSlug
@@ -24,6 +25,7 @@ export const docs: DocPage[] = [
   { slug: 'quick-start', title: '快速开始', group: '开始使用', summary: '创建应用与 Key，发送第一条 API 请求。', markdown: quickStart },
   { slug: 'authentication', title: 'API Key 与认证', group: '开始使用', summary: '理解管理端 JWT 与机器端 API Key 的边界。', markdown: authentication },
   { slug: 'quota', title: '调用配额', group: '开始使用', summary: '了解应用共享额度、30 天周期、计次规则与 429 排查。', markdown: quota },
+  { slug: 'webhooks', title: 'Webhook 通知', group: '开始使用', summary: '配置截图完成通知，验证签名并按 eventId 幂等处理。', markdown: webhooks },
   { slug: 'uuid', title: '生成 UUID', group: 'API 参考', summary: '获取一个新生成的 UUID。', method: 'GET', path: '/v1/utils/uuid', markdown: uuid },
   { slug: 'hash', title: '计算 Hash', group: 'API 参考', summary: '计算文本的 SHA-256 或 SHA-512 摘要。', method: 'POST', path: '/v1/utils/hash', markdown: hash },
   { slug: 'shortlink', title: '短链接', group: 'API 参考', summary: '创建、管理并公开访问有期限的短链接。', method: 'POST', path: '/v1/short-links', markdown: shortlink },
