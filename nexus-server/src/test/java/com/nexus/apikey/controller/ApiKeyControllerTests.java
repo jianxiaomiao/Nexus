@@ -22,7 +22,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.ObjectMapper;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 
 import static org.mockito.Mockito.doThrow;
@@ -58,7 +58,7 @@ class ApiKeyControllerTests {
         when(bearerUserIdResolver.resolve("Bearer valid-token")).thenReturn(42L);
         when(apiKeyService.createMyApiKey(42L, request)).thenReturn(new CreateApiKeyResponse(
                 9L, 7L, "key", "public-id", "masked-preview", "complete-key", 0,
-                LocalDateTime.of(2026, 10, 4, 12, 0)));
+                Instant.parse("2026-10-04T12:00:00Z")));
 
         mockMvc.perform(post(BASE_PATH + "/create")
                         .header("Authorization", "Bearer valid-token")
@@ -69,6 +69,7 @@ class ApiKeyControllerTests {
                 .andExpect(jsonPath("$.data.apiKey").value("complete-key"))
                 .andExpect(jsonPath("$.data.publicId").value("public-id"))
                 .andExpect(jsonPath("$.data.keyPreview").value("masked-preview"))
+                .andExpect(jsonPath("$.data.createdAt").value("2026-10-04T12:00:00Z"))
                 .andExpect(jsonPath("$.data.secretHash").doesNotExist());
 
         verify(apiKeyService).createMyApiKey(42L, request);
@@ -79,13 +80,15 @@ class ApiKeyControllerTests {
         when(bearerUserIdResolver.resolve("Bearer valid-token")).thenReturn(42L);
         when(apiKeyService.listMyApiKeys(42L, 7L, 1, 10, null)).thenReturn(new com.nexus.common.web.ListPage<>(1, 1, 10, List.of(
                 new ApiKeyResponse(9L, 7L, "key", "public-id", "masked-preview", 0,
-                        LocalDateTime.of(2026, 10, 4, 12, 0), LocalDateTime.of(2026, 10, 4, 12, 0)))));
+                        Instant.parse("2026-10-04T12:00:00Z"), Instant.parse("2026-10-04T12:00:00Z")))));
 
         mockMvc.perform(get(BASE_PATH + "/7")
                         .header("Authorization", "Bearer valid-token"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.records[0].id").value(9))
                 .andExpect(jsonPath("$.data.records[0].keyPreview").value("masked-preview"))
+                .andExpect(jsonPath("$.data.records[0].createdAt").value("2026-10-04T12:00:00Z"))
+                .andExpect(jsonPath("$.data.records[0].updatedAt").value("2026-10-04T12:00:00Z"))
                 .andExpect(jsonPath("$.data.records[0].apiKey").doesNotExist())
                 .andExpect(jsonPath("$.data.records[0].secretHash").doesNotExist());
 
@@ -117,7 +120,7 @@ class ApiKeyControllerTests {
         when(bearerUserIdResolver.resolve("Bearer valid-token")).thenReturn(42L);
         when(apiKeyService.rotateMyApiKey(42L, 9L, "old-public-id"))
                 .thenReturn(new RotateApiKeyResponse(9L, 7L, "key", "new-public-id",
-                        "new-preview", "new-complete-key", 0, LocalDateTime.of(2026, 10, 9, 12, 0)));
+                        "new-preview", "new-complete-key", 0, Instant.parse("2026-10-09T12:00:00Z")));
 
         mockMvc.perform(post(BASE_PATH + "/9/rotate")
                         .header("Authorization", "Bearer valid-token")
@@ -126,6 +129,7 @@ class ApiKeyControllerTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.id").value(9))
                 .andExpect(jsonPath("$.data.publicId").value("new-public-id"))
+                .andExpect(jsonPath("$.data.updatedAt").value("2026-10-09T12:00:00Z"))
                 .andExpect(jsonPath("$.data.apiKey").value("new-complete-key"))
                 .andExpect(jsonPath("$.data.secretHash").doesNotExist());
 

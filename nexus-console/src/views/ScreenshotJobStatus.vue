@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatBeijingTime } from '@/utils/beijingTime'
 import { computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { ScreenshotJob } from '@/api/openApi'
@@ -25,9 +26,7 @@ const currentStep = computed(() => {
 const terminalError = computed(() => props.job.status === 'FAILED' || props.job.status === 'EXPIRED')
 
 function formatTime(value: string | null): string {
-  if (!value) return '—'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('zh-CN')
+  return value ? formatBeijingTime(value) : '—'
 }
 
 async function copyJobId() {

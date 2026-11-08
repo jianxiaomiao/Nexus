@@ -28,7 +28,7 @@ import static org.mockito.Mockito.*;
 
 class ApplicationQuotaServiceTests {
     private static final LocalDateTime ANCHOR = LocalDateTime.of(2026, 10, 13, 14, 0, 0, 123_000_000);
-    private static final Instant ANCHOR_INSTANT = ANCHOR.toInstant(ZoneOffset.ofHours(8));
+    private static final Instant ANCHOR_INSTANT = ANCHOR.toInstant(ZoneOffset.UTC);
     private final ApplicationMapper applications = mock(ApplicationMapper.class);
     private final ApiKeyMapper keys = mock(ApiKeyMapper.class);
     private final ApplicationQuotaMapper quotas = mock(ApplicationQuotaMapper.class);
@@ -44,9 +44,32 @@ class ApplicationQuotaServiceTests {
                 ANCHOR_INSTANT.plusSeconds(720 * 3600L).minusNanos(1)));
     }
 
+    @Test void lastMillisecondStillBelongsToOldPeriod() {
+        assertEquals(ANCHOR, ApplicationQuotaService.currentPeriodStart(ANCHOR,
+                ANCHOR_INSTANT.plusSeconds(720 * 3600L).minusMillis(1)));
+    }
+
+    @Test void finalEightHoursDoNotRollOverEarly() {
+        assertEquals(ANCHOR, ApplicationQuotaService.currentPeriodStart(ANCHOR,
+                ANCHOR_INSTANT.plusSeconds((720 - 8) * 3600L)));
+    }
+
     @Test void exactEndBelongsToNewPeriod() {
         assertEquals(ANCHOR.plusHours(720), ApplicationQuotaService.currentPeriodStart(ANCHOR,
                 ANCHOR_INSTANT.plusSeconds(720 * 3600L)));
+    }
+
+    @Test void firstMillisecondAfterEndBelongsToNewPeriod() {
+        assertEquals(ANCHOR.plusHours(720), ApplicationQuotaService.currentPeriodStart(ANCHOR,
+                ANCHOR_INSTANT.plusSeconds(720 * 3600L).plusMillis(1)));
+    }
+
+    @Test void periodIs720HoursRatherThanOneCalendarMonth() {
+        when(applications.selectOne(any(Wrapper.class))).thenReturn(application(0));
+        var response = service.queryMyApplicationQuota(1L, new QueryQuotaRequest(2L));
+        assertEquals(java.time.Duration.ofHours(720), java.time.Duration.between(
+                response.periodStart(), response.periodEnd()));
+        assertNotEquals(ANCHOR.plusMonths(1).toInstant(ZoneOffset.UTC), response.periodEnd());
     }
 
     @Test void inactivePeriodsAreSkippedWithoutMovingAnchor() {
@@ -62,8 +85,8 @@ class ApplicationQuotaServiceTests {
     @Test void absentPeriodDisplaysZeroWithoutWriting() {
         when(applications.selectOne(any(Wrapper.class))).thenReturn(application(0));
         var response = service.queryMyApplicationQuota(1L, new QueryQuotaRequest(2L));
-        assertAll(() -> assertEquals(ANCHOR, response.periodStart()),
-                () -> assertEquals(ANCHOR.plusHours(720), response.periodEnd()),
+        assertAll(() -> assertEquals(ANCHOR_INSTANT, response.periodStart()),
+                () -> assertEquals(ANCHOR_INSTANT.plusSeconds(720 * 3600L), response.periodEnd()),
                 () -> assertEquals(1000, response.quotaLimit()),
                 () -> assertEquals(0, response.usedCount()),
                 () -> assertEquals(1000, response.restCount()));
@@ -130,10 +153,10 @@ class ApplicationQuotaServiceTests {
         stored.setUsedCount(7);
         when(quotas.selectList(any(Wrapper.class))).thenReturn(List.of(stored));
         var responses = service.queryCurrentQuotas(List.of(second, first));
-        assertEquals(ANCHOR.minusHours(1), responses.get(0).periodStart());
+        assertEquals(ANCHOR.minusHours(1).toInstant(ZoneOffset.UTC), responses.get(0).periodStart());
         assertEquals(500, responses.get(0).quotaLimit());
         assertEquals(0, responses.get(0).usedCount());
-        assertEquals(ANCHOR, responses.get(1).periodStart());
+        assertEquals(ANCHOR_INSTANT, responses.get(1).periodStart());
         assertEquals(25, responses.get(1).quotaLimit());
         assertEquals(7, responses.get(1).usedCount());
         verify(quotas, times(1)).selectList(any(Wrapper.class));
@@ -151,8 +174,8 @@ class ApplicationQuotaServiceTests {
         second.setId(3L);
         when(quotas.selectList(any(Wrapper.class))).thenReturn(List.of());
         var responses = batchService.queryCurrentQuotas(List.of(first, second));
-        assertEquals(ANCHOR, responses.get(0).periodStart());
-        assertEquals(ANCHOR, responses.get(1).periodStart());
+        assertEquals(ANCHOR_INSTANT, responses.get(0).periodStart());
+        assertEquals(ANCHOR_INSTANT, responses.get(1).periodStart());
         verify(movingClock, times(1)).instant();
     }
 

@@ -27,7 +27,11 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 
 @Service
 @RequiredArgsConstructor
@@ -36,6 +40,7 @@ public class ApiKeyService {
     private final ApplicationMapper applicationMapper;
     private final ShortLinkMapper shortLinkMapper;
     private final ApiKeyCredentialGenerator credentialGenerator;
+    private final Clock clock;
 
     @Transactional
     public CreateApiKeyResponse createMyApiKey(Long userId, CreateApiKeyRequest createApiKeyRequest){
@@ -55,7 +60,7 @@ public class ApiKeyService {
         }
         //生成密钥
         GeneratedApiKey generatedApiKey = credentialGenerator.generate();
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = utcNow();
 
         ApiKey apiKey = new ApiKey();
         apiKey.setApplicationId(createApiKeyRequest.applicationId());
@@ -82,7 +87,7 @@ public class ApiKeyService {
                 generatedApiKey.keyPreview(),
                 generatedApiKey.plaintextKey(),
                 apiKey.getStatus(),
-                apiKey.getCreatedAt()
+                asInstant(apiKey.getCreatedAt())
         );
     }
 
@@ -115,8 +120,8 @@ public class ApiKeyService {
                         key.getPublicId(),
                         key.getKeyPreview(),
                         key.getStatus(),
-                        key.getCreatedAt(),
-                        key.getUpdatedAt()
+                        asInstant(key.getCreatedAt()),
+                        asInstant(key.getUpdatedAt())
                 ));
     }
 
@@ -153,7 +158,7 @@ public class ApiKeyService {
         }
 
         GeneratedApiKey generated = credentialGenerator.generate();
-        LocalDateTime updatedAt = LocalDateTime.now();
+        LocalDateTime updatedAt = utcNow();
         int changed = apiKeyMapper.update(null, Wrappers.<ApiKey>lambdaUpdate()
                 .eq(ApiKey::getId, apiKeyId)
                 .eq(ApiKey::getApplicationId, application.getId())
@@ -169,7 +174,7 @@ public class ApiKeyService {
 
         return new RotateApiKeyResponse(current.getId(), current.getApplicationId(), current.getName(),
                 generated.publicId(), generated.keyPreview(), generated.plaintextKey(),
-                current.getStatus(), updatedAt);
+                current.getStatus(), asInstant(updatedAt));
     }
 
     @Transactional
@@ -214,7 +219,7 @@ public class ApiKeyService {
                 .eq(ApiKey::getIsDeleted, 0)
                 .set(name != null, ApiKey::getName, name)
                 .set(status!= null, ApiKey::getStatus, status)
-                .set(ApiKey::getUpdatedAt, LocalDateTime.now());
+                .set(ApiKey::getUpdatedAt, utcNow());
         try {
             affectedRows = apiKeyMapper.update(null, lambdaUpdateWrapper);
         }catch (DuplicateKeyException exception){
@@ -229,8 +234,8 @@ public class ApiKeyService {
                     apiKey.getPublicId(),
                     apiKey.getKeyPreview(),
                     apiKey.getStatus(),
-                    apiKey.getCreatedAt(),
-                    apiKey.getUpdatedAt()
+                    asInstant(apiKey.getCreatedAt()),
+                    asInstant(apiKey.getUpdatedAt())
             );
         }else {
             throw new ApiKeyNotFoundException();
@@ -256,14 +261,15 @@ public class ApiKeyService {
         if (application == null) {
             throw new ApplicationNotFoundException();
         }
-        LocalDateTime deletedAt = LocalDateTime.now();
+        LocalDateTime deletedAt = utcNow();
         LambdaUpdateWrapper<ApiKey> lambdaUpdateWrapper = Wrappers.lambdaUpdate();
         lambdaUpdateWrapper
                 .eq(ApiKey::getId, deleteApiKeyRequest.apiKeyId())
                 .eq(ApiKey::getApplicationId, deleteApiKeyRequest.applicationId())
                 .eq(ApiKey::getIsDeleted, 0)
                 .set(ApiKey::getIsDeleted, 1)
-                .set(ApiKey::getDeletedAt, deletedAt);
+                .set(ApiKey::getDeletedAt, deletedAt)
+                .set(ApiKey::getUpdatedAt, deletedAt);
         affectedRows = apiKeyMapper.update(null, lambdaUpdateWrapper);
         if(affectedRows > 0){
             shortLinkMapper.update(null, Wrappers.<ShortLink>lambdaUpdate()
@@ -278,4 +284,11 @@ public class ApiKeyService {
         }
     }
 
+    private LocalDateTime utcNow() {
+        return LocalDateTime.ofInstant(clock.instant().truncatedTo(ChronoUnit.MILLIS), ZoneOffset.UTC);
+    }
+
+    private static Instant asInstant(LocalDateTime value) {
+        return value == null ? null : value.toInstant(ZoneOffset.UTC);
+    }
 }

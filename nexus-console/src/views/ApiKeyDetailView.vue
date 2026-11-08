@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatBeijingTime } from '@/utils/beijingTime'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, CircleCheck, CircleClose, Delete, EditPen, Refresh } from '@element-plus/icons-vue'
@@ -73,8 +74,7 @@ async function load() {
 }
 
 function formatDate(value: string): string {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'medium' }).format(date)
+  return formatBeijingTime(value)
 }
 
 async function rename() {

@@ -1,5 +1,8 @@
 # Nexus Open API：第一个机器调用
 
+时间约定：内部绝对时刻使用 UTC。Application、配额及 API Key 的时间字段返回带 `Z` 的 ISO-8601 UTC 字符串；短链、截图和 Webhook 事件同样明确带 UTC 偏移。Usage 事件明细 `occurredAt` 返回 UTC `Z`，汇总查询的范围继续使用 `+08:00` 并声明 `timeZone: Asia/Shanghai`，每日标签为北京日期。控制台按北京时间展示；短链自定义到期输入仍按标注的设备本地时间解释，提交时转换成带 `Z` 的绝对时刻。不要移除偏移或重复加八小时。
+
+
 ## 获取与保管 API Key
 
 用户先使用管理端 JWT 创建 Application，再调用管理接口 `POST /api/apiKey/create`，请求体包含 `applicationId` 和 `name`。创建响应中的 `apiKey` 是完整凭证，仅在这一次返回；请在安全的位置保存。普通列表只显示公开 ID 和遮蔽预览，不能找回完整凭证。不要把密钥写进代码仓库、日志或公开文档。
@@ -25,7 +28,7 @@ UUID、Hash、短链创建、网页正文提取和截图各消耗 1 次；短链
 拒绝时不执行实际业务，不新增消费次数；数据库故障与额度耗尽区分处理。
 Usage 记录与配额计数职责不同，Usage 仍保留原有成功及失败事件。实现理由见 [配额设计](QUOTA_DESIGN.md)。
 
-管理端配额查询为 `GET /api/application/{applicationId}/quota`，使用 Bearer JWT，检查应用归属；不消耗或创建配额记录。禁用应用仍可查，其他用户或已删除应用返回404。成功的 `data` 包含 `periodStart`、`periodEnd`、`quotaLimit`、`usedCount`、`restCount`；两个无偏移时间字符串按北京时间解释，周期结束时刻属于下一期。Application详情概览已接入，支持单独刷新。
+管理端配额查询为 `GET /api/application/{applicationId}/quota`，使用 Bearer JWT，检查应用归属；不消耗或创建配额记录。禁用应用仍可查，其他用户或已删除应用返回404。成功的 `data` 包含 `periodStart`、`periodEnd`、`quotaLimit`、`usedCount`、`restCount`；两个时间字符串均以带 `Z` 的 ISO 格式明确表示 UTC，控制台转换为北京时间展示；周期结束时刻属于下一期。Application 列表和更新响应的 `createdAt`、`updatedAt` 同样返回带 `Z` 的 UTC 时间。此契约随本地 UTC 调整更新，尚未部署 ECS。
 
 Application 分页列表 `GET /api/application?current=1&size=10` 的 `data` 仍为 `{total,current,size,records}`，每个记录保留 `id/name/status/createdAt/updatedAt`，并新增嵌套 `quota`，字段与上述详情查询相同。后端只批量查询本页所属用户应用的各自当前周期，再按原排序组装；无记录显示零用量，不写库。已有周期取额度快照，没有周期才取应用配置。查询故障不会伪装为零用量。创建和更新响应保持原字段；列表页面直接展示嵌套quota，不逐卡请求。
 

@@ -12,6 +12,8 @@ GRANT ALL PRIVILEGES ON nexus_test.* TO 'nexus_test_user'@'127.0.0.1';
 
 后端测试 classpath 另有启动前保护：`mvn test` 的 Spring 上下文只接受最终生效的 MySQL schema 为 `nexus_test`，并检查单独设置的 Hikari/Flyway URL 和 Flyway schema；缺失或不匹配时，在连接数据库前拒绝启动。这个保护不随正式应用打包，但运行真实后端验收时仍须人工确认启动日志中的 Flyway schema。本机配置可能保留注释掉的旧 `nexus` URL；判断生效值时不要只搜索文件里的第一个 JDBC URL。
 
+时间测试必须区分 JVM、数据库全局时区和连接会话时区。JDBC 的 `connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true` 约束实际会话；只设置 `TZ` 或 `serverTimezone` 不够。需从应用数据源及独立 Flyway 数据源读取 `@@session.time_zone` 并验证 `NOW()` 与 `UTC_TIMESTAMP()` 一致。日志使用 UTC；不要把 Usage 的北京自然日边界改成 UTC 自然日。
+
 ## 1. 显式选择 local Profile，配置测试库与临时 JWT 密钥
 
 公共 `application.yml` 不再导入本地文件。每次启动本地后端或运行后端测试，都必须显式设置 `SPRING_PROFILES_ACTIVE=local`；没有 Profile 时不能静默回退到本地数据库。完整边界及生产模板见 [部署配置边界](DEPLOYMENT_CONFIGURATION.md)。
@@ -24,7 +26,7 @@ server:
   port: 8080
 spring:
   datasource:
-    url: jdbc:mysql://127.0.0.1:3306/nexus_test?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8
+    url: jdbc:mysql://127.0.0.1:3306/nexus_test?useSSL=false&allowPublicKeyRetrieval=true&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&characterEncoding=UTF-8
     username: <本机测试库用户>
     password: <本机测试库密码>
     hikari:
@@ -109,7 +111,7 @@ node scripts/accept-usage-real.mjs
 
 ## 4. Usage 逐条记录分页
 
-`GET /api/usage/events` 使用管理端 Bearer JWT，必填 `applicationId`、`apiKeyId`；`current` 默认 1，`size` 默认 10，允许 1–100。响应 `data` 包含 `total`、`current`、`size` 和 `records`，每条只展示 `apiCode`、`httpStatusCode`、`durationMs`、`occurredAt`（带北京时间偏移）。记录按调用时刻倒序，同一时刻按内部 ID 倒序；上方统计时间范围不限制逐条历史。已禁用 Key 可查历史，已删除 Key 不可查；Filter 拒绝的请求和公开短链跳转仍不写入 Usage。
+`GET /api/usage/events` 使用管理端 Bearer JWT，必填 `applicationId`、`apiKeyId`；`current` 默认 1，`size` 默认 10，允许 1–100。响应 `data` 包含 `total`、`current`、`size` 和 `records`，每条只展示 `apiCode`、`httpStatusCode`、`durationMs`、`occurredAt`（带 `Z` 的 UTC 时刻，页面按北京时间展示）。记录按调用时刻倒序，同一时刻按内部 ID 倒序；上方统计时间范围不限制逐条历史。已禁用 Key 可查历史，已删除 Key 不可查；Filter 拒绝的请求和公开短链跳转仍不写入 Usage。
 
 可重复验证：在专用测试库运行 `mvn -q -Dtest=UsageHttpIntegrationTests test`，它插入同一时刻的 11 条记录，并验证默认第一页 10 条、第二页 1 条、自定义每页 5 条、禁用历史、无权访问及非法页大小。运行 `npm run test:e2e -- e2e/usage.spec.ts` 验证浏览器翻页和每页条数输入。完整回归仍按第 1、2 节执行；第 3 节现有真实浏览器脚本只覆盖 Usage 汇总与禁用历史，不覆盖 11 条翻页。
 
@@ -173,7 +175,7 @@ node scripts/accept-web-extract-real.mjs
 本地 `application-local.yml` 若已切回 `nexus` 与日常账号，数据库测试必须同时覆盖 URL、用户名和密码。仅覆盖 URL 会导致日常账号因没有 `nexus_test` 权限而初始化失败。可以在专用测试窗口设置以下环境变量，再按第 1 节生成本轮 JWT 密钥并运行 `mvn clean test`：
 
 ```powershell
-$env:SPRING_DATASOURCE_URL = 'jdbc:mysql://127.0.0.1:3306/nexus_test?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8'
+$env:SPRING_DATASOURCE_URL = 'jdbc:mysql://127.0.0.1:3306/nexus_test?useSSL=false&allowPublicKeyRetrieval=true&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&characterEncoding=UTF-8'
 $env:SPRING_DATASOURCE_USERNAME = 'nexus_test_user'
 $env:SPRING_DATASOURCE_PASSWORD = Read-Host '输入本机专用测试库账号的密码'
 $env:SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE = '2'

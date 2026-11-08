@@ -21,7 +21,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.ObjectMapper;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -117,14 +117,14 @@ class ApplicationControllerTests {
 
     @Test
     void validTokenShouldListApplicationsForAuthenticatedOwner() throws Exception {
-        LocalDateTime createdAt = LocalDateTime.of(2026, 9, 26, 10, 30);
-        LocalDateTime updatedAt = LocalDateTime.of(2026, 9, 26, 11, 0);
+        Instant createdAt = Instant.parse("2026-09-26T10:30:00Z");
+        Instant updatedAt = Instant.parse("2026-09-26T11:00:00Z");
         when(bearerUserIdResolver.resolve("Bearer valid-token")).thenReturn(42L);
         when(applicationService.listMyApplications(42L, 1, 10, null)).thenReturn(new com.nexus.common.web.ListPage<>(2, 1, 10, List.of(
                 new ApplicationListItemResponse(100L, "appA", 0, createdAt, updatedAt,
-                        new QueryQuotaResponse(createdAt, createdAt.plusHours(720), 1000, 350, 650)),
+                        new QueryQuotaResponse(createdAt, createdAt.plusSeconds(720 * 3600L), 1000, 350, 650)),
                 new ApplicationListItemResponse(101L, "appB", 1, createdAt, updatedAt,
-                        new QueryQuotaResponse(createdAt, createdAt.plusHours(720), 1000, 0, 1000)))));
+                        new QueryQuotaResponse(createdAt, createdAt.plusSeconds(720 * 3600L), 1000, 0, 1000)))));
 
         mockMvc.perform(get("/api/application")
                         .header("Authorization", "Bearer valid-token"))
@@ -136,8 +136,10 @@ class ApplicationControllerTests {
                 .andExpect(jsonPath("$.data.records[0].id").value(100))
                 .andExpect(jsonPath("$.data.records[0].name").value("appA"))
                 .andExpect(jsonPath("$.data.records[0].status").value(0))
-                .andExpect(jsonPath("$.data.records[0].createdAt").value("2026-09-26T10:30:00"))
-                .andExpect(jsonPath("$.data.records[0].updatedAt").value("2026-09-26T11:00:00"))
+                .andExpect(jsonPath("$.data.records[0].createdAt").value("2026-09-26T10:30:00Z"))
+                .andExpect(jsonPath("$.data.records[0].updatedAt").value("2026-09-26T11:00:00Z"))
+                .andExpect(jsonPath("$.data.records[0].quota.periodStart").value("2026-09-26T10:30:00Z"))
+                .andExpect(jsonPath("$.data.records[0].quota.periodEnd").value("2026-10-26T10:30:00Z"))
                 .andExpect(jsonPath("$.data.records[0].quota.usedCount").value(350))
                 .andExpect(jsonPath("$.data.records[0].quota.restCount").value(650))
                 .andExpect(jsonPath("$.data.records[1].id").value(101))
@@ -193,8 +195,8 @@ class ApplicationControllerTests {
         UpdateApplicationRequest request = new UpdateApplicationRequest(100L, "renamed-app", 1);
         ApplicationResponse response = new ApplicationResponse(
                 100L, "renamed-app", 1,
-                LocalDateTime.of(2026, 9, 26, 10, 0),
-                LocalDateTime.of(2026, 9, 26, 11, 0));
+                Instant.parse("2026-09-26T10:00:00Z"),
+                Instant.parse("2026-09-26T11:00:00Z"));
         when(bearerUserIdResolver.resolve("Bearer valid-token")).thenReturn(42L);
         when(applicationService.updateMyApplication(42L, request)).thenReturn(response);
 
@@ -208,8 +210,8 @@ class ApplicationControllerTests {
                 .andExpect(jsonPath("$.data.id").value(100))
                 .andExpect(jsonPath("$.data.name").value("renamed-app"))
                 .andExpect(jsonPath("$.data.status").value(1))
-                .andExpect(jsonPath("$.data.createdAt").value("2026-09-26T10:00:00"))
-                .andExpect(jsonPath("$.data.updatedAt").value("2026-09-26T11:00:00"));
+                .andExpect(jsonPath("$.data.createdAt").value("2026-09-26T10:00:00Z"))
+                .andExpect(jsonPath("$.data.updatedAt").value("2026-09-26T11:00:00Z"));
 
         verify(bearerUserIdResolver).resolve("Bearer valid-token");
         verify(applicationService).updateMyApplication(42L, request);

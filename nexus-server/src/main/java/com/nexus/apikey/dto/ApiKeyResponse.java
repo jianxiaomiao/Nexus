@@ -3,7 +3,7 @@ package com.nexus.apikey.dto;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 public record ApiKeyResponse(
     Long id,
@@ -12,7 +12,7 @@ public record ApiKeyResponse(
     String publicId,
     String keyPreview,
     Integer status,
-    LocalDateTime createdAt,
-    LocalDateTime updatedAt
+    Instant createdAt,
+    Instant updatedAt
 ) {
 }

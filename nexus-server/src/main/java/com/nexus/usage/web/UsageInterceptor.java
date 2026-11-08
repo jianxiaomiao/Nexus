@@ -14,6 +14,8 @@ import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 import java.time.LocalDateTime;
+import java.time.Clock;
+import java.time.temporal.ChronoUnit;
 import java.time.ZoneOffset;
 import java.util.UUID;
 
@@ -28,11 +30,13 @@ public class UsageInterceptor implements HandlerInterceptor {
 
     private final UsageRecordService usageRecordService;
     private final UsageRecordMetrics metrics;
+    private final Clock clock;
 
     public UsageInterceptor(UsageRecordService usageRecordService,
-                            UsageRecordMetrics metrics) {
+                            UsageRecordMetrics metrics, Clock clock) {
         this.usageRecordService = usageRecordService;
         this.metrics = metrics;
+        this.clock = clock;
     }
 
     @Override
@@ -42,7 +46,8 @@ public class UsageInterceptor implements HandlerInterceptor {
         // 把纳秒开始时间放进request属性，不要写成员变量！线程不安全
         long start = System.nanoTime();
         // ✅ 请求进来那一刻，直接记录UTC墙上时间
-        LocalDateTime startUtc = LocalDateTime.now(ZoneOffset.UTC);
+        LocalDateTime startUtc = LocalDateTime.ofInstant(
+                clock.instant().truncatedTo(ChronoUnit.MILLIS), ZoneOffset.UTC);
 
         request.setAttribute(START_NANO_TIME, start);
         request.setAttribute(START_UTC_TIME, startUtc);

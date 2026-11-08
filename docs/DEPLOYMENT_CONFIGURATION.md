@@ -20,6 +20,12 @@ Nexus 在 Java 进程启动时选择环境，不根据 `localhost`、公网域�
 
 公共配置不再导入 `application-local.yml`，也不指定默认活动 Profile。没有显式选择 Profile 的进程不会静默退回本地配置。
 
+## UTC 配置约定（本地调整，尚未部署 ECS）
+
+绝对时刻的存储和计算统一 UTC，控制台按北京时间展示。JDBC URL 应包含 `connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true`，独立 Flyway 数据源也遵守此约定。JVM 显式使用 `-Duser.timezone=UTC`；公共日志带 UTC 偏移，按 UTC 日期滚动。Usage 的北京自然日和配额的固定 720 小时周期保持各自业务含义。
+
+此处及生产模板仅说明后续配置要求，不表示服务器已应用新版本。旧 DATETIME、配额周期锚点和计数须先确认原有含义，再决定转换或按批准范围清理；不能以修改时区代替历史数据处理。
+
 ## Profile 加载
 
 本地从 `nexus-server` 目录启动，使 Spring Boot 能发现 `./config/application-local.yml`：

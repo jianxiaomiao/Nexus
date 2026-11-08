@@ -13,8 +13,8 @@ const sampleWebhook: ApplicationWebhook = {
   url: 'https://api.example.com/nexus/webhooks',
   status: 0,
   currentSecretVersion: 1,
-  createdAt: '2026-11-05T09:30:00',
-  updatedAt: '2026-11-05T10:15:00',
+  createdAt: '2026-11-05T01:30:00Z',
+  updatedAt: '2026-11-05T02:15:00Z',
 }
 
 async function openWebhookTab(page: Parameters<typeof openApplication>[0]) {

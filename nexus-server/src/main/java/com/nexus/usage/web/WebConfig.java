@@ -6,17 +6,20 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+import java.time.Clock;
 
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
 
     private final ObjectProvider<UsageRecordService> usageRecordService;
     private final ObjectProvider<UsageRecordMetrics> usageRecordMetrics;
+    private final ObjectProvider<Clock> clock;
 
     public WebConfig(ObjectProvider<UsageRecordService> usageRecordService,
-                     ObjectProvider<UsageRecordMetrics> usageRecordMetrics) {
+                     ObjectProvider<UsageRecordMetrics> usageRecordMetrics, ObjectProvider<Clock> clock) {
         this.usageRecordService = usageRecordService;
         this.usageRecordMetrics = usageRecordMetrics;
+        this.clock = clock;
     }
 
     @Override
@@ -25,7 +28,7 @@ public class WebConfig implements WebMvcConfigurer {
         UsageRecordService recorder = usageRecordService.getIfAvailable();
         UsageRecordMetrics metrics = usageRecordMetrics.getIfAvailable();
         if (recorder != null && metrics != null) {
-            registry.addInterceptor(new UsageInterceptor(recorder, metrics))
+            registry.addInterceptor(new UsageInterceptor(recorder, metrics, clock.getObject()))
                     .addPathPatterns("/v1/**")
                     .excludePathPatterns("/v1/health");
         }

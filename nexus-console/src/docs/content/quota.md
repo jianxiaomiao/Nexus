@@ -74,8 +74,8 @@ Authorization: Bearer <登录后的 JWT>
   "code": "SUCCESS",
   "message": "配额查询成功",
   "data": {
-    "periodStart": "2026-10-13T14:00:00",
-    "periodEnd": "2026-11-12T14:00:00",
+    "periodStart": "2026-10-13T06:00:00Z",
+    "periodEnd": "2026-11-12T06:00:00Z",
     "quotaLimit": 1000,
     "usedCount": 350,
     "restCount": 650
@@ -91,7 +91,7 @@ Authorization: Bearer <登录后的 JWT>
 | `usedCount` | 当前周期已消耗次数 |
 | `restCount` | 剩余次数，即 `quotaLimit - usedCount` |
 
-上述时间字符串没有 `Z` 或偏移量，接口约定表示**北京时间（UTC+08:00）**。自行接入时应明确按该时区解释，不能当作设备本地时间或 UTC。
+上述时间字符串带 `Z`，明确表示 **UTC 时刻**；控制台按北京时间展示。例如 `2026-10-13T06:00:00Z` 对应北京时间 `2026-10-13 14:00`。自行接入时按响应中的时区解析，不要先去掉 `Z` 或手工重复加 8 小时。Application 列表和更新响应的 `createdAt`、`updatedAt` 同样使用带 `Z` 的格式。
 
 分页接口 `GET /api/application?current=1&size=10` 的每个 `records` 项内还包含同样结构的 `quota`；展示列表时可直接使用它，无需逐个查询详情。用户只能查询自己的未删除应用；不存在、已删除或归属不符返回 404 `APPLICATION_NOT_FOUND`。
 

@@ -6,6 +6,7 @@ export interface Application {
   id: number
   name: string
   status: number
+  // ISO 时间字符串，带 Z，表示 UTC 时刻。
   createdAt: string
   updatedAt: string
 }

@@ -1,6 +1,6 @@
 package com.nexus.apikey.dto;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 public record CreateApiKeyResponse(
         Long id,
@@ -10,7 +10,7 @@ public record CreateApiKeyResponse(
         String keyPreview,
         String apiKey,
         Integer status,
-        LocalDateTime createdAt
+        Instant createdAt
 ) {
     @Override
     public String toString() {

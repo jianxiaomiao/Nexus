@@ -23,7 +23,10 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.ArrayList;
 
@@ -36,6 +39,7 @@ public class ApplicationService {
     private final ApiKeyMapper apiKeyMapper;
     private final ShortLinkMapper shortLinkMapper;
     private final ApplicationQuotaService quotaService;
+    private final Clock clock;
 
     public CreateApplicationResponse createApplication(Long userId, CreateApplicationRequest createApplicationRequest){
         //获取用户id
@@ -43,6 +47,9 @@ public class ApplicationService {
         Application application = new Application();
         application.setOwnerUserId(userId);
         application.setName(createApplicationRequest.name().strip());
+        LocalDateTime now = utcNow();
+        application.setCreatedAt(now);
+        application.setUpdatedAt(now);
         //try catch处理错误：重复名称的问题
         try {
             applicationMapper.insert(application);
@@ -69,7 +76,7 @@ public class ApplicationService {
         for (int index = 0; index < records.size(); index++) {
             Application app = records.get(index);
             responses.add(new ApplicationListItemResponse(app.getId(), app.getName(), app.getStatus(),
-                    app.getCreatedAt(), app.getUpdatedAt(), quotas.get(index)));
+                    app.getCreatedAt().toInstant(ZoneOffset.UTC), app.getUpdatedAt().toInstant(ZoneOffset.UTC), quotas.get(index)));
         }
         return new ListPage<>(applications.getTotal(), applications.getCurrent(), applications.getSize(), responses);
     }
@@ -101,7 +108,7 @@ public class ApplicationService {
                 .eq(Application::getIsDeleted,0)
                 .set(name != null, Application::getName, name)
                 .set(status != null, Application::getStatus, status)
-                .set(Application::getUpdatedAt, LocalDateTime.now());
+                .set(Application::getUpdatedAt, utcNow());
         try {
             affetRow =applicationMapper.update(null, lambdaUpdateWrapper);
         }catch (DuplicateKeyException exception){
@@ -114,8 +121,8 @@ public class ApplicationService {
                     application.getId(),
                     application.getName(),
                     application.getStatus(),
-                    application.getCreatedAt(),
-                    application.getUpdatedAt()
+                    application.getCreatedAt().toInstant(ZoneOffset.UTC),
+                    application.getUpdatedAt().toInstant(ZoneOffset.UTC)
             );
         }else {
             throw new ApplicationNotFoundException();
@@ -127,14 +134,15 @@ public class ApplicationService {
         if (appId == null || appId <= 0) {
             throw new InvalidApplicationIdException();
         }
-        LocalDateTime deletedAt = LocalDateTime.now();
+        LocalDateTime deletedAt = utcNow();
         LambdaUpdateWrapper<Application> lambdaUpdateWrapper = Wrappers.lambdaUpdate();
         lambdaUpdateWrapper
                 .eq(Application::getId,appId)
                 .eq(Application::getOwnerUserId,userId)
                 .eq(Application::getIsDeleted,0)
                 .set(Application::getIsDeleted,1)
-                .set(Application::getDeletedAt,deletedAt);
+                .set(Application::getDeletedAt,deletedAt)
+                .set(Application::getUpdatedAt,deletedAt);
 
         int affectedRows = applicationMapper.update(null, lambdaUpdateWrapper);
         if (affectedRows == 0) {
@@ -149,7 +157,8 @@ public class ApplicationService {
                 .eq(ApiKey::getApplicationId, appId)
                 .eq(ApiKey::getIsDeleted, 0)
                 .set(ApiKey::getIsDeleted, 1)
-                .set(ApiKey::getDeletedAt, deletedAt));
+                .set(ApiKey::getDeletedAt, deletedAt)
+                .set(ApiKey::getUpdatedAt, deletedAt));
         if (!keyIds.isEmpty()) {
             shortLinkMapper.update(null, Wrappers.<ShortLink>lambdaUpdate()
                     .in(ShortLink::getApiKeyId, keyIds)
@@ -160,5 +169,9 @@ public class ApplicationService {
         }
     }
 
+    private LocalDateTime utcNow() {
+        // DATETIME(3) 保存 UTC 墙上时间，精度与数据库毫秒列一致。
+        return LocalDateTime.ofInstant(clock.instant().truncatedTo(ChronoUnit.MILLIS), ZoneOffset.UTC);
+    }
 
 }

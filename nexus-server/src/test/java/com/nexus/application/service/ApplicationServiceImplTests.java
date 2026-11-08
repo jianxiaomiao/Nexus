@@ -26,13 +26,20 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DuplicateKeyException;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -47,9 +54,13 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 
 @ExtendWith(MockitoExtension.class)
 class ApplicationServiceImplTests {
+    private static final Instant NOW = Instant.parse("2026-11-08T10:00:00.123456789Z");
+    private static final LocalDateTime UTC_NOW = LocalDateTime.of(2026, 11, 8, 10, 0, 0, 123_000_000);
 
     @Mock
     private ApplicationMapper applicationMapper;
@@ -85,7 +96,8 @@ class ApplicationServiceImplTests {
 
     @BeforeEach
     void setUp() {
-        applicationService = new ApplicationService(applicationMapper, apiKeyMapper, shortLinkMapper, quotaService);
+        applicationService = new ApplicationService(applicationMapper, apiKeyMapper, shortLinkMapper, quotaService,
+                Clock.fixed(NOW, ZoneId.of("Asia/Shanghai")));
     }
 
     @Test
@@ -95,6 +107,8 @@ class ApplicationServiceImplTests {
             assertNull(application.getId(), "自增主键应由数据库生成");
             assertEquals(42L, application.getOwnerUserId());
             assertEquals("appA", application.getName());
+            assertEquals(UTC_NOW, application.getCreatedAt());
+            assertEquals(UTC_NOW, application.getUpdatedAt());
             application.setId(100L);
             return 1;
         });
@@ -106,6 +120,35 @@ class ApplicationServiceImplTests {
         assertEquals("appA", response.name());
         verify(applicationMapper).insert(any(Application.class));
         verifyNoMoreInteractions(applicationMapper);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"UTC", "Asia/Shanghai", "America/Los_Angeles"})
+    void createShouldPersistSameUtcMillisRegardlessOfClockZone(String zone) {
+        var service = new ApplicationService(applicationMapper, apiKeyMapper, shortLinkMapper, quotaService,
+                Clock.fixed(NOW, ZoneId.of(zone)));
+
+        service.createApplication(42L, new CreateApplicationRequest("appA"));
+
+        ArgumentCaptor<Application> captor = ArgumentCaptor.forClass(Application.class);
+        verify(applicationMapper).insert(captor.capture());
+        assertEquals(UTC_NOW, captor.getValue().getCreatedAt());
+        assertEquals(UTC_NOW, captor.getValue().getUpdatedAt());
+    }
+
+    @Test
+    void createShouldReadClockOnlyOnceForBothTimestamps() {
+        Clock clock = mock(Clock.class);
+        when(clock.instant()).thenReturn(NOW, NOW.plusSeconds(1));
+        var service = new ApplicationService(applicationMapper, apiKeyMapper, shortLinkMapper, quotaService, clock);
+
+        service.createApplication(42L, new CreateApplicationRequest("appA"));
+
+        ArgumentCaptor<Application> captor = ArgumentCaptor.forClass(Application.class);
+        verify(applicationMapper).insert(captor.capture());
+        assertEquals(UTC_NOW, captor.getValue().getCreatedAt());
+        assertEquals(UTC_NOW, captor.getValue().getUpdatedAt());
+        verify(clock, times(1)).instant();
     }
 
     @Test
@@ -161,15 +204,15 @@ class ApplicationServiceImplTests {
         page.setTotal(2);
         page.setRecords(List.of(enabled, disabled));
         when(applicationMapper.selectPage(any(), any())).thenReturn(page);
-        QueryQuotaResponse firstQuota = new QueryQuotaResponse(createdAt, createdAt.plusHours(720), 1000, 350, 650);
-        QueryQuotaResponse secondQuota = new QueryQuotaResponse(createdAt, createdAt.plusHours(720), 1000, 0, 1000);
+        QueryQuotaResponse firstQuota = new QueryQuotaResponse(createdAt.toInstant(ZoneOffset.UTC), createdAt.plusHours(720).toInstant(ZoneOffset.UTC), 1000, 350, 650);
+        QueryQuotaResponse secondQuota = new QueryQuotaResponse(createdAt.toInstant(ZoneOffset.UTC), createdAt.plusHours(720).toInstant(ZoneOffset.UTC), 1000, 0, 1000);
         when(quotaService.queryCurrentQuotas(List.of(enabled, disabled))).thenReturn(List.of(firstQuota, secondQuota));
 
         var responses = applicationService.listMyApplications(42L, 1, 10, null);
 
         assertEquals(List.of(
-                new ApplicationListItemResponse(100L, "enabled-app", 0, createdAt, updatedAt, firstQuota),
-                new ApplicationListItemResponse(101L, "disabled-app", 1, createdAt, updatedAt, secondQuota)
+                new ApplicationListItemResponse(100L, "enabled-app", 0, createdAt.toInstant(ZoneOffset.UTC), updatedAt.toInstant(ZoneOffset.UTC), firstQuota),
+                new ApplicationListItemResponse(101L, "disabled-app", 1, createdAt.toInstant(ZoneOffset.UTC), updatedAt.toInstant(ZoneOffset.UTC), secondQuota)
         ), responses.records());
         verify(quotaService).queryCurrentQuotas(List.of(enabled, disabled));
         verify(applicationMapper).selectPage(any(), org.mockito.ArgumentMatchers.argThat(wrapper -> {
@@ -214,13 +257,15 @@ class ApplicationServiceImplTests {
         ApplicationResponse response = applicationService.updateMyApplication(
                 42L, new UpdateApplicationRequest(100L, "  renamed-app  ", 1));
 
-        assertEquals(new ApplicationResponse(100L, "renamed-app", 1, createdAt, updatedAt), response);
+        assertEquals(new ApplicationResponse(100L, "renamed-app", 1, createdAt.toInstant(ZoneOffset.UTC), updatedAt.toInstant(ZoneOffset.UTC)), response);
         verify(applicationMapper).update(isNull(), argThat(wrapper -> {
             if (!(wrapper instanceof LambdaUpdateWrapper<?> update)) {
                 return false;
             }
             String where = update.getExpression().getSqlSegment();
             String set = update.getSqlSet();
+            assertTimestampAssignment(update, "updated_at");
+            assertTrue(!set.contains("created_at"), "更新不能重置配额的创建时间锚点");
             return where.contains("owner_user_id")
                     && where.contains("is_deleted")
                     && where.contains("id")
@@ -337,6 +382,9 @@ class ApplicationServiceImplTests {
         assertTrue(appUpdate.getExpression().getSqlSegment().contains("is_deleted"));
         assertTrue(appUpdate.getParamNameValuePairs().containsValue(100L));
         assertTrue(appUpdate.getParamNameValuePairs().containsValue(42L));
+        assertTimestampAssignment(appUpdate, "deleted_at");
+        assertTimestampAssignment(appUpdate, "updated_at");
+        assertTrue(!appUpdate.getSqlSet().contains("created_at"));
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<LambdaUpdateWrapper<ApiKey>> keyCaptor =
@@ -349,6 +397,8 @@ class ApplicationServiceImplTests {
         assertTrue(keyUpdate.getParamNameValuePairs().containsValue(100L));
         assertTrue(keyUpdate.getParamNameValuePairs().containsValue(0));
         assertTrue(keyUpdate.getParamNameValuePairs().containsValue(1));
+        assertTimestampAssignment(keyUpdate, "deleted_at");
+        assertTimestampAssignment(keyUpdate, "updated_at");
 
         LocalDateTime appDeletedAt = appUpdate.getParamNameValuePairs().values().stream()
                 .filter(LocalDateTime.class::isInstance)
@@ -357,7 +407,12 @@ class ApplicationServiceImplTests {
         assertTrue(keyUpdate.getParamNameValuePairs().containsValue(appDeletedAt));
         verifyNoMoreInteractions(applicationMapper);
         verify(apiKeyMapper).selectList(any());
-        verify(shortLinkMapper).update(isNull(), any(LambdaUpdateWrapper.class));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<LambdaUpdateWrapper<ShortLink>> linkCaptor =
+                ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(shortLinkMapper).update(isNull(), linkCaptor.capture());
+        assertTimestampAssignment(linkCaptor.getValue(), "deleted_at");
+        assertTimestampAssignment(linkCaptor.getValue(), "updated_at");
         verifyNoMoreInteractions(apiKeyMapper, shortLinkMapper);
     }
 
@@ -381,5 +436,12 @@ class ApplicationServiceImplTests {
         }
         verifyNoInteractions(applicationMapper);
         verifyNoInteractions(apiKeyMapper);
+    }
+
+    private static void assertTimestampAssignment(LambdaUpdateWrapper<?> wrapper, String column) {
+        var matcher = Pattern.compile(Pattern.quote(column) + "=\\#\\{ew\\.paramNameValuePairs\\.([^}]+)\\}")
+                .matcher(wrapper.getSqlSet());
+        assertTrue(matcher.find(), () -> "缺少时间字段赋值：" + column);
+        assertEquals(UTC_NOW, wrapper.getParamNameValuePairs().get(matcher.group(1)), column);
     }
 }

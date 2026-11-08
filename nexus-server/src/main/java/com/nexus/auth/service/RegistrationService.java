@@ -12,6 +12,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Locale;
+import java.time.Clock;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 
 @Service
 @RequiredArgsConstructor
@@ -19,6 +23,7 @@ public class RegistrationService {
 
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
+    private final Clock clock;
 
     @Transactional
     public RegisterResponse register(RegisterRequest request) {
@@ -30,6 +35,10 @@ public class RegistrationService {
         user.setEmail(normalizedEmail);
         user.setDisplayName(request.displayName().strip());
         user.setPasswordHash(passwordEncoder.encode(request.password()));
+        LocalDateTime now = LocalDateTime.ofInstant(
+                clock.instant().truncatedTo(ChronoUnit.MILLIS), ZoneOffset.UTC);
+        user.setCreatedAt(now);
+        user.setUpdatedAt(now);
 
         try {
             userMapper.insert(user);

@@ -16,6 +16,8 @@ management:
 
 spring:
   datasource:
+    # Include connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true in NEXUS_DB_URL.
+    # A separately configured Flyway URL must use the same UTC options.
     url: ${NEXUS_DB_URL}
     username: ${NEXUS_DB_USERNAME}
     password: ${NEXUS_DB_PASSWORD}
@@ -37,8 +39,10 @@ nexus:
 
 # Use an absolute deployment-host path, such as /opt/nexus/logs on Linux.
 logging:
+  pattern:
+    dateformat: "yyyy-MM-dd'T'HH:mm:ss.SSSXXX,UTC"
   file:
     name: ${NEXUS_LOG_DIR}/nexus.log
   logback:
     rollingpolicy:
-      file-name-pattern: ${NEXUS_LOG_DIR}/nexus.%d{yyyy-MM-dd}.%i.log.gz
+      file-name-pattern: ${NEXUS_LOG_DIR}/nexus.%d{yyyy-MM-dd,UTC}.%i.log.gz

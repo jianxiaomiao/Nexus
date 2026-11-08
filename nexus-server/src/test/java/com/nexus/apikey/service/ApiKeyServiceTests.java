@@ -59,6 +59,10 @@ class ApiKeyServiceTests {
     @Mock
     private ApiKeyCredentialGenerator credentialGenerator;
 
+    @org.mockito.Spy
+    private java.time.Clock clock = java.time.Clock.fixed(
+            java.time.Instant.parse("2026-11-08T20:30:00.123456789Z"), java.time.ZoneId.of("Asia/Shanghai"));
+
     @InjectMocks
     private ApiKeyService service;
 
@@ -118,7 +122,8 @@ class ApiKeyServiceTests {
             assertEquals("masked-preview", key.getKeyPreview());
             assertEquals(0, key.getStatus());
             assertEquals(0, key.getIsDeleted());
-            assertNotNull(key.getCreatedAt());
+            assertEquals(java.time.LocalDateTime.parse("2026-11-08T20:30:00.123"), key.getCreatedAt());
+            assertEquals(key.getCreatedAt(), key.getUpdatedAt());
             key.setId(99L);
             return 1;
         });
@@ -126,6 +131,8 @@ class ApiKeyServiceTests {
         CreateApiKeyResponse response = service.createMyApiKey(
                 42L, new CreateApiKeyRequest("  named key  ", 7L));
 
+        assertEquals(java.time.Instant.parse("2026-11-08T20:30:00.123Z"), response.createdAt());
+        verify(clock).instant();
         assertEquals(99L, response.id());
         assertEquals("complete-key", response.apiKey());
         assertEquals("public-id", response.publicId());
@@ -295,7 +302,15 @@ class ApiKeyServiceTests {
         assertTrue(update.getParamNameValuePairs().containsValue(9L));
         assertTrue(update.getSqlSet().contains("deleted_at"));
         assertTrue(update.getParamNameValuePairs().containsValue(1));
-        verify(shortLinkMapper).update(any(), any(LambdaUpdateWrapper.class));
+        assertTrue(update.getSqlSet().contains("updated_at"));
+        java.time.LocalDateTime expectedUtc = java.time.LocalDateTime.parse("2026-11-08T20:30:00.123");
+        assertEquals(2L, update.getParamNameValuePairs().values().stream().filter(expectedUtc::equals).count());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<LambdaUpdateWrapper<ShortLink>> links = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(shortLinkMapper).update(any(), links.capture());
+        links.getValue().getSqlSet();
+        assertEquals(2L, links.getValue().getParamNameValuePairs().values().stream().filter(expectedUtc::equals).count());
+        verify(clock).instant();
     }
 
     @Test

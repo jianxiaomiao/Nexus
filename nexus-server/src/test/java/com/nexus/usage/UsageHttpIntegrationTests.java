@@ -313,7 +313,7 @@ class UsageHttpIntegrationTests {
         assertEquals(10, firstData.path("records").size());
         assertEquals("event.11", firstData.at("/records/0/apiCode").asText());
         assertEquals("event.2", firstData.at("/records/9/apiCode").asText());
-        assertEquals("2026-10-08T20:00:00+08:00", firstData.at("/records/0/occurredAt").asText());
+        assertEquals("2026-10-08T12:00:00Z", firstData.at("/records/0/occurredAt").asText());
         assertEquals(4, firstData.at("/records/0").size());
 
         HttpResponse<String> second = getWithBearer(url + "&current=2", token);

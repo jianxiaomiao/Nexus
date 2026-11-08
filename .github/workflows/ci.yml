@@ -27,7 +27,8 @@ jobs:
   backend:
     runs-on: ubuntu-latest
     env:
-      SPRING_DATASOURCE_URL: jdbc:mysql://127.0.0.1:3306/nexus_test
+      JAVA_TOOL_OPTIONS: -Duser.timezone=UTC
+      SPRING_DATASOURCE_URL: jdbc:mysql://127.0.0.1:3306/nexus_test?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true
       SPRING_DATASOURCE_USERNAME: nexus_test_user
       SPRING_DATASOURCE_PASSWORD: "@nexusTestUserPassword!"
       NEXUS_AUTH_JWT_ISSUER: nexus_test_user
@@ -46,7 +47,7 @@ jobs:
           MYSQL_DATABASE: nexus_test
           MYSQL_USER: nexus_test_user
           MYSQL_PASSWORD: "@nexusTestUserPassword!"
-          TZ: Asia/Shanghai
+          TZ: UTC
 
         options: >-
           --health-cmd="mysqladmin ping -h 127.0.0.1"
@@ -98,3 +99,12 @@ jobs:
       - name: 运行后端测试
         working-directory: ./nexus-server
         run: sh ./mvnw -B clean test
+
+      - name: 验证默认时区不改变 UTC 业务时间
+        working-directory: ./nexus-server
+        env:
+          JAVA_TOOL_OPTIONS: -Duser.timezone=America/Los_Angeles
+        run: >-
+          sh ./mvnw -B
+          -Dtest=ApplicationServiceImplTests,ApplicationQuotaServiceTests,ApiKeyServiceTests,ApiKeyControllerTests,RegistrationClockTests,UsageClockTests
+          test

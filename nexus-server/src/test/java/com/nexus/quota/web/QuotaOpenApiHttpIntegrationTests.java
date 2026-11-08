@@ -34,7 +34,9 @@ import tools.jackson.databind.ObjectMapper;
 import java.net.URI;
 import java.net.http.*;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.UUID;
 import java.util.concurrent.*;
 
@@ -209,6 +211,39 @@ class QuotaOpenApiHttpIntegrationTests {
             } finally { release.countDown(); }
             assertEquals(200, screenshot.get(5, TimeUnit.SECONDS));
         }
+    }
+
+    @Test void managementResponsesExposeUtcInstantsMatchingStoredApplication() throws Exception {
+        String bearer = "Bearer " + tokens.issueAccessToken(owner.getId()).value();
+        var created = request("POST", "/api/application/create", bearer,
+                "{\"name\":\"utc-" + UUID.randomUUID() + "\"}");
+        assertEquals(200, created.statusCode());
+        long id = json.readTree(created.body()).at("/data/id").asLong();
+        Application stored = applications.selectById(id);
+        Instant anchor = stored.getCreatedAt().toInstant(ZoneOffset.UTC);
+
+        var listed = request("GET", "/api/application?applicationId=" + id, bearer, null);
+        assertEquals(200, listed.statusCode());
+        var item = json.readTree(listed.body()).at("/data/records/0");
+        assertTrue(item.at("/createdAt").asText().endsWith("Z"));
+        assertEquals(anchor, Instant.parse(item.at("/createdAt").asText()));
+        assertEquals(stored.getUpdatedAt().toInstant(ZoneOffset.UTC),
+                Instant.parse(item.at("/updatedAt").asText()));
+        assertEquals(anchor, Instant.parse(item.at("/quota/periodStart").asText()));
+        assertEquals(anchor.plus(Duration.ofHours(720)), Instant.parse(item.at("/quota/periodEnd").asText()));
+
+        var detail = request("GET", "/api/application/" + id + "/quota", bearer, null);
+        assertEquals(200, detail.statusCode());
+        assertEquals(item.at("/quota"), json.readTree(detail.body()).at("/data"));
+
+        var updated = request("PUT", "/api/application", bearer,
+                "{\"id\":" + id + ",\"name\":\"utc-updated-" + UUID.randomUUID() + "\"}");
+        assertEquals(200, updated.statusCode());
+        var data = json.readTree(updated.body()).at("/data");
+        assertEquals(anchor, Instant.parse(data.at("/createdAt").asText()));
+        assertTrue(data.at("/updatedAt").asText().endsWith("Z"));
+        assertEquals(applications.selectById(id).getUpdatedAt().toInstant(ZoneOffset.UTC),
+                Instant.parse(data.at("/updatedAt").asText()));
     }
 
     @Test void managerQueryDoesNotCreateOrConsumeAndDisabledHistoryRemainsReadable() throws Exception {

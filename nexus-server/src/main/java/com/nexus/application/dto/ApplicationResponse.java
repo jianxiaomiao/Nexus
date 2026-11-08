@@ -1,12 +1,12 @@
 package com.nexus.application.dto;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 public record ApplicationResponse (
         Long id,
         String name,
         Integer status,
-        LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        Instant createdAt,
+        Instant updatedAt
 ){
 }

@@ -61,8 +61,8 @@ class ApplicationQuotaIntegrationTests {
     @BeforeEach void fixtures() {
         assertEquals("nexus_test", jdbc.queryForObject("SELECT DATABASE()", String.class));
         assertTrue(jdbc.queryForObject("SELECT CURRENT_USER()", String.class).startsWith("nexus_test_user@"));
-        // 验证当前本地创建时间约定；不在测试中偷偷改写已有 DATETIME 的解释方式。
-        assertEquals(28800, jdbc.queryForObject("SELECT TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW())", Integer.class));
+        // 本组只接受已明确配置为 UTC 的专用测试库。
+        assertEquals(0, jdbc.queryForObject("SELECT TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW())", Integer.class));
         User owner = new User();
         owner.setEmail("quota-" + UUID.randomUUID() + "@example.com");
         owner.setDisplayName("Quota Test");
@@ -91,6 +91,29 @@ class ApplicationQuotaIntegrationTests {
         assertEquals(1, query().usedCount());
         assertEquals(999, query().restCount());
         assertEquals(1, quotas.selectCount(Wrappers.<ApplicationQuota>lambdaQuery().eq(ApplicationQuota::getApplicationId, app.getId())));
+    }
+
+    @Test void utcBoundaryChargesOldAndNewPeriodsWithoutMovingAnchor() {
+        LocalDateTime anchor = app.getCreatedAt();
+        var end = anchor.toInstant(ZoneOffset.UTC).plusSeconds(720 * 3600L);
+        var before = new ApplicationQuotaService(applications, keys, quotas,
+                Clock.fixed(end.minusMillis(1), ZoneOffset.UTC), transactions);
+        var exact = new ApplicationQuotaService(applications, keys, quotas,
+                Clock.fixed(end, ZoneOffset.UTC), transactions);
+        var after = new ApplicationQuotaService(applications, keys, quotas,
+                Clock.fixed(end.plusMillis(1), ZoneOffset.UTC), transactions);
+
+        before.consumeOnce(identity(key));
+        exact.consumeOnce(identity(key));
+        after.consumeOnce(identity(key));
+
+        assertEquals(1, quotas.selectPeriod(app.getId(), anchor).getUsedCount());
+        assertEquals(2, quotas.selectPeriod(app.getId(), anchor.plusHours(720)).getUsedCount());
+        assertEquals(2L, quotas.selectCount(Wrappers.<ApplicationQuota>lambdaQuery()
+                .eq(ApplicationQuota::getApplicationId, app.getId())));
+        assertEquals(anchor, applications.selectById(app.getId()).getCreatedAt());
+        assertEquals(anchor.plusHours(720).toInstant(ZoneOffset.UTC), exact.queryMyApplicationQuota(ownerId,
+                new QueryQuotaRequest(app.getId())).periodStart());
     }
 
     @Test void lastCreditIsAcceptedAndNextCallIsRejected() {
@@ -144,7 +167,7 @@ class ApplicationQuotaIntegrationTests {
         app.setQuota(7);
         applications.updateById(app);
         period(app, 2, 2);
-        assertEquals(NOW, query().periodStart());
+        assertEquals(NOW.toInstant(ZoneOffset.UTC), query().periodStart());
         assertEquals(0, query().usedCount());
         service.consumeOnce(identity(key));
         assertEquals(7, query().quotaLimit());
@@ -156,7 +179,7 @@ class ApplicationQuotaIntegrationTests {
         app.setCreatedAt(NOW.minusHours(720 * 4 + 1));
         applications.updateById(app);
         service.consumeOnce(identity(key));
-        assertEquals(NOW.minusHours(1), query().periodStart());
+        assertEquals(NOW.minusHours(1).toInstant(ZoneOffset.UTC), query().periodStart());
         assertEquals(1, quotas.selectCount(Wrappers.<ApplicationQuota>lambdaQuery().eq(ApplicationQuota::getApplicationId, app.getId())));
     }
 
@@ -233,10 +256,10 @@ class ApplicationQuotaIntegrationTests {
         current.setUsedCount(8);
         quotas.insert(current);
         var responses = service.queryCurrentQuotas(java.util.List.of(second, third, app));
-        assertEquals(NOW.minusHours(5), responses.get(0).periodStart());
+        assertEquals(NOW.minusHours(5).toInstant(ZoneOffset.UTC), responses.get(0).periodStart());
         assertEquals(90, responses.get(0).quotaLimit());
         assertEquals(8, responses.get(0).usedCount());
-        assertEquals(NOW.minusHours(2), responses.get(1).periodStart());
+        assertEquals(NOW.minusHours(2).toInstant(ZoneOffset.UTC), responses.get(1).periodStart());
         assertEquals(300, responses.get(1).quotaLimit());
         assertEquals(0, responses.get(1).usedCount());
         assertEquals(50, responses.get(2).quotaLimit());
@@ -297,6 +320,6 @@ class ApplicationQuotaIntegrationTests {
 
     @TestConfiguration(proxyBeanMethods = false)
     static class FixedTime {
-        @Bean @Primary Clock quotaTestClock() { return Clock.fixed(NOW.toInstant(ZoneOffset.ofHours(8)), ZoneOffset.UTC); }
+        @Bean @Primary Clock quotaTestClock() { return Clock.fixed(NOW.toInstant(ZoneOffset.UTC), ZoneOffset.UTC); }
     }
 }

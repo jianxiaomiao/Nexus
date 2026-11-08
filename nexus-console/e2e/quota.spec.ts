@@ -4,7 +4,7 @@ import { installMockApi, openApplication, sampleApplication, sampleQuota, signIn
 test('列表直接显示本页各应用的配额，不逐卡查询，禁用与耗尽分别显示', async ({ page }) => {
   const api = await installMockApi(page, { applications: [
     { ...sampleApplication, name: '晨星实验室' },
-    { ...sampleApplication, id: 2, name: '小岛计划', status: 1, quota: { ...sampleQuota, usedCount: 920, restCount: 80, periodEnd: '2026-11-14T09:30:00' } },
+    { ...sampleApplication, id: 2, name: '小岛计划', status: 1, quota: { ...sampleQuota, usedCount: 920, restCount: 80, periodEnd: '2026-11-14T01:30:00Z' } },
     { ...sampleApplication, id: 3, name: 'Nexus Demo', quota: { ...sampleQuota, usedCount: 1000, restCount: 0 } },
   ] })
   await signIn(page)
@@ -30,7 +30,7 @@ test('详情可单独刷新配额，查询失败显示错误，重试后显示�
   await expect(card.locator('.quota-amount')).toHaveCount(0)
   await expect(page.getByRole('heading', { name: '应用信息' })).toBeVisible()
   api.failures.delete('GET /api/application/1/quota')
-  api.applications[0]!.quota = { ...sampleQuota, periodStart: sampleQuota.periodEnd, periodEnd: '2026-12-12T14:00:00', usedCount: 0, restCount: 1000 }
+  api.applications[0]!.quota = { ...sampleQuota, periodStart: sampleQuota.periodEnd, periodEnd: '2026-12-12T06:00:00Z', usedCount: 0, restCount: 1000 }
   await card.getByRole('button', { name: '重试配额查询' }).click()
   await expect(card.locator('.quota-amount')).toHaveText('0 / 1000 次')
   await expect(card.locator('.quota-period')).toContainText('2026年12月12日 14:00')
@@ -96,5 +96,30 @@ for (const width of [1440, 390]) {
     await expect(page.locator('.quota-period')).toContainText('2026年11月12日 14:00')
     expect(await page.locator('.console-scroll-area > .el-scrollbar__wrap').evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
     await page.screenshot({ path: testInfo.outputPath(`quota-detail-${width}.png`), fullPage: true })
+  })
+}
+
+for (const timezoneId of ['UTC', 'Asia/Shanghai', 'America/Los_Angeles']) {
+  test(`UTC 响应在 ${timezoneId} 设备上按北京时间跨日展示，配额刷新保持同一时刻`, async ({ page }) => {
+    const cdp = await page.context().newCDPSession(page)
+    await cdp.send('Emulation.setTimezoneOverride', { timezoneId })
+    const api = await installMockApi(page, { applications: [{
+      ...sampleApplication,
+      createdAt: '2026-11-08T20:30:00Z', updatedAt: '2026-11-08T20:30:00Z',
+      quota: { ...sampleQuota, periodStart: '2026-11-08T20:30:00Z', periodEnd: '2026-12-08T20:30:00Z' },
+    }] })
+    await signIn(page)
+    await expect(page.locator('.card-date')).toContainText('2026年11月9日')
+    await expect(page.locator('.quota-recovery')).toContainText('2026年12月9日 04:30')
+    await page.getByRole('link', { name: '查看详情' }).click()
+    await expect(page.locator('dl > div').filter({ has: page.getByText('创建时间', { exact: true }) }).locator('dd')).toHaveText('2026年11月9日 04:30')
+    await expect(page.locator('.quota-period')).toContainText('2026年11月9日 04:30')
+    api.applications[0]!.quota = { ...api.applications[0]!.quota,
+      periodStart: '2026-11-09T04:30:00+08:00', periodEnd: '2026-12-09T04:30:00+08:00' }
+    const refreshed = page.waitForResponse((response) => response.url().endsWith('/api/application/1/quota'))
+    await page.getByRole('button', { name: '刷新配额' }).click()
+    await refreshed
+    await expect(page.locator('.quota-card')).toHaveAttribute('aria-busy', 'false')
+    await expect(page.locator('.quota-period')).toContainText('2026年12月9日 04:30')
   })
 }

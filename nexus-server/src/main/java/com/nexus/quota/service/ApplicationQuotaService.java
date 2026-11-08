@@ -27,7 +27,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -38,9 +38,7 @@ import java.util.stream.Collectors;
 @Service
 public class ApplicationQuotaService {
     private static final Duration PERIOD = Duration.ofHours(720);
-    // applications.created_at 由本地 MySQL CURRENT_TIMESTAMP 写入，按北京时间解释。
-    // DATETIME 不携带时区；周期记录沿用同一约定，不把已有创建时间直接当作 UTC。
-    private static final ZoneId APPLICATION_TIME_ZONE = ZoneId.of("Asia/Shanghai");
+    // applications.created_at 与 period_start 均为 UTC 墙上时间；DATETIME 本身不含时区。
 
     private final ApplicationMapper applicationMapper;
     private final ApiKeyMapper apiKeyMapper;
@@ -109,7 +107,8 @@ public class ApplicationQuotaService {
     private QueryQuotaResponse quotaResponse(Application application, LocalDateTime start, ApplicationQuota quota) {
         int limit = quota == null ? application.getQuota() : quota.getQuotaLimit();
         int used = quota == null ? 0 : quota.getUsedCount();
-        return new QueryQuotaResponse(start, start.plusHours(720), limit, used, limit - used);
+        return new QueryQuotaResponse(start.toInstant(ZoneOffset.UTC),
+                start.plus(PERIOD).toInstant(ZoneOffset.UTC), limit, used, limit - used);
     }
 
     /** 校验完成后、业务事务和实际执行开始前调用；返回时额度事务已提交。 */
@@ -181,11 +180,11 @@ public class ApplicationQuotaService {
         if (createdAt == null) {
             throw new IllegalStateException("Application creation time is missing");
         }
-        Instant anchor = createdAt.atZone(APPLICATION_TIME_ZONE).toInstant();
+        Instant anchor = createdAt.toInstant(ZoneOffset.UTC);
         if (now.isBefore(anchor)) {
             throw new IllegalStateException("Current time precedes application creation");
         }
         long periods = Duration.between(anchor, now).dividedBy(PERIOD);
-        return LocalDateTime.ofInstant(anchor.plus(PERIOD.multipliedBy(periods)), APPLICATION_TIME_ZONE);
+        return LocalDateTime.ofInstant(anchor.plus(PERIOD.multipliedBy(periods)), ZoneOffset.UTC);
     }
 }

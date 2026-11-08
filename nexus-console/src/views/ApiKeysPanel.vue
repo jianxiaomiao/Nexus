@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatBeijingTime } from '@/utils/beijingTime'
 import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
@@ -115,8 +116,7 @@ function closeReveal() {
 }
 
 function formatDate(value: string): string {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium' }).format(date)
+  return formatBeijingTime(value, true)
 }
 
 onMounted(() => {

@@ -1,0 +1,61 @@
+name: nexus-docker-compose-lab
+
+services:
+  frontend:
+    build:
+      context: ../../nexus-console
+    image: nexus-compose-frontend:local
+    ports:
+      - "127.0.0.1:18092:80"
+    depends_on:
+      - nexus
+
+  mysql:
+    image: mysql:8.4@sha256:c592c15aaf4a1961e15d82eb31ea5987dda862d1c4b1e93424438c0e91dc1f8d
+    command: ["--default-time-zone=+00:00"]
+    environment:
+      MYSQL_DATABASE: nexus_compose_lab
+      MYSQL_USER: nexus_compose_lab
+      MYSQL_PASSWORD: ${NEXUS_LAB_DB_PASSWORD:?Set NEXUS_LAB_DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${NEXUS_LAB_DB_ROOT_PASSWORD:?Set NEXUS_LAB_DB_ROOT_PASSWORD}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+
+  nexus:
+    build:
+      context: ../../nexus-server
+    image: nexus-compose-lab:local
+    init: true
+    depends_on:
+      mysql:
+        condition: service_healthy
+    security_opt:
+      - seccomp=${NEXUS_LAB_SECCOMP_PATH:?Set NEXUS_LAB_SECCOMP_PATH}
+    ports:
+      - "127.0.0.1:18091:8080"
+    environment:
+      JAVA_TOOL_OPTIONS: -Duser.timezone=UTC
+      SERVER_ADDRESS: 0.0.0.0
+      SERVER_PORT: "8080"
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/nexus_compose_lab?useSSL=false&allowPublicKeyRetrieval=true&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&characterEncoding=UTF-8
+      SPRING_DATASOURCE_USERNAME: nexus_compose_lab
+      SPRING_DATASOURCE_PASSWORD: ${NEXUS_LAB_DB_PASSWORD:?Set NEXUS_LAB_DB_PASSWORD}
+      NEXUS_AUTH_JWT_ISSUER: nexus-compose-lab
+      NEXUS_AUTH_JWT_ACCESS_TOKEN_TTL: 30m
+      NEXUS_AUTH_JWT_SECRET: ${NEXUS_LAB_JWT_SECRET:?Set NEXUS_LAB_JWT_SECRET}
+      NEXUS_WEBHOOK_CRYPTO_CURRENT_KEY_VERSION: v1
+      NEXUS_WEBHOOK_CRYPTO_KEYS_V1: ${NEXUS_LAB_WEBHOOK_KEY:?Set NEXUS_LAB_WEBHOOK_KEY}
+      NEXUS_WEBHOOK_SCHEDULING_ENABLED: "false"
+      NEXUS_LOG_DIR: /tmp/nexus-logs
+    volumes:
+      - screenshot-data:/var/lib/nexus/screenshot-jobs
+
+volumes:
+  mysql-data:
+  screenshot-data:

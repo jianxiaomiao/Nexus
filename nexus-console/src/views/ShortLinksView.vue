@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatBeijingTime } from '@/utils/beijingTime'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -49,8 +50,7 @@ function positiveId(value: unknown): number {
 }
 
 function formatDate(value: string): string {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+  return formatBeijingTime(value)
 }
 
 function expired(link: ShortLink): boolean {

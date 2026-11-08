@@ -131,7 +131,7 @@ class UsageRecordingTests {
         doThrow(new TaskRejectedException("queue full")).when(recordService)
                 .record(any(), any(), anyInt(), anyLong(), any(), any());
         UsageInterceptor interceptor = new UsageInterceptor(
-                recordService, new UsageRecordMetrics(registry));
+                recordService, new UsageRecordMetrics(registry), java.time.Clock.systemUTC());
         MockHttpServletRequest request = new MockHttpServletRequest();
         MockHttpServletResponse response = new MockHttpServletResponse();
         response.setStatus(200);
@@ -157,7 +157,7 @@ class UsageRecordingTests {
     void unhandledExceptionBeforeResponseCommitIsRecordedAs500() throws Exception {
         UsageRecordService recordService = mock(UsageRecordService.class);
         UsageInterceptor interceptor = new UsageInterceptor(
-                recordService, new UsageRecordMetrics(new SimpleMeterRegistry()));
+                recordService, new UsageRecordMetrics(new SimpleMeterRegistry()), java.time.Clock.systemUTC());
         MockHttpServletRequest request = new MockHttpServletRequest();
         MockHttpServletResponse response = new MockHttpServletResponse();
         ApiKeyIdentity identity = new ApiKeyIdentity(7L, 8L);

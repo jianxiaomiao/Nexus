@@ -1,6 +1,6 @@
 package com.nexus.apikey.dto;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 public record RotateApiKeyResponse(
         Long id,
@@ -10,7 +10,7 @@ public record RotateApiKeyResponse(
         String keyPreview,
         String apiKey,
         Integer status,
-        LocalDateTime updatedAt
+        Instant updatedAt
 ) {
     @Override
     public String toString() {

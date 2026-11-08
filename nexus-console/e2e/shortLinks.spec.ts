@@ -82,10 +82,12 @@ test('目标主机不在白名单时不发请求，短链文档可进入调试�
   expect(requestCount).toBe(0)
 })
 
-test('自定义到期时刻按浏览器本地时间转换为绝对时间', async ({ page }) => {
+for (const [zone, expected] of [['UTC', '2030-01-01T08:30:00.000Z'], ['Asia/Shanghai', '2030-01-01T00:30:00.000Z'], ['America/Los_Angeles', '2030-01-01T16:30:00.000Z']]) {
+  test(`自定义到期时刻按设备 ${zone} 本地时间转换为 UTC`, async ({ page }) => {
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send('Emulation.setTimezoneOverride', { timezoneId: zone! })
   await installMockApi(page)
   await signIn(page)
-  const expected = await page.evaluate(() => new Date('2030-01-01T08:30').toISOString())
   let expiresAt = ''
   await page.route('**/v1/short-links', async (route) => {
     expiresAt = String(route.request().postDataJSON().expiresAt)
@@ -107,6 +109,7 @@ test('自定义到期时刻按浏览器本地时间转换为绝对时间', async
   await expect(page.getByRole('heading', { name: '短链接已创建' })).toBeVisible()
   expect(expiresAt).toBe(expected)
 })
+}
 
 test('调试台的查询、修改和删除都只携带机器 Key', async ({ page }) => {
   await installMockApi(page)

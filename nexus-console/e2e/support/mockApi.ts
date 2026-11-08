@@ -56,12 +56,12 @@ export type ShortLink = {
 type Failure = { status: number; code: string; message: string }
 type RecordedRequest = { method: string; path: string; body: Record<string, unknown>; query: Record<string, string> }
 
-const timestamp = '2026-10-05T10:00:00'
+const timestamp = '2026-10-05T02:00:00Z'
 export const sampleQuota: Application['quota'] = {
-  periodStart: '2026-10-13T14:00:00', periodEnd: '2026-11-12T14:00:00',
+  periodStart: '2026-10-13T06:00:00Z', periodEnd: '2026-11-12T06:00:00Z',
   quotaLimit: 1000, usedCount: 350, restCount: 650,
 }
-export const sampleApplication: Application = { id: 1, name: '示例应用', status: 0, createdAt: '2026-10-13T14:00:00', updatedAt: timestamp, quota: sampleQuota }
+export const sampleApplication: Application = { id: 1, name: '示例应用', status: 0, createdAt: '2026-10-13T06:00:00Z', updatedAt: '2026-10-13T06:00:00Z', quota: sampleQuota }
 export const sampleKey: ApiKey = {
   id: 11, applicationId: 1, name: '开发环境 Key', publicId: 'test-public-id',
   keyPreview: 'nexus_••••1234', status: 0, createdAt: timestamp, updatedAt: timestamp,
@@ -144,7 +144,7 @@ export async function installMockApi(page: Page, initial?: { applications?: Appl
     if (path === '/api/application' && method === 'GET') {
       await respond(paginate(applications.filter((item) => !params.has('applicationId') || item.id === Number(params.get('applicationId')))))
     } else if (path === '/api/application/create' && method === 'POST') {
-      const created: Application = { id: nextApplicationId++, name: String(body.name), status: 0, createdAt: '2026-10-13T14:00:00', updatedAt: timestamp, quota: { ...sampleQuota, usedCount: 0, restCount: 1000 } }
+      const created: Application = { id: nextApplicationId++, name: String(body.name), status: 0, createdAt: '2026-10-13T06:00:00Z', updatedAt: '2026-10-13T06:00:00Z', quota: { ...sampleQuota, usedCount: 0, restCount: 1000 } }
       applications.push(created)
       await respond({ id: created.id, name: created.name })
     } else if (path === '/api/application' && method === 'PUT') {

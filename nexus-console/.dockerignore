@@ -1,0 +1,5 @@
+*
+!Dockerfile
+!nginx-compose.conf
+!dist/
+!dist/**

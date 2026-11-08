@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -26,15 +26,15 @@ class ApplicationQuotaControllerTests {
             .setControllerAdvice(new GlobalExceptionHandler()).build();
 
     @Test void returnsQuotaFromServiceForAuthenticatedUser() throws Exception {
-        LocalDateTime start = LocalDateTime.of(2026, 10, 13, 14, 0);
+        Instant start = Instant.parse("2026-10-13T14:00:00Z");
         when(users.resolve("Bearer test-token")).thenReturn(42L);
         when(quotas.queryMyApplicationQuota(42L, new QueryQuotaRequest(7L)))
-                .thenReturn(new QueryQuotaResponse(start, start.plusHours(720), 1000, 350, 650));
+                .thenReturn(new QueryQuotaResponse(start, start.plusSeconds(720 * 3600L), 1000, 350, 650));
         mvc.perform(get("/api/application/7/quota").header("Authorization", "Bearer test-token"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
-                .andExpect(jsonPath("$.data.periodStart").value("2026-10-13T14:00:00"))
-                .andExpect(jsonPath("$.data.periodEnd").value("2026-11-12T14:00:00"))
+                .andExpect(jsonPath("$.data.periodStart").value("2026-10-13T14:00:00Z"))
+                .andExpect(jsonPath("$.data.periodEnd").value("2026-11-12T14:00:00Z"))
                 .andExpect(jsonPath("$.data.quotaLimit").value(1000))
                 .andExpect(jsonPath("$.data.usedCount").value(350))
                 .andExpect(jsonPath("$.data.restCount").value(650));

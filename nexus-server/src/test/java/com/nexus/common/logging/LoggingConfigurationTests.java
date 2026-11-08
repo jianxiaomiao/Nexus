@@ -16,7 +16,8 @@ class LoggingConfigurationTests {
 
         assertEquals("${NEXUS_LOG_DIR:../logger}/nexus.log", source.getProperty("logging.file.name"));
         assertTrue(source.getProperty("logging.logback.rollingpolicy.file-name-pattern")
-                .toString().contains("%d{yyyy-MM-dd}"));
+                .toString().contains("%d{yyyy-MM-dd,UTC}"));
+        assertEquals("yyyy-MM-dd'T'HH:mm:ss.SSSXXX,UTC", source.getProperty("logging.pattern.dateformat"));
         assertEquals("10MB", source.getProperty("logging.logback.rollingpolicy.max-file-size"));
         assertEquals(30, source.getProperty("logging.logback.rollingpolicy.max-history"));
     }

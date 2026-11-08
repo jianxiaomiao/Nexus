@@ -25,6 +25,7 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -42,6 +43,7 @@ public class UsageQueryService {
     private final UsageEventMapper usageEventMapper;
     private final ApplicationMapper applicationMapper;
     private final ApiKeyMapper apiKeyMapper;
+    private final Clock clock;
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public UsageEventPageResponse queryMyUsageEvents(Long userId, Long applicationId, Long apiKeyId,
@@ -57,8 +59,7 @@ public class UsageQueryService {
                         .orderByDesc(UsageEvent::getOccurredAt, UsageEvent::getId));
         return new UsageEventPageResponse(page.getTotal(), current, size, page.getRecords().stream()
                 .map(event -> new UsageEventPageResponse.Event(event.getApiCode(), event.getHttpStatusCode(),
-                        event.getDurationMs(), event.getOccurredAt().atOffset(ZoneOffset.UTC)
-                        .atZoneSameInstant(DISPLAY_ZONE).toOffsetDateTime()))
+                        event.getDurationMs(), event.getOccurredAt().atOffset(ZoneOffset.UTC)))
                 .toList());
     }
 
@@ -72,7 +73,7 @@ public class UsageQueryService {
         if (timeRange == null) {
             throw new InvalidUsageTimeRangeException("请选择时间范围");
         }
-        LocalDate today = LocalDate.now(DISPLAY_ZONE);
+        LocalDate today = LocalDate.ofInstant(clock.instant(), DISPLAY_ZONE);
         if (timeRange == TimeRange.CUSTOM) {
             // 前端的无时区日期时间按北京时间解释。
             startLocal = usageQueryRequest.customStartTime();
