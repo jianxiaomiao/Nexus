@@ -1,0 +1,59 @@
+services:
+  nexus:
+    environment:
+      MANAGEMENT_SERVER_PORT: "8081"
+      MANAGEMENT_SERVER_ADDRESS: 0.0.0.0
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,metrics,prometheus
+    networks:
+      - default
+      - monitoring
+
+  prometheus:
+    image: prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --storage.tsdb.retention.size=1GB
+    ports:
+      - "127.0.0.1:19090:9090"
+    volumes:
+      - ../observability/docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:12.1.1@sha256:a1701c2180249361737a99a01bc770db39381640e4d631825d38ff4535efa47d
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana-admin-password
+      GF_SERVER_ROOT_URL: http://127.0.0.1:13000/
+      GF_SERVER_DOMAIN: 127.0.0.1
+      GF_SERVER_ENFORCE_DOMAIN: "true"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+    secrets:
+      - grafana-admin-password
+    ports:
+      - "127.0.0.1:13000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ../observability/docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../observability/docker/grafana/dashboards:/var/lib/nexus-dashboards:ro
+    networks:
+      - monitoring
+
+networks:
+  default: {}
+  monitoring: {}
+
+volumes:
+  prometheus-data: {}
+  grafana-data: {}
+
+secrets:
+  grafana-admin-password:
+    file: ../../data/docker-monitor-lab/grafana-admin-password

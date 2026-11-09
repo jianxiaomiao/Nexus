@@ -1,0 +1,914 @@
+{
+  "uid": "nexus-docker-overview",
+  "version": 0,
+  "time": {
+    "to": "now",
+    "from": "now-1h"
+  },
+  "schemaVersion": 41,
+  "timezone": "browser",
+  "panels": [
+    {
+      "description": "1 means the latest scrape succeeded; 0 means it failed. Missing series is not healthy.",
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "custom": {
+            "axisSoftMin": 0,
+            "lineWidth": 1,
+            "axisSoftMax": 1.0,
+            "drawStyle": "line",
+            "spanNulls": false,
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        }
+      },
+      "type": "timeseries",
+      "id": 1,
+      "gridPos": {
+        "y": 0.0,
+        "w": 12,
+        "x": 0,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nexus-prometheus"
+      },
+      "options": {
+        "tooltip": {
+          "sort": "none",
+          "mode": "multi"
+        },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nexus-prometheus"
+          },
+          "refId": "A",
+          "interval": "15s",
+          "expr": "up{job=\"nexus-local\"}",
+          "range": true,
+          "instant": false,
+          "legendFormat": "scrape status",
+          "editorMode": "code"
+        }
+      ],
+      "title": "Nexus scrape status"
+    },
+    {
+      "description": "Nexus JVM uptime; resets when the process restarts.",
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "custom": {
+            "spanNulls": false,
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "auto",
+            "drawStyle": "line"
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "s"
+        }
+      },
+      "type": "timeseries",
+      "id": 2,
+      "gridPos": {
+        "y": 0.0,
+        "w": 12,
+        "x": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nexus-prometheus"
+      },
+      "options": {
+        "tooltip": {
+          "sort": "none",
+          "mode": "multi"
+        },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nexus-prometheus"
+          },
+          "refId": "A",
+          "interval": "15s",
+          "expr": "process_uptime_seconds{job=\"nexus-local\"}",
+          "range": true,
+          "instant": false,
+          "legendFormat": "uptime",
+          "editorMode": "code"
+        }
+      ],
+      "title": "JVM uptime"
+    },
+    {
+      "description": "Five-minute per-second average across observed HTTP series; includes all recorded status codes.",
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "custom": {
+            "axisSoftMin": 0,
+            "lineWidth": 1,
+            "axisSoftMax": 0.01,
+            "drawStyle": "line",
+            "spanNulls": false,
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "reqps"
+        }
+      },
+      "type": "timeseries",
+      "id": 3,
+      "gridPos": {
+        "y": 8.0,
+        "w": 12,
+        "x": 0,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nexus-prometheus"
+      },
+      "options": {
+        "tooltip": {
+          "sort": "none",
+          "mode": "multi"
+        },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nexus-prometheus"
+          },
+          "refId": "A",
+          "interval": "15s",
+          "expr": "sum(rate(http_server_requests_seconds_count{job=\"nexus-local\"}[5m]))",
+          "range": true,
+          "instant": false,
+          "legendFormat": "requests/s",
+          "editorMode": "code"
+        }
+      ],
+      "title": "HTTP request rate"
+    },
+    {
+      "description": "Five-minute average rate by HTTP status. 4xx and 429 are not automatically business failures; missing series is not zero.",
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "custom": {
+            "axisSoftMin": 0,
+            "lineWidth": 1,
+            "axisSoftMax": 0.01,
+            "drawStyle": "line",
+            "spanNulls": false,
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "reqps"
+        }
+      },
+      "type": "timeseries",
+      "id": 4,
+      "gridPos": {
+        "y": 8.0,
+        "w": 12,
+        "x": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nexus-prometheus"
+      },
+      "options": {
+        "tooltip": {
+          "sort": "none",
+          "mode": "multi"
+        },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nexus-prometheus"
+          },
+          "refId": "A",
+          "interval": "15s",
+          "expr": "sum by (status) (rate(http_server_requests_seconds_count{job=\"nexus-local\"}[5m]))",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{status}}",
+          "editorMode": "code"
+        }
+      ],
+      "title": "HTTP requests by status"
+    },
+    {
+      "description": "Heap used and committed; the separately reported maximum appears in its own panel.",
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "custom": {
+            "spanNulls": false,
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "auto",
+            "drawStyle": "line"
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "bytes"
+        }
+      },
+      "type": "timeseries",
+      "id": 5,
+      "gridPos": {
+        "y": 16.0,
+        "w": 12,
+        "x": 0,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nexus-prometheus"
+      },
+      "options": {
+        "tooltip": {
+          "sort": "none",
+          "mode": "multi"
+        },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nexus-prometheus"
+          },
+          "refId": "A",
+          "interval": "15s",
+          "expr": "sum(jvm_memory_used_bytes{job=\"nexus-local\",area=\"heap\"})",
+          "range": true,
+          "instant": false,
+          "legendFormat": "used",
+          "editorMode": "code"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nexus-prometheus"
+          },
+          "refId": "B",
+          "interval": "15s",
+          "expr": "sum(jvm_memory_committed_bytes{job=\"nexus-local\",area=\"heap\"})",
+          "range": true,
+          "instant": false,
+          "legendFormat": "committed",
+          "editorMode": "code"
+        }
+      ],
+      "title": "JVM heap memory"
+    },
+    {
+      "description": "Process is the Nexus JVM; system is the whole operating system. The JVM metric excludes separately running Chromium processes. Unavailable values remain unknown.",
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "custom": {
+            "spanNulls": false,
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "auto",
+            "drawStyle": "line"
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "percentunit"
+        }
+      },
+      "type": "timeseries",
+      "id": 6,
+      "gridPos": {
+        "y": 16.0,
+        "w": 12,
+        "x": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nexus-prometheus"
+      },
+      "options": {
+        "tooltip": {
+          "sort": "none",
+          "mode": "multi"
+        },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nexus-prometheus"
+          },
+          "refId": "A",
+          "interval": "15s",
+          "expr": "process_cpu_usage{job=\"nexus-local\"}",
+          "range": true,
+          "instant": false,
+          "legendFormat": "process",
+          "editorMode": "code"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nexus-prometheus"
+          },
+          "refId": "B",
+          "interval": "15s",
+          "expr": "system_cpu_usage{job=\"nexus-local\"}",
+          "range": true,
+          "instant": false,
+          "legendFormat": "system",
+          "editorMode": "code"
+        }
+      ],
+      "title": "CPU usage"
+    },
+    {
+      "description": "Active, idle and maximum connections per pool. Compare active against the matching pool maximum.",
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "custom": {
+            "spanNulls": false,
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "auto",
+            "drawStyle": "line"
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        }
+      },
+      "type": "timeseries",
+      "id": 7,
+      "gridPos": {
+        "y": 24.0,
+        "w": 12,
+        "x": 0,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nexus-prometheus"
+      },
+      "options": {
+        "tooltip": {
+          "sort": "none",
+          "mode": "multi"
+        },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nexus-prometheus"
+          },
+          "refId": "A",
+          "interval": "15s",
+          "expr": "hikaricp_connections_active{job=\"nexus-local\"}",
+          "range": true,
+          "instant": false,
+          "legendFormat": "active {{pool}}",
+          "editorMode": "code"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nexus-prometheus"
+          },
+          "refId": "B",
+          "interval": "15s",
+          "expr": "hikaricp_connections_idle{job=\"nexus-local\"}",
+          "range": true,
+          "instant": false,
+          "legendFormat": "idle {{pool}}",
+          "editorMode": "code"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nexus-prometheus"
+          },
+          "refId": "C",
+          "interval": "15s",
+          "expr": "hikaricp_connections_max{job=\"nexus-local\"}",
+          "range": true,
+          "instant": false,
+          "legendFormat": "max {{pool}}",
+          "editorMode": "code"
+        }
+      ],
+      "title": "Hikari connections"
+    },
+    {
+      "description": "Threads currently waiting for a database connection, by pool.",
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "custom": {
+            "axisSoftMin": 0,
+            "lineWidth": 1,
+            "axisSoftMax": 1.0,
+            "drawStyle": "line",
+            "spanNulls": false,
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        }
+      },
+      "type": "timeseries",
+      "id": 8,
+      "gridPos": {
+        "y": 24.0,
+        "w": 12,
+        "x": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nexus-prometheus"
+      },
+      "options": {
+        "tooltip": {
+          "sort": "none",
+          "mode": "multi"
+        },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nexus-prometheus"
+          },
+          "refId": "A",
+          "interval": "15s",
+          "expr": "hikaricp_connections_pending{job=\"nexus-local\"}",
+          "range": true,
+          "instant": false,
+          "legendFormat": "pending {{pool}}",
+          "editorMode": "code"
+        }
+      ],
+      "title": "Hikari pending"
+    },
+    {
+      "description": "Current global Application state count and waiting requests; states are not active requests.",
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "custom": {
+            "axisSoftMin": 0,
+            "lineWidth": 1,
+            "axisSoftMax": 1.0,
+            "drawStyle": "line",
+            "spanNulls": false,
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        }
+      },
+      "type": "timeseries",
+      "id": 9,
+      "gridPos": {
+        "y": 32.0,
+        "w": 12,
+        "x": 0,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nexus-prometheus"
+      },
+      "options": {
+        "tooltip": {
+          "sort": "none",
+          "mode": "multi"
+        },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nexus-prometheus"
+          },
+          "refId": "A",
+          "interval": "15s",
+          "expr": "nexus_ratelimit_states{job=\"nexus-local\"}",
+          "range": true,
+          "instant": false,
+          "legendFormat": "states",
+          "editorMode": "code"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nexus-prometheus"
+          },
+          "refId": "B",
+          "interval": "15s",
+          "expr": "nexus_ratelimit_waiters{job=\"nexus-local\"}",
+          "range": true,
+          "instant": false,
+          "legendFormat": "waiters",
+          "editorMode": "code"
+        }
+      ],
+      "title": "Rate limiter states and waiters"
+    },
+    {
+      "description": "Five-minute rate of admission decisions by outcome; immediate, queued and rejected outcomes have different meanings.",
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "custom": {
+            "axisSoftMin": 0,
+            "lineWidth": 1,
+            "axisSoftMax": 0.01,
+            "drawStyle": "line",
+            "spanNulls": false,
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "reqps"
+        }
+      },
+      "type": "timeseries",
+      "id": 10,
+      "gridPos": {
+        "y": 32.0,
+        "w": 12,
+        "x": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nexus-prometheus"
+      },
+      "options": {
+        "tooltip": {
+          "sort": "none",
+          "mode": "multi"
+        },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nexus-prometheus"
+          },
+          "refId": "A",
+          "interval": "15s",
+          "expr": "sum by (outcome) (rate(nexus_ratelimit_admission_seconds_count{job=\"nexus-local\"}[5m]))",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{outcome}}",
+          "editorMode": "code"
+        }
+      ],
+      "title": "Rate limiter decisions"
+    },
+    {
+      "description": "Queued plus running screenshot jobs. Database read failure may produce NaN; missing or NaN is not zero.",
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "custom": {
+            "axisSoftMin": 0,
+            "lineWidth": 1,
+            "axisSoftMax": 1.0,
+            "drawStyle": "line",
+            "spanNulls": false,
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        }
+      },
+      "type": "timeseries",
+      "id": 11,
+      "gridPos": {
+        "y": 40.0,
+        "w": 12,
+        "x": 0,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nexus-prometheus"
+      },
+      "options": {
+        "tooltip": {
+          "sort": "none",
+          "mode": "multi"
+        },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nexus-prometheus"
+          },
+          "refId": "A",
+          "interval": "15s",
+          "expr": "nexus_screenshot_jobs_unfinished{job=\"nexus-local\"}",
+          "range": true,
+          "instant": false,
+          "legendFormat": "unfinished",
+          "editorMode": "code"
+        }
+      ],
+      "title": "Screenshot unfinished jobs"
+    },
+    {
+      "description": "Shared screenshot execution slot: 0 idle, 1 busy. Compare with unfinished jobs.",
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "custom": {
+            "axisSoftMin": 0,
+            "lineWidth": 1,
+            "axisSoftMax": 1.0,
+            "drawStyle": "line",
+            "spanNulls": false,
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        }
+      },
+      "type": "timeseries",
+      "id": 12,
+      "gridPos": {
+        "y": 40.0,
+        "w": 12,
+        "x": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nexus-prometheus"
+      },
+      "options": {
+        "tooltip": {
+          "sort": "none",
+          "mode": "multi"
+        },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nexus-prometheus"
+          },
+          "refId": "A",
+          "interval": "15s",
+          "expr": "nexus_screenshot_slot_busy{job=\"nexus-local\"}",
+          "range": true,
+          "instant": false,
+          "legendFormat": "busy",
+          "editorMode": "code"
+        }
+      ],
+      "title": "Screenshot execution slot"
+    },
+    {
+      "description": "Five-minute rate of final asynchronous Usage recording failures by reason. HTTP success does not guarantee Usage persistence.",
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "custom": {
+            "axisSoftMin": 0,
+            "lineWidth": 1,
+            "axisSoftMax": 0.01,
+            "drawStyle": "line",
+            "spanNulls": false,
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "ops"
+        }
+      },
+      "type": "timeseries",
+      "id": 13,
+      "gridPos": {
+        "y": 48.0,
+        "w": 12,
+        "x": 0,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nexus-prometheus"
+      },
+      "options": {
+        "tooltip": {
+          "sort": "none",
+          "mode": "multi"
+        },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nexus-prometheus"
+          },
+          "refId": "A",
+          "interval": "15s",
+          "expr": "sum by (reason) (rate(nexus_usage_record_failures_total{job=\"nexus-local\"}[5m]))",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{reason}}",
+          "editorMode": "code"
+        }
+      ],
+      "title": "Usage recording failures"
+    },
+    {
+      "description": "Sum of positive per-pool reported heap maxima; this is not necessarily the exact JVM -Xmx limit.",
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "custom": {
+            "spanNulls": false,
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "auto",
+            "drawStyle": "line"
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "bytes"
+        }
+      },
+      "type": "timeseries",
+      "id": 14,
+      "gridPos": {
+        "y": 48.0,
+        "w": 12,
+        "x": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nexus-prometheus"
+      },
+      "options": {
+        "tooltip": {
+          "sort": "none",
+          "mode": "multi"
+        },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nexus-prometheus"
+          },
+          "refId": "A",
+          "interval": "15s",
+          "expr": "sum(jvm_memory_max_bytes{job=\"nexus-local\",area=\"heap\"} > 0)",
+          "range": true,
+          "instant": false,
+          "legendFormat": "reported max",
+          "editorMode": "code"
+        }
+      ],
+      "title": "JVM heap reported max"
+    }
+  ],
+  "tags": [
+    "nexus",
+    "local"
+  ],
+  "refresh": "15s",
+  "editable": true,
+  "title": "Nexus Docker Overview"
+}

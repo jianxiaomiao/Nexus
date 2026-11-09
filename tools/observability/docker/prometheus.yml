@@ -1,0 +1,12 @@
+global:
+  scrape_interval: 15s
+  scrape_timeout: 5s
+
+scrape_configs:
+  - job_name: nexus-local
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["nexus:8081"]
+        labels:
+          service: nexus
+          environment: local

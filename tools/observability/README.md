@@ -19,6 +19,7 @@ Nexus Actuator 127.0.0.1:8081
 
 - [Prometheus 配置、启动与验收](local-prometheus/README.md)
 - [Grafana 配置、启动与 Dashboard](local-grafana/README.md)
+- [Docker Compose 监控环境](docker/README.md)：使用独立监控卷和 13000/19090 回环端口，不自动迁移 Windows 数据。
 
 Windows 二进制文件、下载归档、Prometheus TSDB、Grafana SQLite、插件和日志放在被 Git 忽略的 `/data/observability/` 下，**不包含在仓库中**。启动前需自行从官方渠道下载对应版本并验证发布方校验值，具体布局见各子目录 README。密码和令牌不得写入仓库。
 
