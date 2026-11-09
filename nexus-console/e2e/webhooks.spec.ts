@@ -88,7 +88,9 @@ test('已配置 Webhook 可修改 URL、暂停恢复并轮换 Secret', async ({ 
     { status: 1 },
     { status: 0 },
   ])
-  expect(api.calls.filter((call) => call.path.endsWith('/rotate-secret'))).toHaveLength(1)
+  const rotations = api.calls.filter((call) => call.path.endsWith('/rotate-secret'))
+  expect(rotations).toHaveLength(1)
+  expect(rotations[0]?.body).toEqual({ currentSecretVersion: 1 })
 })
 
 test('配置加载失败可以原位重试', async ({ page }) => {

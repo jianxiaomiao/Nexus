@@ -39,7 +39,10 @@ export async function updateApplicationWebhook(applicationId: number, request: U
   return response.data.data
 }
 
-export async function rotateApplicationWebhookSecret(applicationId: number): Promise<RotatedWebhookSecret> {
-  const response = await http.post<ApiResponse<RotatedWebhookSecret>>(`/application/${applicationId}/webhook/rotate-secret`)
+export async function rotateApplicationWebhookSecret(applicationId: number, currentSecretVersion: number): Promise<RotatedWebhookSecret> {
+  const response = await http.post<ApiResponse<RotatedWebhookSecret>>(
+    `/application/${applicationId}/webhook/rotate-secret`,
+    { currentSecretVersion },
+  )
   return response.data.data
 }

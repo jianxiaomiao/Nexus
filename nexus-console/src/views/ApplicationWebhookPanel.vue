@@ -170,7 +170,7 @@ async function rotateSecret() {
 
   actionBusy.value = true
   try {
-    const result = await rotateApplicationWebhookSecret(props.application.id)
+    const result = await rotateApplicationWebhookSecret(props.application.id, webhook.value.currentSecretVersion)
     webhook.value = result.webhook
     form.url = result.webhook.url
     openSecret(result.secret, '保存新的 Webhook Secret')

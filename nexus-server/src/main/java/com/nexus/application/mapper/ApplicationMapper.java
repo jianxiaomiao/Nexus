@@ -13,4 +13,15 @@ public interface ApplicationMapper extends BaseMapper<Application> {
             FOR SHARE
             """)
     Long selectIdForShare(@Param("applicationId") long applicationId);
+
+    @Select("""
+            SELECT id
+            FROM applications
+            WHERE id = #{applicationId}
+              AND owner_user_id = #{userId}
+              AND is_deleted = 0
+            FOR SHARE
+            """)
+    Long selectOwnedIdForShare(@Param("userId") long userId,
+                               @Param("applicationId") long applicationId);
 }

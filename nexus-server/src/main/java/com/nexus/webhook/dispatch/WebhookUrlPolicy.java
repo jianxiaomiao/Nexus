@@ -41,7 +41,7 @@ public final class WebhookUrlPolicy {
                 && !(a == 0x3f && c == 0xff && (d & 0xf0) == 0); // 3fff::/20
     }
 
-    static InetAddress[] checked(String host, com.nexus.common.net.PublicWebDnsResolver.AddressLookup lookup)
+    public static InetAddress[] checked(String host, com.nexus.common.net.PublicWebDnsResolver.AddressLookup lookup)
             throws UnknownHostException {
         InetAddress[] addresses = lookup.lookup(host);
         if (addresses == null || addresses.length == 0) throw new UnknownHostException("No webhook addresses");

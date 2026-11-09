@@ -1,5 +1,9 @@
 # Webhook attempt admissions
 
+## Management boundary
+
+Management endpoints under `/api/application/{applicationId}/webhook` use Bearer JWT and verify Application ownership. A configuration and its first encrypted secret commit in one transaction; the unique Application constraint resolves concurrent creation. Secret rotation locks the configuration, compares the caller's `currentSecretVersion`, moves the old secret to one-hour grace, and inserts the new CURRENT secret in the same transaction. A stale version returns a conflict rather than silently replacing a secret another caller just received. Endpoint DNS is preflighted when saved and checked again by the delivery connection.
+
 `attempt_count` counts database-committed admissions: the initial attempt, ordinary retries, and the optional 401 secret-refresh attempt. `secret_refresh_attempted` means the refresh admission was committed, not that its network request completed. For a nonzero count, ordinary retries used are `attempt_count - 1 - (secret_refresh_attempted ? 1 : 0)`. A crash between commit and HTTP can consume an admission without starting a request.
 
 - A successful send returns the committed snapshot with the response.

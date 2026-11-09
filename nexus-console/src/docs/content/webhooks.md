@@ -4,6 +4,19 @@ Webhook 用于让 Nexus 在异步截图任务成功或最终失败后，主动�
 
 每个 Application 最多配置一个回调地址。配置只影响配置完成后进入终态的截图任务，不会为更早完成的任务补发事件。
 
+## 管理接口
+
+Webhook 配置属于 Application，使用管理端 Bearer JWT，并按 Application 所有者校验：
+
+| 方法与路径 | 用途 |
+| --- | --- |
+| `GET /api/application/{applicationId}/webhook` | 查询配置；尚未配置时 `data` 为 `null`。 |
+| `POST /api/application/{applicationId}/webhook` | 使用 `{"url":"https://..."}` 创建配置，并一次性返回 `secret`。 |
+| `PUT /api/application/{applicationId}/webhook` | 修改 `url` 或 `status`；状态 `0` 启用、`1` 暂停。 |
+| `POST /api/application/{applicationId}/webhook/rotate-secret` | 使用 `{"currentSecretVersion":1}` 轮换 Secret，并一次性返回新 Secret。 |
+
+创建配置和保存首个加密 Secret 在同一数据库事务中完成。轮换请求必须携带页面当前看到的版本；版本已经变化时返回冲突，避免并发轮换让刚保存的 Secret 立即失效。回调域名保存时会做公网地址预检，实际投递建立连接时仍会重新解析和校验。
+
 ## 事件请求
 
 当前只发送 `screenshot.completed`。请求包含：

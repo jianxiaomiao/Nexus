@@ -31,6 +31,13 @@ import com.nexus.webExtract.exception.WebContentUnavailableException;
 import com.nexus.webExtract.exception.WebPageFetchException;
 import com.nexus.screenshot.exception.ScreenshotException;
 import com.nexus.quota.exception.ApplicationQuotaExhaustedException;
+import com.nexus.webhook.exception.InvalidWebhookUpdateException;
+import com.nexus.webhook.exception.InvalidWebhookUrlException;
+import com.nexus.webhook.exception.WebhookAddressDisallowedException;
+import com.nexus.webhook.exception.WebhookAlreadyExistsException;
+import com.nexus.webhook.exception.WebhookDnsResolutionException;
+import com.nexus.webhook.exception.WebhookNotFoundException;
+import com.nexus.webhook.exception.WebhookSecretRotationConflictException;
 import com.nexus.job.dto.ScreenshotJobFailureResponse;
 import com.nexus.job.dto.ScreenshotJobNotReadyResponse;
 import com.nexus.job.exception.ScreenshotJobCreationException;
@@ -377,6 +384,58 @@ public class GlobalExceptionHandler{
     public ApiResponse<Void> handleInvalidApplicationIdException(InvalidApplicationIdException exception, HttpServletRequest request) {
         return handled(request, exception, HttpStatus.BAD_REQUEST,
                 "INVALID_APPLICATION_ID", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    @ExceptionHandler(WebhookNotFoundException.class)
+    public ApiResponse<Void> handleWebhookNotFound(WebhookNotFoundException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.NOT_FOUND,
+                "WEBHOOK_NOT_FOUND", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.CONFLICT)
+    @ExceptionHandler(WebhookAlreadyExistsException.class)
+    public ApiResponse<Void> handleWebhookAlreadyExists(WebhookAlreadyExistsException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.CONFLICT,
+                "WEBHOOK_ALREADY_EXISTS", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ExceptionHandler(InvalidWebhookUrlException.class)
+    public ApiResponse<Void> handleInvalidWebhookUrl(InvalidWebhookUrlException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.BAD_REQUEST,
+                "WEBHOOK_URL_INVALID", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ExceptionHandler(InvalidWebhookUpdateException.class)
+    public ApiResponse<Void> handleInvalidWebhookUpdate(InvalidWebhookUpdateException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.BAD_REQUEST,
+                "INVALID_WEBHOOK_UPDATE", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ExceptionHandler(WebhookAddressDisallowedException.class)
+    public ApiResponse<Void> handleWebhookAddressDisallowed(WebhookAddressDisallowedException exception,
+                                                            HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.BAD_REQUEST,
+                "WEBHOOK_ADDRESS_DISALLOWED", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.BAD_GATEWAY)
+    @ExceptionHandler(WebhookDnsResolutionException.class)
+    public ApiResponse<Void> handleWebhookDnsResolution(WebhookDnsResolutionException exception,
+                                                        HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.BAD_GATEWAY,
+                "WEBHOOK_DNS_RESOLUTION_FAILED", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.CONFLICT)
+    @ExceptionHandler(WebhookSecretRotationConflictException.class)
+    public ApiResponse<Void> handleWebhookSecretRotationConflict(WebhookSecretRotationConflictException exception,
+                                                                 HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.CONFLICT,
+                "WEBHOOK_SECRET_ROTATION_CONFLICT", exception.getMessage(), null);
     }
 
     private <T> ApiResponse<T> handled(HttpServletRequest request, Exception exception,

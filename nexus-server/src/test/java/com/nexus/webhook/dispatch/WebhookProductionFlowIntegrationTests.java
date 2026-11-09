@@ -16,6 +16,9 @@ import com.nexus.user.mapper.UserMapper;
 import com.nexus.webhook.crypto.*;
 import com.nexus.webhook.entity.*;
 import com.nexus.webhook.mapper.*;
+import com.nexus.webhook.dto.CreateWebhookRequest;
+import com.nexus.webhook.service.ApplicationWebhookService;
+import com.nexus.webhook.service.WebhookEndpointValidator;
 import com.sun.net.httpserver.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
@@ -43,6 +46,8 @@ class WebhookProductionFlowIntegrationTests {
     @TempDir Path temp;
     @MockitoBean ScreenshotJobScheduler screenshotScheduler;
     @MockitoBean ScreenshotRenderer renderer;
+    @MockitoBean WebhookEndpointValidator endpointValidator;
+    @Autowired ApplicationWebhookService webhookManagement;
     @Autowired ScreenshotJobManager manager;
     @Autowired ScreenshotJobMapper jobs;
     @Autowired WebhookOutboxMapper outbox;
@@ -63,6 +68,7 @@ class WebhookProductionFlowIntegrationTests {
         user = new User(); user.setEmail(UUID.randomUUID()+"@example.test"); user.setDisplayName("webhook flow"); user.setPasswordHash("test-placeholder"); users.insert(user);
         app = new Application(); app.setOwnerUserId(user.getId()); app.setName("flow-"+UUID.randomUUID()); applications.insert(app);
         var generated = credentials.generate(); key = new ApiKey(); key.setApplicationId(app.getId()); key.setName("flow"); key.setPublicId(generated.publicId()); key.setSecretHash(generated.secretHash()); key.setKeyPreview(generated.keyPreview()); keys.insert(key);
+        when(endpointValidator.validate(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
     }
     @AfterEach void cleanup() {
         if (app != null && app.getId() != null) {
@@ -145,8 +151,11 @@ class WebhookProductionFlowIntegrationTests {
         var requests = new java.util.concurrent.atomic.AtomicInteger(); var firstBody = new AtomicReference<byte[]>(); var body = new AtomicReference<byte[]>(); var timestamp = new AtomicReference<String>(); var signature = new AtomicReference<String>(); var received = new CountDownLatch(1);
         server.createContext("/hook", exchange -> { body.set(exchange.getRequestBody().readAllBytes()); int number = requests.incrementAndGet(); if (number == 1) firstBody.set(body.get()); timestamp.set(exchange.getRequestHeaders().getFirst("X-Nexus-Timestamp")); signature.set(exchange.getRequestHeaders().getFirst("X-Nexus-Signature")); exchange.sendResponseHeaders(number == 1 ? 503 : 200, -1); exchange.close(); if (number == 2) received.countDown(); }); server.start();
         try {
-            config = new ApplicationWebhook(); config.setApplicationId(app.getId()); config.setUrl("https://webhook.invalid:"+server.getAddress().getPort()+"/hook"); config.setStatus(0); configs.insert(config);
-            byte[] raw = crypto.generateSecret(); var encrypted = crypto.encrypt(raw); var secret = new WebhookSecret(); secret.setWebhookId(config.getId()); secret.setSecretVersion(1L); secret.setStatus(0); secret.setSecretCiphertext(encrypted.ciphertext()); secret.setSecretNonce(encrypted.nonce()); secret.setEncryptionAlgorithm(encrypted.encryptionAlgorithm()); secret.setEncryptionKeyVersion(encrypted.encryptionKeyVersion()); secrets.insert(secret);
+            var createdWebhook = webhookManagement.createMine(user.getId(), app.getId(),
+                    new CreateWebhookRequest("https://webhook.invalid:"+server.getAddress().getPort()+"/hook"));
+            config = configs.selectByApplicationId(app.getId());
+            assertEquals(createdWebhook.id(), config.getId());
+            byte[] raw = java.util.Base64.getUrlDecoder().decode(createdWebhook.secret());
             var now = LocalDateTime.now(ZoneOffset.UTC); var job = new ScreenshotJob(); job.setJobId(UUID.randomUUID().toString()); job.setApiKeyId(key.getId()); job.setTargetUrl("https://blog.csdn.net/article"); job.setStatus(1); job.setAttemptCount(1); job.setRunToken(UUID.randomUUID().toString()); job.setCreatedAt(now.minusMinutes(1)); job.setUpdatedAt(now.minusMinutes(1)); job.setStartedAt(now.minusSeconds(20)); job.setLeaseExpiresAt(now.plusMinutes(1)); jobs.insert(job);
             when(renderer.render(any())).thenThrow(new ScreenshotException(ScreenshotException.Kind.TIMEOUT));
             var execute = ScreenshotJobManager.class.getDeclaredMethod("executeClaimedJob", ScreenshotJob.class); execute.setAccessible(true); assertEquals(false, execute.invoke(manager, job));
