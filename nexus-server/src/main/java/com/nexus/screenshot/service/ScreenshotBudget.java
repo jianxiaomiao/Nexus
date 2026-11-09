@@ -26,9 +26,13 @@ public final class ScreenshotBudget {
         this.maxBytes = maxBytes;
     }
     public long remainingMillis() {
+        long remaining = remainingNanos();
+        return Math.floorDiv(remaining - 1, 1_000_000) + 1;
+    }
+    long remainingNanos() {
         long remaining = deadline - clock.getAsLong();
         if (remaining <= 0) throw new ScreenshotException(TIMEOUT);
-        return Math.max(1, remaining / 1_000_000);
+        return remaining;
     }
     public void requestStarted() {
         remainingMillis();

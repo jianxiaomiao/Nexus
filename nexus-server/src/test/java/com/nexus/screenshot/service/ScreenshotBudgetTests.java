@@ -17,6 +17,18 @@ class ScreenshotBudgetTests {
         assertEquals(TIMEOUT, assertThrows(ScreenshotException.class, budget::remainingMillis).kind());
     }
     @Test
+    void millisecondViewRoundsUpWithoutMovingTheNanosecondDeadlineEarlier() {
+        AtomicLong clock = new AtomicLong();
+        var budget = new ScreenshotBudget(clock::get, Duration.ofNanos(1_000_001), 1, 1);
+        assertEquals(2, budget.remainingMillis());
+        assertEquals(1_000_001, budget.remainingNanos());
+        clock.set(1_000_000);
+        assertEquals(1, budget.remainingMillis());
+        assertEquals(1, budget.remainingNanos());
+        clock.incrementAndGet();
+        assertEquals(TIMEOUT, assertThrows(ScreenshotException.class, budget::remainingNanos).kind());
+    }
+    @Test
     void requestAndByteLimitsPermitExactBoundary() {
         var budget = new ScreenshotBudget(() -> 0, Duration.ofSeconds(1), 2, 10);
         budget.requestStarted(); budget.requestStarted(); budget.bytesRead(10);

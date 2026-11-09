@@ -24,6 +24,7 @@ import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static com.nexus.screenshot.exception.ScreenshotException.Kind.*;
 import static com.nexus.screenshot.exception.ScreenshotException.DiagnosticReason.*;
@@ -52,12 +53,17 @@ public class ScreenshotResourceFetcher {
     public ScreenshotResource fetch(URI uri, String resourceType, ScreenshotBudget budget) {
         policy.requireResource(uri.toString());
         HttpGet get = new HttpGet(uri);
-        long remaining = budget.remainingMillis();
-        get.setConfig(RequestConfig.custom().setResponseTimeout(Timeout.ofMilliseconds(Math.min(remaining, 4000)))
-                .setConnectionRequestTimeout(Timeout.ofMilliseconds(Math.min(remaining, 1000))).build());
+        long remainingNanos = budget.remainingNanos();
+        long remainingMillis = Math.floorDiv(remainingNanos - 1, 1_000_000) + 1;
+        get.setConfig(RequestConfig.custom().setResponseTimeout(Timeout.ofMilliseconds(Math.min(remainingMillis, 4000)))
+                .setConnectionRequestTimeout(Timeout.ofMilliseconds(Math.min(remainingMillis, 1000))).build());
         get.setHeader("User-Agent", "Nexus-Screenshot/1.0");
         // 不复制浏览器 Cookie、Authorization 或管理端凭据。
-        var deadline = cancellation.schedule(get::cancel, remaining, TimeUnit.MILLISECONDS);
+        AtomicBoolean deadlineTriggered = new AtomicBoolean();
+        var deadline = cancellation.schedule(() -> {
+            deadlineTriggered.set(true);
+            get.cancel();
+        }, remainingNanos, TimeUnit.NANOSECONDS);
         try {
             return client.execute(get, response -> {
                 if (response.getCode() != 200 || response.getEntity() == null)
@@ -85,6 +91,7 @@ public class ScreenshotResourceFetcher {
                 return new ScreenshotResource(output.toByteArray(), type, headers);
             });
         } catch (IOException exception) {
+            if (deadlineTriggered.get()) throw new ScreenshotException(TIMEOUT);
             budget.remainingMillis();
             boolean dnsFailure = false;
             for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
