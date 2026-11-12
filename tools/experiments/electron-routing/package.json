@@ -1,0 +1,8 @@
+{
+  "name": "nexus-electron-routing-experiment",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": { "test": "electron main.cjs" },
+  "engines": { "node": ">=24.12.0" },
+  "devDependencies": { "electron": "45.2.3" }
+}

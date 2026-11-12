@@ -1,12 +1,31 @@
 # Nexus Session Handoff
 
+## Electron 开发与窗口持久化检查点（2026-11-11）
+
+- nexus-desktop 复用 nexus-console 的 Vue 与 Vite，固定回环 5178，代理到本地 8080；开发者确认桌面真实登录和 Application 列表加载成功。独立构建和正式转发入口、续期及任务通知尚未实现。
+- 普通启动空白曾由启动器 windowsHide:true 触发显示差异，移除后开发者确认界面正常；保留 GPU 与浏览器安全设置。Playwright 启动绕过开发启动器，不能单独证明普通启动通过。
+- 开发者编写 window-state.cjs 与 Main 接入。窗口配置通过同目录临时文件替换保存；screen 工作区校验不通过时回退主屏默认居中。当前仅支持启动时布局变化，不涵盖运行中热拔屏和小于800x600的工作区。
+- Windows 150%缩放下存在创建/回读几何偏差；原生窗口对照已定位创建尺寸与矩形转换均参与，但未证明具体底层源码修复点。创建后 setBounds 候选不能通用收敛，未采用。详细证据与限制见 nexus-desktop/README.md。
+- 采用 will-move / will-resize 标记，关闭时以 resolveWindowBounds 目标为基准：不操作保留目标，只移动更新坐标，缩放更新普通矩形，独立保存最大化标记。正式启动三轮不操作配置完全不变；真实移动后宽高仍1284x864；右下角缩放后保存800x601；最大化关闭保留普通矩形，重启最大化、还原后再关闭恢复maximized=false。实际操作由开发者完成并反馈，Agent逐步核对文件。最终配置为x=4、y=31、800x601、maximized=false，证据在忽略的.runtime目录。
+- 该策略阻止保存值累积，未修复底层创建偏差；Windows贴靠、跨DPI拖动、键盘布局操作尚未验收。
+- 截图另存为基本闭环完成：开发者实现Preload/contextBridge、受限screenshot:save处理器及Vue能力分流。前端类型检查、现有浏览器下载定向测试1/1通过；开发者确认真实Vue按钮取消安静结束、保存出现成功提示，Agent核对产物80037字节、1280x720、PNG签名/CRC/IDAT解压正常。`npm run test:save-boundaries`补验Main并发BUSY、真实目录写入失败后再次保存成功且PNG字节一致；Playwright使用真实桥接/IPC/文件系统，仅控制对话框返回并隔离userData，不涉及后端。非信任来源等其他边界仍未运行验收。下一候选任务通知，代码继续由开发者先写，Agent解释与审查。
+
+## 多端规划（2026-11-10）
+
+- 2026-11-12 截图跟踪边界已确认：第一版只跟踪一个任务，切换页面后保留跟踪和状态，桌面需支持应用运行时的后台完成通知；点击×退出程序后不再本地跟踪，不引入托盘驻留。后端已接受的任务不因退出客户端而取消。状态/跟踪协议及Web与Main监控分工仍处于设计，尚未改动轮询实现；代码由开发者先写。
+
+- 开发者确认 Mobile MVP 为只读：登录、Application 列表与详情、Quota 和 Usage；移动端沿用 Web 按 API Key 查看 Usage。先开发 Electron；随后 uni-app 验证顺序为 Android → iOS → 微信小程序，同仓维护独立客户端。后续移动端和小程序允许创建或轮换凭据，一次性展示和复制参考 Web；这些写操作不属于只读 MVP。
+- 登录目标包括 Refresh Token 和多设备长期会话；当前尚未实现，设备会话、续期、撤销和安全存储方案待设计。
+- 管理 API 暂不引入版本前缀，长期版本兼容策略待定；多端网络与部署入口暂不讨论、待定。共享契约包是否以及何时抽取待讨论，不预设实施。
+- Electron 关注任务通知和截图下载，安全存储的具体需求待明确；不以通用文件工作流为目标。域名 myxiaomiao.com 正在备案，目前先做本地自用，备案完成后再继续服务器域名与 Nginx 入口工作。
+
 ## Webhook 管理与真实投递闭环（2026-11-09）
 
 Webhook 管理后端已接通现有前端契约：Bearer JWT 下按 Application 归属查询、创建、更新 URL/启停和轮换 Secret。配置与首个 AES-GCM 加密 Secret 同事务提交，Application 唯一约束处理并发创建；轮换携带 `currentSecretVersion`，在锁内比较版本并原子切换 CURRENT Secret，旧 Secret 保留一小时 GRACE。完整 Secret 只在创建或轮换响应中返回。保存 URL 时预检 HTTPS、公网域名和全部解析地址，实际投递仍在连接时重新校验。
 
 验证包括后端编译、HTTP 契约与 URL 策略 8/8、真实 MySQL 管理事务 3/3，以及“管理 Service 创建配置和 Secret → 截图任务终态 Outbox → 真实本地 TLS 接收端先 503 后 200 → 重试保持 eventId 和请求体 → HMAC 验签”1/1。前端构建、源码/E2E 类型检查通过，Webhook 页面 Playwright 4/4 通过。隔离 MySQL 容器已删除，原 Compose 数据未改动。
 
-尚未把新代码打包并更新到本地 Compose，也没有通过真实浏览器连接新后端做人工验收；当前代码级闭环已完成。进入复习前可选择做一次本地 Compose 前后端验收，或直接以自动化证据作为当前工程检查点。
+2026-11-10 开发者反馈：已通过真实浏览器连接新后端完成人工验收。未提供逐项验收结果及所使用的部署环境；是否已将新代码打包并更新本地 Compose 仍待确认，不将本次反馈推断为 Compose 更新或真实投递验收。
 
 ## 完整 Compose 重建验证（2026-11-09）
 
@@ -30,7 +49,7 @@ Docker Compose 和 UTC 时间调整已完成本地验证。经开发者明确授
 
 - 内部绝对时刻统一 UTC，API 返回明确偏移，控制台使用北京时间；Usage 自然日按北京时间，配额周期固定 720 小时。
 - Docker Compose 使用独立数据库卷与截图卷；保存本地秘密文件，不提交 data、密码、API Key 或令牌。Webhook 租约仍由数据库 UTC 时间判定。
-- Webhook 管理 Controller/Service 已实现并接入前端轮换版本契约；代码级管理到真实 HTTPS 投递闭环已验证，尚未更新本地 Compose 做人工浏览器验收。
+- Webhook 管理 Controller/Service 已实现并接入前端轮换版本契约；代码级管理到真实 HTTPS 投递闭环已验证，开发者反馈已完成真实浏览器连接新后端的人工验收；本地 Compose 更新状态待确认。
 - 后端完整回归 638/638、前端模拟浏览器回归 103/103；隔离 Compose 与真实本地 Compose 的登录、Key、UUID、UTC 和容器重建验证见 docs/UTC_TIME_DESIGN.md。
 - 开发者希望先说明每一步的目的、验证内容及遗漏的影响，机械工作由 Agent 完成，关键结果用于教学。
 

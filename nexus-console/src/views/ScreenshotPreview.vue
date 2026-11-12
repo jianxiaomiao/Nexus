@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { Download, ZoomIn } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 
+const saving = ref(false)
 const props = defineProps<{ image: Blob; blockedResources: number | null; resourceLimitReached: boolean; cacheControl: string | null }>()
 const imageUrl = ref('')
 const tab = ref('preview')
@@ -9,6 +11,9 @@ const expanded = ref(false)
 const imageError = ref(false)
 const dimensions = ref('1280 × 720')
 const sizeLabel = computed(() => `${(props.image.size / 1024).toFixed(1)} KB`)
+
+const supportsDesktopSave =
+  typeof window.nexusDesktop?.saveScreenshot === 'function'
 
 function releaseImage() {
   if (imageUrl.value) URL.revokeObjectURL(imageUrl.value)
@@ -28,7 +33,44 @@ function readDimensions(event: Event) {
   const image = event.target as HTMLImageElement
   dimensions.value = `${image.naturalWidth} × ${image.naturalHeight}`
 }
-function downloadImage() {
+
+async function downloadImage() {
+  if (!imageUrl.value || imageError.value || saving.value) return
+
+  const desktop = window.nexusDesktop
+
+  if (typeof desktop?.saveScreenshot === 'function') {
+    saving.value = true
+    const image = props.image
+
+    try {
+      const bytes = await image.arrayBuffer()
+      const result = await desktop.saveScreenshot(bytes)
+
+      // 根据 result.status 处理成功、取消、失败
+      if(result.status === "saved"){
+        ElMessage.success("图片保存成功")
+      }else if(result.status === "failed"){
+        if(result.code === "BUSY"){
+          ElMessage.info("图片正在保存中")
+        }else{
+          ElMessage.warning("图片保存失败")
+        }
+      }
+    } catch {
+      ElMessage.error('保存截图失败，请稍后重试')
+    } finally {
+      saving.value = false
+    }
+
+    return
+  }
+
+  // 原来的 <a download> 浏览器下载代码保留在这里
+  downloadImageForChrome()
+}
+
+function downloadImageForChrome() {
   if (!imageUrl.value || imageError.value) return
   const link = document.createElement('a')
   link.href = imageUrl.value
@@ -58,7 +100,10 @@ function downloadImage() {
           <el-tag v-if="blockedResources !== null && blockedResources > 0" type="warning">{{ blockedResources }} 个资源未加载</el-tag>
           <div class="playground-screenshot-actions">
             <el-button :disabled="imageError" @click="expanded = true"><el-icon><ZoomIn /></el-icon>放大预览</el-button>
-            <el-button type="primary" :disabled="imageError" @click="downloadImage"><el-icon><Download /></el-icon>下载 PNG</el-button>
+            <el-button  type="primary" :loading="saving" :disabled="imageError || saving" @click="downloadImage">
+              <el-icon><Download /></el-icon>
+              {{ supportsDesktopSave ? '另存为 PNG' : '下载 PNG' }}
+            </el-button>
           </div>
         </div>
         <p class="playground-screenshot-note">图片仅在当前页面保留；离开或重新请求后清除。</p>
