@@ -599,6 +599,27 @@ onBeforeUnmount(() => {
             <p v-if="desktopSnapshot.queryFailedInfo" role="alert">{{ desktopSnapshot.queryFailedInfo }}</p>
           </template>
           <p v-else-if="!trackingStore.submitting && !trackingStore.pendingHandoffJob && !trackingStore.submissionError">创建异步任务后，切换页面仍会继续跟踪。</p>
+          <p v-if="trackingStore.resultLoading" role="status">正在获取 PNG 图片…</p>
+          <el-alert
+            v-else-if="trackingStore.resultError"
+            type="warning"
+            show-icon
+            :closable="false"
+            title="PNG 图片获取失败"
+            description="任务状态不受影响。可以重试获取图片；若后端结果已过期，则无法重新获取。"
+          >
+            <el-button type="primary" plain size="small" @click="trackingStore.loadScreenshotResult()">重试获取 PNG</el-button>
+          </el-alert>
+          <ScreenshotPreview
+            v-if="trackingStore.resultImage && trackingStore.resultJobId === desktopSnapshot.jobId"
+            :key="trackingStore.resultJobId ?? undefined"
+            :image="trackingStore.resultImage"
+            :blocked-resources="desktopSnapshot.latestJob?.blockedResources ?? null"
+            :resource-limit-reached="desktopSnapshot.latestJob?.resourceLimitReached ?? false"
+            :cache-control="trackingStore.resultCacheControl"
+          >
+            <template #retention-note>图片仅在本次应用运行期间保留；切换页面后仍可预览，清理当前任务或退出应用后清除。</template>
+          </ScreenshotPreview>
         </div>
         <div v-else-if="endpoint === 'web-screenshot' && screenshotMode === 'async' && screenshotJob" class="playground-async-screenshot-result">
           <ScreenshotJobStatus :job="screenshotJob" :polling="screenshotPolling" :poll-error="screenshotPollError" :retryable="screenshotPollRetryable" @retry="resumeScreenshotPolling" />

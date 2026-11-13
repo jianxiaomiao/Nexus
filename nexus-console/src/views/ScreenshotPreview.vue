@@ -106,7 +106,7 @@ function downloadImageForChrome() {
             </el-button>
           </div>
         </div>
-        <p class="playground-screenshot-note">图片仅在当前页面保留；离开或重新请求后清除。</p>
+        <p class="playground-screenshot-note"><slot name="retention-note">图片仅在当前页面保留；离开或重新请求后清除。</slot></p>
       </el-tab-pane>
       <el-tab-pane label="响应信息" name="info" lazy>
         <el-descriptions :column="1" border class="playground-screenshot-info">
