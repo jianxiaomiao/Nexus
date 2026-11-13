@@ -15,6 +15,7 @@ import WebExtractPreview from './WebExtractPreview.vue'
 import ScreenshotJobStatus from './ScreenshotJobStatus.vue'
 import ScreenshotPreview from './ScreenshotPreview.vue'
 import '@/assets/playground.css'
+import { useScreenshotTrackingStore } from '@/stores/screenshotTrackingStore'
 
 type PlaygroundEndpoint = OpenApiEndpoint | 'shortlink' | 'web-extract' | 'web-screenshot'
 type ScreenshotMode = 'sync' | 'async'
@@ -31,6 +32,7 @@ const durations = [
   { label: '1 小时', value: '1h', ms: 3_600_000 },
   { label: '1 天', value: '1d', ms: 86_400_000 },
 ] as const
+const trackingStore = useScreenshotTrackingStore()
 
 function queryEndpoint(value: unknown): PlaygroundEndpoint {
   return value === 'uuid' || value === 'shortlink' || value === 'web-extract' || value === 'web-screenshot' ? value : 'hash'
@@ -68,6 +70,29 @@ const screenshotPolling = ref(false)
 const screenshotPollError = ref('')
 const screenshotPollRetryable = ref(false)
 const articleTab = ref('preview')
+const supportsDesktopTracking =
+  typeof window.nexusDesktop?.startScreenshotTracking === 'function'
+
+const desktopAsync = computed(() =>
+  supportsDesktopTracking &&
+  endpoint.value === 'web-screenshot' &&
+  screenshotMode.value === 'async'
+)
+
+const desktopSnapshot = computed(() => trackingStore.snapshot)
+
+const requestLoading = computed(() =>
+  loading.value ||
+  (desktopAsync.value && trackingStore.submitting)
+)
+
+const desktopSubmissionBlocked = computed(() =>
+    desktopAsync.value && (
+      trackingStore.pendingHandoffJob !== null ||
+      trackingStore.creationUncertain ||
+      desktopSnapshot.value.traceStatus !== 'IDLE'
+    )
+)
 let controller: AbortController | null = null
 let requestId = 0
 let screenshotJobApiKey = ''
@@ -390,6 +415,11 @@ async function sendRequest() {
     } catch { return }
   }
 
+  if (desktopAsync.value) {
+    await trackingStore.submitDesktopScreenshot(key, articleUrl.value.trim())
+    return
+  }
+
   controller?.abort()
   const currentId = ++requestId
   controller = new AbortController()
@@ -545,14 +575,32 @@ onBeforeUnmount(() => {
           </template>
           <p v-else class="playground-uuid-help">此接口不需要请求体，每次发送都会生成一个新 UUID。</p>
           <p v-if="formError" class="playground-form-error" role="alert">{{ formError }}</p>
-          <el-button class="playground-submit" native-type="submit" type="primary" :loading="loading" :disabled="endpoint === 'hash' && byteCount > 4096">{{ loading ? '发送中…' : endpoint === 'web-screenshot' ? screenshotMode === 'async' ? '创建异步任务' : '生成同步截图' : '发送请求' }}</el-button>
+          <el-button class="playground-submit" native-type="submit" type="primary" :loading="requestLoading" :disabled="desktopSubmissionBlocked || (endpoint === 'hash' && byteCount > 4096)">{{ requestLoading ? '发送中…' : endpoint === 'web-screenshot' ? screenshotMode === 'async' ? '创建异步任务' : '生成同步截图' : '发送请求' }}</el-button>
         </el-form>
       </section>
       <section class="playground-panel playground-response" aria-labelledby="playground-response-title" aria-live="polite"><div class="playground-panel-heading"><h2 id="playground-response-title">响应</h2><div v-if="result?.status !== null && result?.status !== undefined" class="playground-response-meta"><span class="playground-status" :class="{ 'is-error': result.status >= 400 }">{{ result.status }} {{ result.status >= 200 && result.status < 300 ? 'OK' : 'ERROR' }}</span><span v-if="result.durationMs !== null">{{ result.durationMs }} ms</span></div></div>
         <p v-if="result" class="playground-result-message" :class="{ 'is-error': result.status === null || result.status >= 400 || result.invalidImage || result.isError }">{{ result.message }}</p>
         <div v-if="createdLink" class="playground-created-link"><p class="playground-eyebrow">SHORT LINK CREATED</p><h3>短链接已创建</h3><p>复制后即可分享；到期或禁用后将无法跳转。</p><code>{{ publicShortLinkUrl(createdLink.shortCode) }}</code><div class="playground-created-actions"><el-button type="primary" @click="copyShortUrl(createdLink.shortCode)">复制短地址</el-button><RouterLink :to="{ name: 'short-links', query: { apiKeyId: createdLink.apiKeyId } }">管理这把 Key 的短链 <el-icon aria-hidden="true"><ArrowRight /></el-icon></RouterLink></div></div>
         <div v-if="listedLinks" class="playground-link-list"><h3>这把 Key 的短链接</h3><p v-if="listedLinks.length === 0" class="playground-list-empty">这把 Key 还没有短链接。</p><div v-for="link in listedLinks" :key="link.id" class="playground-link-item"><strong>{{ link.name }}</strong><small>ID {{ link.id }} · {{ link.status === 1 ? '已禁用' : new Date(link.expiresAt).getTime() <= Date.now() ? '已到期' : '自身启用' }} · 到期 {{ formatBeijingTime(link.expiresAt) }}</small><a :href="publicShortLinkUrl(link.shortCode)" target="_blank" rel="noopener noreferrer">{{ publicShortLinkUrl(link.shortCode) }}</a><div class="playground-link-actions"><el-button size="small" @click="copyShortUrl(link.shortCode)">复制短地址</el-button><a :href="publicShortLinkUrl(link.shortCode)" target="_blank" rel="noopener noreferrer">打开短地址 <el-icon aria-hidden="true"><ArrowRight /></el-icon></a></div></div></div>
-        <div v-if="endpoint === 'web-screenshot' && screenshotMode === 'async' && screenshotJob" class="playground-async-screenshot-result">
+        <div v-if="desktopAsync" class="playground-async-screenshot-result">
+          <el-alert v-if="trackingStore.submissionError" type="warning" :closable="false" :title="trackingStore.submissionError" />
+          <p v-if="trackingStore.submitting">正在创建任务并交给桌面端跟踪…</p>
+          <p v-if="trackingStore.pendingHandoffJob">已创建任务：{{ trackingStore.pendingHandoffJob.jobId }}。尚未确认接手，请勿重复创建。</p>
+          <ScreenshotJobStatus
+            v-if="desktopSnapshot.latestJob"
+            :job="desktopSnapshot.latestJob"
+            :polling="desktopSnapshot.traceStatus === 'POLLING'"
+            :poll-error="desktopSnapshot.queryFailedInfo ?? ''"
+            :retryable="false"
+          />
+          <template v-else-if="desktopSnapshot.jobId">
+            <p>任务：{{ desktopSnapshot.jobId }}</p>
+            <p v-if="desktopSnapshot.traceStatus === 'POLLING'">已接手，正在查询任务状态…</p>
+            <p v-if="desktopSnapshot.queryFailedInfo" role="alert">{{ desktopSnapshot.queryFailedInfo }}</p>
+          </template>
+          <p v-else-if="!trackingStore.submitting && !trackingStore.pendingHandoffJob && !trackingStore.submissionError">创建异步任务后，切换页面仍会继续跟踪。</p>
+        </div>
+        <div v-else-if="endpoint === 'web-screenshot' && screenshotMode === 'async' && screenshotJob" class="playground-async-screenshot-result">
           <ScreenshotJobStatus :job="screenshotJob" :polling="screenshotPolling" :poll-error="screenshotPollError" :retryable="screenshotPollRetryable" @retry="resumeScreenshotPolling" />
           <ScreenshotPreview v-if="screenshot" :image="screenshot.image" :blocked-resources="screenshot.blockedResources" :resource-limit-reached="screenshot.resourceLimitReached" :cache-control="screenshot.cacheControl" />
         </div>

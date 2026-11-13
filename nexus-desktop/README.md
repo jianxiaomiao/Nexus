@@ -2,6 +2,16 @@
 
 当前复用 `../nexus-console` 的 Vue 源码与 Vite 配置，仅支持本地开发模式。Electron Main 创建窗口并加载 Vue；已接入窗口状态文件持久化，尚未实现安装包、独立构建入口、登录续期和任务通知。
 
+## Main 截图跟踪（2026-11-12）
+
+Renderer根部同步已接入：开发者实现Pinia screenshotTrackingStore.snapshot、initScreenshotTracking和App挂载/卸载接入；先订阅再读取，以推送计数拒绝迟到的首次读取，清理时标记disposed并取消订阅，不停止Main。`e2e/trackingInitialization.spec.ts`定向5/5通过，覆盖首次读取、路由切换不重复订阅、推送更新、旧读取不覆盖新推送、真实App卸载后迟到读取/已排队回调不更新、没有桌面桥的Web兼容。测试使用真实App/Store和受控桌面桥，不是本轮真实Electron验收。前端与E2E类型检查通过；E2E配置补齐与前端一致的@别名以引用实际类型。Playground提交与展示尚未切换到Store，通知未实现。
+
+真实后端验收：开发者在桌面Console创建一次任务后交由Main查询，提供截图确认QUEUED、RUNNING、SUCCEEDED及TERMINAL，无查询错误。请求创建走Renderer/Vite，跟踪查询由Main直连本地8080。Console每条日志分别来自VM69与VM194两个订阅，不据此推断重复网络请求。此阶段仍未连接Store、页面恢复及通知。
+
+开发者实现内存快照、受限的开始/读取/停止接口、Preload订阅与取消订阅、activeRun对象身份围栏、8秒请求超时，以及每次查询完成后等待2秒的串行调度。当前只跟踪一个任务；PAUSED可重试，同一POLLING或TERMINAL任务不重复启动，其他Job返回BUSY。Key留在Main运行对象，不进入快照。此阶段尚未把Vue原页面轮询切换到Main，也未实现Renderer Store、系统通知或完成结果读取桥。
+
+`npm run test:tracking-boundaries`使用现有前端Playwright依赖，在隔离userData的Electron中运行正式Main/Preload/IPC，只有Main fetch被受控响应替换，不访问真实8080、数据库或真实Key。验证通过：同Job去重与不同Job BUSY；首请求未完成即使超过2秒也不重叠；停止触发abort，模拟不遵守abort的旧响应在新任务开始后返回，不修改新快照、不推送、不继续调度；真实8秒超时进入PAUSED、保留最近RUNNING快照且不继续查询；重试PAUSED后可得到终态；SUCCEEDED/FAILED/EXPIRED均停止查询，终态同任务start不重查；推送中无模拟Key。第一次测试因测试脚本误用Electron evaluate参数位置而中断，修正测试后全通过，未修改开发者业务实现。证据在.runtime/tracking-boundaries-hEWDv2/evidence.json。
+
 ## 截图另存为接入（2026-11-11）
 
 开发者已实现 desktop.d.ts、Preload saveScreenshot(ArrayBuffer)、screenshot:save IPC 处理器和 ScreenshotPreview.vue 能力分流。Main 校验窗口主框架/来源、大小及 PNG 签名，使用用户选择路径异步写入，区分 saved/cancelled/failed 并在 finally 释放忙碌标记。通过开发者在真实 Renderer 控制台调用，确认无效输入被拒绝、真实对话框取消和保存成功；Agent检查保存文件为134字节32x32绿色PNG，签名、块CRC和图像均正常。
@@ -11,6 +21,7 @@
 保存边界补验通过：`npm run test:save-boundaries` 使用现有前端 Playwright 依赖启动 Electron，加载正式 Main、Preload，通过真实主页面的能力桥调用 IPC；只控制 showSaveDialog 返回并重定向测试 userData，未替换业务处理器或 fs.writeFile。第一个调用挂起时第二个返回BUSY，未增加对话框调用；取消第一个后，将第二次对话框路径指定为已存在的测试目录，真实写入失败返回SAVE_FAILED；第三次对话框选择新文件后保存成功，逐字节等于输入PNG。该测试直接调用桥接以绕过Vue按钮防重复点击状态，验证Main并发门而非按钮外观；真实系统对话框交互已由上述人工验证覆盖。不可信来源等其他边界仍未运行验收。测试文件与证据放在独立.runtime/save-boundaries-*目录，既有窗口与配置不被关闭或覆盖。
 
 ## 窗口状态检查点（2026-11-11）
+
 
 最新验收：手动事件策略下四个基本场景通过。三轮不操作配置不变；只拖标题栏后位置4,31、宽高保持1284x864；右下角缩放后800x601；最大化关闭保留普通矩形，重启后开发者确认最大化与还原，最后正常关闭保存4,31、800x601、maximized=false。真实鼠标操作及可见效果由开发者确认，Agent逐次核对文件，证据为.runtime下的move-only/resize/maximize/restore-evidence.json。下文保留几何差异调查过程；这不是底层像素精度修复，也不涵盖贴靠、跨DPI与键盘布局操作。
 

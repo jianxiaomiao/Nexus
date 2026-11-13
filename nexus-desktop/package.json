@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "test:smoke": "node scripts/dev.mjs --smoke",
-    "test:save-boundaries": "node scripts/test-save-boundaries.cjs"
+    "test:save-boundaries": "node scripts/test-save-boundaries.cjs",
+    "test:tracking-boundaries": "node scripts/test-tracking-boundaries.cjs"
   },
   "engines": { "node": ">=24.12.0" },
   "devDependencies": { "electron": "45.2.3" }

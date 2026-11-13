@@ -12,6 +12,30 @@ const DEV_ORIGIN = 'http://127.0.0.1:5178'
 const smoke = process.env.NEXUS_DESKTOP_SMOKE === '1'
 let mainWindow
 
+function createIdleTrace() {
+  return {
+    jobId: null,
+    latestJob: null,
+    traceStatus: 'IDLE',
+    queryFailedInfo: null,
+  }
+}
+
+function isTrustedScreenshotCaller(event) {
+  // 将现有保存处理器里的来源检查提取到这里
+  // 合法返回 true；不合法或检查异常返回 false
+  try {
+    return !(!mainWindow || mainWindow.isDestroyed()
+        || event.sender !== mainWindow.webContents
+        || !event.senderFrame
+        || event.senderFrame !== mainWindow.webContents.mainFrame
+        || new URL(event.senderFrame.url).origin !== DEV_ORIGIN);
+  }catch (e){
+    return false
+  }
+
+}
+
 // 当前仅实现开发模式，独立构建的页面入口留到下一检查点。
 app.setPath('userData', path.join(__dirname, '.runtime', 'user-data'))
 if (app.isPackaged) {
@@ -31,6 +55,132 @@ if (app.isPackaged) {
     const savedState = loadWindowState(statePath)
 
     const bounds = resolveWindowBounds(savedState, workAreas, primaryArea)
+
+    let trackingSnapshot = createIdleTrace()
+    let activeRun = null
+
+    let screenshotResultBusy = false
+
+    function cancelActiveRun() {
+      const previous = activeRun
+      activeRun = null
+
+      if (!previous) return
+
+      if (previous.timer !== null) clearTimeout(previous.timer)
+      previous.controller?.abort()
+      previous.timer = null
+      previous.controller = null
+      previous.resultController?.abort()
+      previous.resultController = null
+      previous.apiKey = ''
+    }
+
+    function publishTrackingSnapshot() {
+      if (!mainWindow || mainWindow.isDestroyed()) return
+
+      mainWindow.webContents.send(
+          'screenshot-tracking:updated',
+          trackingSnapshot,
+      )
+    }
+
+    async function pollScreenshotJob(run) {
+      if (activeRun !== run) return
+
+      const controller = new AbortController()
+      run.controller = controller
+
+      let timedOut = false
+
+      const requestTimeout = setTimeout(() => {
+        timedOut = true
+        controller.abort()
+      }, 8000)
+
+      try {
+        const response = await fetch(
+            `http://localhost:8080/v1/web/screenshot-jobs/${encodeURIComponent(run.jobId)}`,
+            {
+              headers: {
+                Authorization: `ApiKey ${run.apiKey}`,
+              },
+              redirect: 'error',
+              signal: controller.signal,
+            },
+        )
+        if (activeRun !== run) return
+        if (!response.ok) {
+          const message = response.status === 401 ? 'API Key 无效，请重新提供。'
+            : response.status === 403 ? 'API Key、所属应用或账号已被禁用。'
+              : response.status === 404 ? '任务不存在，或不属于当前 API Key。'
+                : '查询任务失败，请稍后重试。'
+          trackingSnapshot = { ...trackingSnapshot, traceStatus: 'PAUSED', queryFailedInfo: message }
+          publishTrackingSnapshot()
+          return
+        }
+
+        const contentType = response.headers.get('content-type')
+
+        const mediaType = contentType
+            ?.split(';')[0]
+            ?.trim()
+            .toLowerCase()
+
+        if (mediaType !== 'application/json') throw new Error('INVALID_JOB_RESPONSE')
+
+        const body = await response.json()
+
+        if (activeRun !== run) return
+
+        const job = body?.data
+        const nullableString = value => value === null || typeof value === 'string'
+        const nullableNumber = value => value === null || (typeof value === 'number' && Number.isFinite(value))
+        const valid = body?.code === 'SUCCESS' && job && typeof job === 'object' && !Array.isArray(job)
+          && job.jobId === run.jobId
+          && ['QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'EXPIRED'].includes(job.status)
+          && Number.isSafeInteger(job.attemptCount) && job.attemptCount >= 0
+          && typeof job.createdAt === 'string' && typeof job.updatedAt === 'string'
+          && nullableNumber(job.resultSizeBytes) && nullableString(job.resultSha256)
+          && nullableNumber(job.blockedResources)
+          && (job.resourceLimitReached === null || typeof job.resourceLimitReached === 'boolean')
+          && nullableString(job.resultExpiresAt) && nullableString(job.failureCode)
+          && nullableString(job.startedAt) && nullableString(job.completedAt)
+        if (!valid) throw new Error('INVALID_JOB_RESPONSE')
+
+        // 只复制约定字段，不将后端额外字段或 Key 推送给页面。
+        const { jobId, status, attemptCount, createdAt, updatedAt, resultSizeBytes,
+          resultSha256, blockedResources, resourceLimitReached, resultExpiresAt,
+          failureCode, startedAt, completedAt } = job
+        const latestJob = { jobId, status, attemptCount, createdAt, updatedAt, resultSizeBytes,
+          resultSha256, blockedResources, resourceLimitReached, resultExpiresAt,
+          failureCode, startedAt, completedAt }
+        const pending = status === 'QUEUED' || status === 'RUNNING'
+        trackingSnapshot = { jobId, latestJob, traceStatus: pending ? 'POLLING' : 'TERMINAL', queryFailedInfo: null }
+        publishTrackingSnapshot()
+        if (pending && activeRun === run) {
+          run.timer = setTimeout(() => {
+            run.timer = null
+            void pollScreenshotJob(run)
+          }, 2000)
+        }
+      } catch (e) {
+        if (activeRun !== run) return
+        const message = timedOut ? '查询任务超时，请重试。'
+          : e?.message === 'INVALID_JOB_RESPONSE' || e instanceof SyntaxError
+            ? '服务器返回的任务状态格式不正确。'
+            : '无法连接服务器，请稍后重试。'
+        trackingSnapshot = { ...trackingSnapshot, traceStatus: 'PAUSED', queryFailedInfo: message }
+        publishTrackingSnapshot()
+      } finally {
+        clearTimeout(requestTimeout)
+
+        if (run.controller === controller) {
+          run.controller = null
+        }
+      }
+
+    }
 
     mainWindow = new BrowserWindow({
       x: bounds.x,
@@ -117,11 +267,7 @@ if (app.isPackaged) {
       // 窗口、网页内容、主框架和来源必须全部匹配；失效的框架也拒绝。
       const owner = mainWindow
       try {
-        if (!owner || owner.isDestroyed()
-          || event.sender !== owner.webContents
-          || !event.senderFrame
-          || event.senderFrame !== owner.webContents.mainFrame
-          || new URL(event.senderFrame.url).origin !== DEV_ORIGIN) {
+        if (!isTrustedScreenshotCaller(event)) {
           return { status: 'failed', code: 'FORBIDDEN' }
         }
       } catch {
@@ -164,6 +310,220 @@ if (app.isPackaged) {
         return { status: 'failed', code: 'SAVE_FAILED' }
       } finally {
         screenshotSaveBusy = false
+      }
+    })
+
+    ipcMain.handle('screenshot-tracking:start', (event, input) => {
+      if (!isTrustedScreenshotCaller(event)) {
+        return { status: 'failed', code: 'FORBIDDEN' }
+      }
+
+      if (
+          input == null ||
+          typeof input !== 'object' ||
+          Array.isArray(input) ||
+          typeof input.jobId !== 'string' ||
+          typeof input.apiKey !== 'string'
+      ) {
+        return { status: 'failed', code: 'INVALID_REQUEST' }
+      }
+
+      const jobIdPattern =
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+      const apiKeyPattern =
+          /^nxk_v1_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_[A-Za-z0-9_-]{43}$/
+
+      if (!jobIdPattern.test(input.jobId) || !apiKeyPattern.test(input.apiKey)) {
+        return { status: 'failed', code: 'INVALID_REQUEST' }
+      }
+
+      if (trackingSnapshot.jobId !== null &&
+          trackingSnapshot.jobId !== input.jobId) {
+        return { status: 'failed', code: 'BUSY' }
+      }else{
+        if(trackingSnapshot.traceStatus === 'POLLING'|| trackingSnapshot.traceStatus === 'TERMINAL'){
+          return {
+            status: 'ok',
+            snapshot: trackingSnapshot,
+          }
+        }else if(trackingSnapshot.traceStatus === 'PAUSED' || trackingSnapshot.traceStatus === 'IDLE'){
+          const latestJob = trackingSnapshot.latestJob
+          cancelActiveRun()
+          const run = {
+            jobId: input.jobId,
+            apiKey: input.apiKey,
+            controller: null,
+            resultController: null,
+            timer: null,
+          }
+
+          activeRun = run
+
+          trackingSnapshot = { jobId: input.jobId, latestJob, traceStatus: 'POLLING', queryFailedInfo: null }
+
+          publishTrackingSnapshot()
+
+          void pollScreenshotJob(run)
+
+          return {
+            status: 'ok',
+            snapshot: trackingSnapshot,
+          }
+        }
+      }
+    })
+
+    ipcMain.handle('screenshot-tracking:read', (event) => {
+      if (!isTrustedScreenshotCaller(event)) {
+        return { status: 'failed', code: 'FORBIDDEN' }
+      }
+
+      return {
+        status: 'ok',
+        snapshot: trackingSnapshot,
+      }
+    })
+
+    ipcMain.handle('screenshot-tracking:stop', (event) => {
+      // ① 检查来源，不合法返回 FORBIDDEN
+      if (!isTrustedScreenshotCaller(event)) {
+        return { status: 'failed', code: 'FORBIDDEN' }
+      }
+
+      cancelActiveRun()
+
+      // ② 将 trackingSnapshot 重置为新的 IDLE 快照
+      trackingSnapshot = createIdleTrace()
+      // ③ 向当前窗口发送 screenshot-tracking:updated
+      publishTrackingSnapshot()
+      // ④ 返回 { status: 'ok', snapshot: trackingSnapshot }
+      return { status: 'ok', snapshot: trackingSnapshot }
+    })
+
+    ipcMain.handle('screenshot-result:get', async (event, jobId) =>{
+      if (!isTrustedScreenshotCaller(event)) {
+        return { status: 'failed', code: 'FORBIDDEN' }
+      }
+      const jobIdPattern =
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+      if(typeof jobId !== 'string' || !jobIdPattern.test(jobId)){
+        return  { status: 'failed', code: 'INVALID_REQUEST' }
+      }
+
+      if(activeRun === null || activeRun.jobId !== jobId){
+        return  { status: 'failed', code: 'STALE_TASK' }
+      }
+
+      if (trackingSnapshot.latestJob?.status !== 'SUCCEEDED') {
+        return { status: 'failed', code: 'NOT_READY' }
+      }
+
+      if (screenshotResultBusy) {
+        return { status: 'failed', code: 'BUSY' }
+      }
+
+      screenshotResultBusy = true
+
+      const run = activeRun
+      const controller = new AbortController()
+      run.resultController = controller
+
+      const timeout = setTimeout(() => {
+        controller.abort()
+      }, 8000)
+
+      try {
+        const response = await fetch(
+            `http://localhost:8080/v1/web/screenshot-jobs/${encodeURIComponent(jobId)}/result`,
+            {
+              headers: { Authorization: `ApiKey ${run.apiKey}` },
+              redirect: 'error',
+              signal: controller.signal,
+            },
+        )
+
+        if (activeRun !== run) {
+          return { status: 'failed', code: 'STALE_TASK' }
+        }
+
+        if (!response.ok) {
+          return { status: 'failed', code: 'FETCH_FAILED' }
+        }
+
+        const mediaType = response.headers.get('content-type')
+            ?.split(';')[0]
+            ?.trim()
+            .toLowerCase()
+
+        if (mediaType !== 'image/png' || !response.body) {
+          return { status: 'failed', code: 'INVALID_IMAGE' }
+        }
+
+        const maxBytes = 5 * 1024 * 1024
+        const reader = response.body.getReader()
+        const chunks = []
+        let totalBytes = 0
+
+        while (true) {
+          const { done, value } = await reader.read()
+
+          if (activeRun !== run) {
+            return { status: 'failed', code: 'STALE_TASK' }
+          }
+
+          if (done) break
+
+          totalBytes += value.byteLength
+          if (totalBytes > maxBytes) {
+            return { status: 'failed', code: 'INVALID_IMAGE' }
+          }
+
+          chunks.push(value)
+        }
+
+        if (totalBytes < 8) {
+          return { status: 'failed', code: 'INVALID_IMAGE' }
+        }
+
+        const bytes = new Uint8Array(totalBytes)
+        let offset = 0
+
+        for (const chunk of chunks) {
+          bytes.set(chunk, offset)
+          offset += chunk.byteLength
+        }
+
+        const signature = [137, 80, 78, 71, 13, 10, 26, 10]
+        const validSignature = signature.every((byte, index) => bytes[index] === byte)
+
+        if (!validSignature) {
+          return { status: 'failed', code: 'INVALID_IMAGE' }
+        }
+
+        if (activeRun !== run) {
+          return { status: 'failed', code: 'STALE_TASK' }
+        }
+
+        return {
+          status: 'ok',
+          jobId,
+          bytes: bytes.buffer,
+          cacheControl: response.headers.get('cache-control'),
+        }
+      } catch {
+        if (activeRun !== run) {
+          return { status: 'failed', code: 'STALE_TASK' }
+        }
+        return { status: 'failed', code: 'FETCH_FAILED' }
+      } finally {
+        clearTimeout(timeout)
+        controller.abort()
+        if (run.resultController === controller) {
+          run.resultController = null
+        }
+        screenshotResultBusy = false
       }
     })
 

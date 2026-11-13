@@ -12,6 +12,10 @@
 
 ## 多端规划（2026-11-10）
 
+- 最新Renderer检查点（2026-11-12）：开发者已实现snapshot Store、根部订阅初始化、App清理和桌面提交action/页面分流。后端创建成功即保留pendingHandoffJob，Main接手失败保留Job ID；创建结果不确定以creationUncertain阻止重复POST；start返回值不覆盖推送快照。经开发者指定，Agent补上Playground桌面状态展示分支，并将按钮文字统一读取requestLoading。源码/E2E类型检查通过；trackingInitialization.spec.ts与desktopScreenshotDisplay.spec.ts受控桥接测试9/9通过，覆盖首次等待、离页推送返回恢复、接手失败/IPC异常、迟到start返回不覆盖新终态、根部读取和清理。测试使用真实Vue/Store、模拟桌面桥与HTTP，不代表真实Electron离页验收。桌面不再运行旧Renderer轮询；恢复接手、清理当前任务、PNG结果获取和通知尚未接入，真实离页恢复待开发者验证。
+
+- 2026-11-12 Main单任务跟踪已由开发者实现。`npm run test:tracking-boundaries`隔离Electron/真实IPC/受控Main fetch验证去重、串行、停止后迟到响应隔离、8秒超时PAUSED保留旧状态、恢复和三个终态停查通过。开发者随后在真实桌面Console创建任务并交给Main，截图确认QUEUED→RUNNING→SUCCEEDED，跟踪最终TERMINAL、无查询错误。前次失败任务已通过stop清理后重新创建；此前VPN为开发者反馈，未将其认定为确证根因。每条日志出现在VM69与VM194两处，说明残留两个Console订阅，不能据此认定重复轮询。下一步接Renderer Store和页面恢复，替换桌面旧轮询，最后接通知；离页/最小化端到端仍待验收。详见nexus-desktop/README.md。
+
 - 2026-11-12 截图跟踪边界已确认：第一版只跟踪一个任务，切换页面后保留跟踪和状态，桌面需支持应用运行时的后台完成通知；点击×退出程序后不再本地跟踪，不引入托盘驻留。后端已接受的任务不因退出客户端而取消。状态/跟踪协议及Web与Main监控分工仍处于设计，尚未改动轮询实现；代码由开发者先写。
 
 - 开发者确认 Mobile MVP 为只读：登录、Application 列表与详情、Quota 和 Usage；移动端沿用 Web 按 API Key 查看 Usage。先开发 Electron；随后 uni-app 验证顺序为 Android → iOS → 微信小程序，同仓维护独立客户端。后续移动端和小程序允许创建或轮换凭据，一次性展示和复制参考 Web；这些写操作不属于只读 MVP。
