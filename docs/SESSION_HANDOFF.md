@@ -2,7 +2,7 @@
 
 ## Electron 开发与窗口持久化检查点（2026-11-11）
 
-- nexus-desktop 复用 nexus-console 的 Vue 与 Vite，固定回环 5178，代理到本地 8080；开发者确认桌面真实登录和 Application 列表加载成功。独立构建和正式转发入口、续期及任务通知尚未实现。
+- nexus-desktop 复用 nexus-console 的 Vue 与 Vite，固定回环 5178，代理到本地 8080；开发者确认桌面真实登录和 Application 列表加载成功。独立构建和正式转发入口、续期尚未实现；任务完成通知已于2026-11-13实现并验收，见下方最新检查点。
 - 普通启动空白曾由启动器 windowsHide:true 触发显示差异，移除后开发者确认界面正常；保留 GPU 与浏览器安全设置。Playwright 启动绕过开发启动器，不能单独证明普通启动通过。
 - 开发者编写 window-state.cjs 与 Main 接入。窗口配置通过同目录临时文件替换保存；screen 工作区校验不通过时回退主屏默认居中。当前仅支持启动时布局变化，不涵盖运行中热拔屏和小于800x600的工作区。
 - Windows 150%缩放下存在创建/回读几何偏差；原生窗口对照已定位创建尺寸与矩形转换均参与，但未证明具体底层源码修复点。创建后 setBounds 候选不能通用收敛，未采用。详细证据与限制见 nexus-desktop/README.md。
@@ -11,6 +11,8 @@
 - 截图另存为基本闭环完成：开发者实现Preload/contextBridge、受限screenshot:save处理器及Vue能力分流。前端类型检查、现有浏览器下载定向测试1/1通过；开发者确认真实Vue按钮取消安静结束、保存出现成功提示，Agent核对产物80037字节、1280x720、PNG签名/CRC/IDAT解压正常。`npm run test:save-boundaries`补验Main并发BUSY、真实目录写入失败后再次保存成功且PNG字节一致；Playwright使用真实桥接/IPC/文件系统，仅控制对话框返回并隔离userData，不涉及后端。非信任来源等其他边界仍未运行验收。下一候选任务通知，代码继续由开发者先写，Agent解释与审查。
 
 ## 多端规划（2026-11-10）
+
+- 最新通知检查点（2026-11-13）：开发者实现Main进程内Job ID去重的任务完成通知，SUCCEEDED/FAILED在推送快照后触发，尝试前登记且stop不清集合；不等待PNG、不新增Preload/IPC。Agent隔离Electron受控验收通过：同Job ID跨stop/re-track不重复，RUNNING/EXPIRED不通知，支持检查/构造/show同步异常及异步failed、不支持均不改TERMINAL/SUCCEEDED且无未处理拒绝。测试入口最初直接重定义Electron.Notification失败，已改成仅为目标模块require注入独立门面；未改开发者业务代码。真实Windows通知起初因DisabledForUser失败，用户打开通知后系统读回Enabled，重测show=1、failed=0，用户截图确认横幅出现。证据`.runtime/notification-boundaries-wpSYVg/`；脚本`node scripts/test-notification-boundaries.cjs --native`保留窗口45秒后关闭，使用受控任务、不访问后端。去重范围仅本次Main进程，失败不自动重试，通知点击唤起/跳转未实现；真实后端截图+通知的一体化验收尚未单独执行。pendingHandoffJob恢复和creationUncertain仍未解决。本条更新下方历史“系统通知待实现”状态。
 
 - 真实暂停恢复验收已通过（2026-11-13）：Agent运行`nexus-desktop/scripts/test-resume-acceptance.cjs`，隔离Electron userData，使用正式Main/Preload/Vue/Store，用户在隔离窗口登录并填写真实Key与URL；真实8080创建POST仅一次。测试入口只让Main第一次状态查询返回503，确认PAUSED和继续查询按钮，随后自动恢复，所有请求沿用同一Job ID。后续4次真实查询200并到SUCCEEDED，真实PNG结果200且仅获取一次；79999字节、解码宽1280，长度与SHA-256匹配后端元数据。Renderer旧轮询/结果请求数0。证据在`.runtime/resume-acceptance-wVsZde/`。脚本成功后自动清理本地跟踪和测试登录存储、关闭隔离窗口（用户因此询问窗口消失，已核实正常退出码0）。真实后端任务按原生命周期保留，不重新创建；尚未确定当前后端使用的数据库环境，不将本次验收标记为nexus_test数据库测试。正式业务实现未改动；pendingHandoffJob恢复、creationUncertain处理和系统通知仍待实现。本条更新下方“真实暂停恢复待验收”状态。
 

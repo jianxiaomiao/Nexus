@@ -1,6 +1,14 @@
 # Nexus Desktop：阶段 1 开发壳
 
-当前复用 `../nexus-console` 的 Vue 源码与 Vite 配置，仅支持本地开发模式。Electron Main 创建窗口并加载 Vue；已接入窗口状态文件持久化，尚未实现安装包、独立构建入口、登录续期和任务通知。
+当前复用 `../nexus-console` 的 Vue 源码与 Vite 配置，仅支持本地开发模式。Electron Main 创建窗口并加载 Vue；已接入窗口状态文件持久化和任务完成通知，尚未实现安装包、独立构建入口和登录续期。
+
+## 任务完成通知验收（2026-11-13）
+
+开发者实现Main的notifyScreenshotFinished：成功解析SUCCEEDED/FAILED并推送快照后尝试通知，以进程内Job ID Set去重，尝试前登记，清理跟踪不清空集合；通知异常不更改任务状态。无需新增Preload/IPC；通知不是在PNG获取后触发。RUNNING/EXPIRED不通知，当前失败不自动重试，进程退出后去重集合消失，通知点击跳转尚未实现。
+
+`node scripts/test-notification-boundaries.cjs`运行隔离Electron、正式Main/Preload/IPC，使用受控任务和通知替身；验证同Job ID在stop后重新跟踪仍不重复、FAILED通知和RUNNING/EXPIRED不通知、支持检查/构造/show同步抛错、异步failed、系统不支持均不影响TERMINAL/SUCCEEDED且无未处理Promise拒绝。初次测试入口直接重定义Electron.Notification报错；修正为仅拦截目标模块require并返回独立门面，正式业务代码未改。
+
+加`--native`会在边界测试后对受控成功任务发送一条真实Windows通知，并保留窗口45秒后自动关闭，不访问后端。最初系统接口返回DisabledForUser，真实通知failed，开发者也未看到；开发者打开通知总开关后接口返回Enabled，重测show=1、failed=0、任务终态不变，开发者截图确认横幅出现。`show`事件本身不等于用户看到，最终结论结合系统状态与人工观察。证据在忽略目录`.runtime/notification-boundaries-wpSYVg/`，不将该受控任务验收表述为真实后端截图与通知的一体化验收。
 
 ## 真实暂停恢复验收（2026-11-13）
 

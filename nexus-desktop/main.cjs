@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, session, screen, ipcMain } = require('electron')
+const { app, BrowserWindow, dialog, session, screen, ipcMain, Notification } = require('electron')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 const {
@@ -41,6 +41,9 @@ app.setPath('userData', path.join(__dirname, '.runtime', 'user-data'))
 if (app.isPackaged) {
   app.whenReady().then(() => { dialog.showErrorBox('Nexus', '独立构建入口尚未实现，请使用 npm run dev。'); app.exit(1) })
 } else {
+  if (process.platform === 'win32') {
+    app.setAppUserModelId(process.execPath)
+  }
   app.whenReady().then(async () => {
     console.log('[desktop main] Electron ready; creating BrowserWindow')
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
@@ -55,6 +58,8 @@ if (app.isPackaged) {
     const savedState = loadWindowState(statePath)
 
     const bounds = resolveWindowBounds(savedState, workAreas, primaryArea)
+
+    const notifiedJobIds = new Set()
 
     let trackingSnapshot = createIdleTrace()
     let activeRun = null
@@ -83,6 +88,36 @@ if (app.isPackaged) {
           'screenshot-tracking:updated',
           trackingSnapshot,
       )
+    }
+
+    function notifyScreenshotFinished(latestJob){
+      if(latestJob.status !== 'SUCCEEDED' && latestJob.status !== 'FAILED') return
+
+      if(notifiedJobIds.has(latestJob.jobId)) return
+
+      notifiedJobIds.add(latestJob.jobId)
+
+      try {
+          if(Notification.isSupported()){
+            const notification = new Notification({
+              title: 'Nexus 截图任务',
+              body: latestJob.status === 'SUCCEEDED'
+                  ? '截图任务已完成，可返回应用查看。'
+                  : '截图任务执行失败，可返回应用查看详情。',
+            })
+
+            notification.on('failed', () => {
+              console.warn('[desktop main] Screenshot notification failed')
+            })
+
+            notification.show()
+          }else{
+            console.log("截图通知触发,但是由于不支持notification,所以只记录日志")
+          }
+
+      }catch (e) {
+          console.warn("截图通知异常")
+      }
     }
 
     async function pollScreenshotJob(run) {
@@ -158,6 +193,7 @@ if (app.isPackaged) {
         const pending = status === 'QUEUED' || status === 'RUNNING'
         trackingSnapshot = { jobId, latestJob, traceStatus: pending ? 'POLLING' : 'TERMINAL', queryFailedInfo: null }
         publishTrackingSnapshot()
+        notifyScreenshotFinished(latestJob)
         if (pending && activeRun === run) {
           run.timer = setTimeout(() => {
             run.timer = null
