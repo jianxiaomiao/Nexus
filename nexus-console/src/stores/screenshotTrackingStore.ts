@@ -9,14 +9,19 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
     pendingHandoffJob: CreatedScreenshotJob | null
     submissionError: string | null
     creationUncertain: boolean
+
     resultImage: Blob | null       // 初始 null
     resultJobId: string | null     // 初始 null
     resultLoading: boolean        // 初始 false
     resultError: string | null     // 初始 null
     resultCacheControl: string | null // 初始 null
     resultRequestVersion: number   // 初始 0
+
     clearing: boolean       // 初始 false
     clearError: string | null // 初始 null
+
+    resuming: boolean        // 初始 false
+    resumeError: string | null // 初始 null
   } => ({
     snapshot: {
       jobId: null,
@@ -37,7 +42,10 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
     resultRequestVersion: 0,   // 初始 0
 
     clearing: false,
-    clearError: null
+    clearError: null,
+
+    resuming: false,        // 初始 false
+    resumeError: null // 初始 null
   }),
 
 
@@ -51,6 +59,10 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
           this.resultCacheControl = null
           this.resultLoading = false
         }
+
+      if (next.jobId !== this.snapshot.jobId || next.traceStatus !== 'PAUSED') {
+        this.resumeError = null
+      }
 
         // 每次推送都要更新；清理图片只在任务变化时执行
         this.snapshot = next
@@ -66,7 +78,7 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
     },
 
     async submitDesktopScreenshot(apiKey: string, url: string) {
-      if (this.submitting || this.pendingHandoffJob !== null || this.creationUncertain || this.clearing) return
+      if (this.submitting || this.pendingHandoffJob !== null || this.creationUncertain || this.clearing || this.resuming) return
 
       const desktop = window.nexusDesktop
       if (!desktop) {
@@ -178,7 +190,7 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
     },
 
     async clearCurrentTask(){
-      if (this.clearing || this.submitting) return
+      if (this.clearing || this.submitting || this.resuming) return
 
       if(this.pendingHandoffJob !== null || this.creationUncertain === true){
         this.clearError = "保护中"
@@ -212,6 +224,54 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
         }
       }finally {
         this.clearing = false
+      }
+    },
+
+    async resumeCurrentTask(apiKey: string){
+      if (this.resuming || this.submitting || this.clearing) return
+      if (this.pendingHandoffJob !== null || this.creationUncertain) return
+
+      const jobId = this.snapshot.jobId
+
+      if (!jobId || this.snapshot.traceStatus !== 'PAUSED') return
+
+      const key = apiKey.trim()
+
+      if (!key) {
+        this.resumeError = '请输入该任务使用的完整 API Key'
+        return
+      }
+
+      const desktop = window.nexusDesktop
+
+      if (typeof desktop?.startScreenshotTracking !== 'function') {
+        this.resumeError = '桌面恢复查询功能不可用'
+        return
+      }
+
+      this.resuming = true
+      this.resumeError = null
+
+      try {
+        const result = await desktop.startScreenshotTracking({
+          jobId,
+          apiKey: key,
+        })
+
+        const stillPaused =
+          this.snapshot.jobId === jobId &&
+          this.snapshot.traceStatus === 'PAUSED'
+
+        if(result.status === 'failed' && stillPaused){
+          this.resumeError = '恢复查询请求未成功，请检查 API Key 后重试'
+          return
+        }
+      }catch {
+        if(this.snapshot.jobId === jobId && this.snapshot.traceStatus === 'PAUSED'){
+          this.resumeError = '恢复结果暂未确认，请查看当前状态后重试'
+        }
+      }finally {
+        this.resuming = false
       }
     }
   },

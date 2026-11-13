@@ -19,6 +19,7 @@ type Control = {
   subscriptions: number
   results: { jobId: string; resolve: (value: GetScreenshotResult) => void; reject: () => void }[]
   stopResults: { resolve: (value: StopScreenshotTrackingResult) => void; reject: () => void }[]
+  resumeResults: { jobId: string; resolve: (value: StartScreenshotTrackingResult) => void; reject: () => void }[]
 }
 type TestWindow = Window & { __desktopDisplay: Control }
 
@@ -26,7 +27,7 @@ async function setup(page: Page, mode: Control['mode'] = 'ok') {
   await page.addInitScript(mode => {
     const c: Control = {
       snapshot: { jobId: null, latestJob: null, traceStatus: 'IDLE', queryFailedInfo: null },
-      listener: null, mode, resolveStart: null, starts: 0, stops: 0, subscriptions: 0, results: [], stopResults: [],
+      listener: null, mode, resolveStart: null, starts: 0, stops: 0, subscriptions: 0, results: [], stopResults: [], resumeResults: [],
     }
     ;(window as unknown as TestWindow).__desktopDisplay = c
     window.nexusDesktop = {
@@ -47,6 +48,11 @@ async function setup(page: Page, mode: Control['mode'] = 'ok') {
       },
       startScreenshotTracking: async input => {
         c.starts++
+        if (c.snapshot.jobId === input.jobId && c.snapshot.traceStatus === 'PAUSED') {
+          return new Promise((resolve, reject) => {
+            c.resumeResults.push({ jobId: input.jobId, resolve, reject: () => reject(new Error('Controlled resume rejection')) })
+          })
+        }
         if (c.mode === 'fail') return { status: 'failed', code: 'BUSY' }
         if (c.mode === 'reject') throw new Error('Controlled IPC rejection')
         c.snapshot = { jobId: input.jobId, latestJob: null, traceStatus: 'POLLING', queryFailedInfo: null }
@@ -73,6 +79,15 @@ async function setup(page: Page, mode: Control['mode'] = 'ok') {
   await page.getByLabel('API Key', { exact: true }).fill('PLAYWRIGHT_ONLY_MACHINE_KEY')
   await page.locator('#playground-screenshot-url').fill('https://zhuanlan.zhihu.com/p/123456')
   await page.getByRole('button', { name: '创建异步任务', exact: true }).click()
+  // click完成不代表POST和接手已完成；后续模拟推送必须发生在首次接手之后。
+  await expect.poll(() => page.evaluate(() => (window as unknown as TestWindow).__desktopDisplay.starts)).toBe(1)
+  if (mode !== 'hold') {
+    await expect.poll(() => page.evaluate(async () => {
+      const modulePath = '/src/stores/screenshotTrackingStore.ts'
+      const { useScreenshotTrackingStore } = await import(modulePath)
+      return useScreenshotTrackingStore().submitting
+    })).toBe(false)
+  }
   return { posts: () => posts, rendererQueries: () => rendererQueries }
 }
 
@@ -328,4 +343,126 @@ test('取图中清理，迟到PNG不恢复预览', async ({ page }) => {
   await finishPng(page, 0)
   await expect(page.getByRole('button', { name: '创建异步任务', exact: true })).toBeEnabled()
   await expect(page.getByAltText('网页截图预览', { exact: true })).toHaveCount(0)
+})
+
+async function pause(page: Page) {
+  await page.evaluate(() => {
+    const c = (window as unknown as TestWindow).__desktopDisplay
+    c.snapshot = { ...c.snapshot, traceStatus: 'PAUSED', queryFailedInfo: '查询任务超时，请重试。' }
+    c.listener?.(c.snapshot)
+  })
+}
+
+async function finishResume(page: Page, kind: 'ok' | 'fail' | 'reject', index = 0) {
+  await page.evaluate(({ kind, index }) => {
+    const request = (window as unknown as TestWindow).__desktopDisplay.resumeResults[index]!
+    if (kind === 'reject') request.reject()
+    else request.resolve(kind === 'fail' ? { status: 'failed', code: 'FORBIDDEN' } : {
+      status: 'ok', snapshot: { jobId: request.jobId, latestJob: null, traceStatus: 'POLLING', queryFailedInfo: null },
+    })
+  }, { kind, index })
+}
+
+test('恢复去重且与提交清理互斥，终态推送先到仍自动取PNG，迟到返回不覆盖', async ({ page }) => {
+  const counts = await setup(page)
+  // 首次查询就暂停，latestJob仍为空，也必须能恢复。
+  await pause(page)
+  await page.getByRole('button', { name: '继续查询', exact: true }).click()
+  await expect(page.getByRole('button', { name: '正在恢复查询…', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: '清理当前任务', exact: true })).toBeDisabled()
+  await page.evaluate(async () => {
+    const modulePath = '/src/stores/screenshotTrackingStore.ts'
+    const { useScreenshotTrackingStore } = await import(modulePath)
+    const store = useScreenshotTrackingStore()
+    await store.resumeCurrentTask('PLAYWRIGHT_ONLY_MACHINE_KEY')
+    await store.submitDesktopScreenshot('PLAYWRIGHT_ONLY_MACHINE_KEY', 'https://zhuanlan.zhihu.com/p/123456')
+    await store.clearCurrentTask()
+  })
+  expect(await page.evaluate(() => {
+    const c = (window as unknown as TestWindow).__desktopDisplay
+    return { starts: c.starts, stops: c.stops, resumes: c.resumeResults.length }
+  })).toEqual({ starts: 2, stops: 0, resumes: 1 })
+  expect(counts.posts()).toBe(1)
+  await push(page, 'SUCCEEDED')
+  expect(await resultCount(page)).toBe(1)
+  await finishPng(page, 0)
+  await expect(page.getByAltText('网页截图预览', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '正在恢复查询…', exact: true })).toBeDisabled()
+  await finishResume(page, 'ok')
+  await expect(page.getByRole('button', { name: '正在恢复查询…', exact: true })).toHaveCount(0)
+  await expect(page.locator('.playground-response')).toContainText('截图任务已完成')
+  await push(page, 'SUCCEEDED')
+  expect(await resultCount(page)).toBe(1)
+})
+
+test('恢复返回先到不应用返回快照，等待推送才进入查询中和终态', async ({ page }) => {
+  await setup(page)
+  await push(page, 'RUNNING')
+  await pause(page)
+  await page.getByRole('button', { name: '继续查询', exact: true }).click()
+  await finishResume(page, 'ok')
+  await expect(page.getByRole('button', { name: '继续查询', exact: true })).toBeEnabled()
+  await expect(page.locator('.playground-response')).toContainText('查询任务超时，请重试。')
+  expect(await resultCount(page)).toBe(0)
+  await push(page, 'RUNNING')
+  await expect(page.getByRole('button', { name: '继续查询', exact: true })).toHaveCount(0)
+  await expect(page.locator('.playground-response')).not.toContainText('查询任务超时，请重试。')
+  await push(page, 'SUCCEEDED')
+  await finishPng(page, 0)
+  await expect(page.getByAltText('网页截图预览', { exact: true })).toBeVisible()
+})
+
+for (const failure of ['fail', 'reject'] as const) {
+  test(`恢复${failure}保留暂停任务，允许重试且新推送清除恢复错误`, async ({ page }) => {
+    const counts = await setup(page)
+    await pause(page)
+    await page.getByRole('button', { name: '继续查询', exact: true }).click()
+    await finishResume(page, failure)
+    const message = failure === 'fail'
+      ? '恢复查询请求未成功，请检查 API Key 后重试'
+      : '恢复结果暂未确认，请查看当前状态后重试'
+    await expect(page.getByText(message, { exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: '继续查询', exact: true })).toBeEnabled()
+    await expect(page.locator('.playground-response')).toContainText(jobId)
+    await page.getByRole('button', { name: '继续查询', exact: true }).click()
+    await push(page, 'RUNNING')
+    await expect(page.getByText(message, { exact: true })).toHaveCount(0)
+    await finishResume(page, 'ok', 1)
+    expect(counts.posts()).toBe(1)
+  })
+
+  test(`成功推送先到，恢复调用${failure}不误报失败或覆盖终态`, async ({ page }) => {
+    await setup(page)
+    await pause(page)
+    await page.getByRole('button', { name: '继续查询', exact: true }).click()
+    await push(page, 'SUCCEEDED')
+    await finishResume(page, failure)
+    await finishPng(page, 0)
+    await expect(page.locator('.playground-response')).toContainText('截图任务已完成')
+    await expect(page.getByAltText('网页截图预览', { exact: true })).toBeVisible()
+    await expect(page.getByText(/恢复查询请求未成功|恢复结果暂未确认/)).toHaveCount(0)
+  })
+}
+
+test('恢复要求重新填写Key，空值不调用桥；恢复错误在清理时清除', async ({ page }) => {
+  await setup(page)
+  await pause(page)
+  await page.getByLabel('API Key', { exact: true }).fill('   ')
+  await page.getByRole('button', { name: '继续查询', exact: true }).click()
+  await expect(page.getByText('请输入该任务使用的完整 API Key', { exact: true })).toBeVisible()
+  expect(await page.evaluate(() => (window as unknown as TestWindow).__desktopDisplay.resumeResults.length)).toBe(0)
+  await page.getByRole('button', { name: '清理当前任务', exact: true }).click()
+  await publishIdle(page)
+  await finishStop(page, 'ok')
+  await expect(page.getByText('请输入该任务使用的完整 API Key', { exact: true })).toHaveCount(0)
+})
+
+test('任务已变化，旧恢复请求的异常不挂到新任务', async ({ page }) => {
+  await setup(page)
+  await pause(page)
+  await page.getByRole('button', { name: '继续查询', exact: true }).click()
+  await push(page, 'RUNNING', secondJobId)
+  await finishResume(page, 'reject')
+  await expect(page.locator('.playground-response')).toContainText(secondJobId)
+  await expect(page.getByText('恢复结果暂未确认，请查看当前状态后重试', { exact: true })).toHaveCount(0)
 })

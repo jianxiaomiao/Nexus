@@ -89,6 +89,7 @@ const requestLoading = computed(() =>
 const desktopSubmissionBlocked = computed(() =>
     desktopAsync.value && (
       trackingStore.clearing ||
+      trackingStore.resuming ||
       trackingStore.pendingHandoffJob !== null ||
       trackingStore.creationUncertain ||
       desktopSnapshot.value.traceStatus !== 'IDLE'
@@ -584,12 +585,13 @@ onBeforeUnmount(() => {
         <div v-if="createdLink" class="playground-created-link"><p class="playground-eyebrow">SHORT LINK CREATED</p><h3>短链接已创建</h3><p>复制后即可分享；到期或禁用后将无法跳转。</p><code>{{ publicShortLinkUrl(createdLink.shortCode) }}</code><div class="playground-created-actions"><el-button type="primary" @click="copyShortUrl(createdLink.shortCode)">复制短地址</el-button><RouterLink :to="{ name: 'short-links', query: { apiKeyId: createdLink.apiKeyId } }">管理这把 Key 的短链 <el-icon aria-hidden="true"><ArrowRight /></el-icon></RouterLink></div></div>
         <div v-if="listedLinks" class="playground-link-list"><h3>这把 Key 的短链接</h3><p v-if="listedLinks.length === 0" class="playground-list-empty">这把 Key 还没有短链接。</p><div v-for="link in listedLinks" :key="link.id" class="playground-link-item"><strong>{{ link.name }}</strong><small>ID {{ link.id }} · {{ link.status === 1 ? '已禁用' : new Date(link.expiresAt).getTime() <= Date.now() ? '已到期' : '自身启用' }} · 到期 {{ formatBeijingTime(link.expiresAt) }}</small><a :href="publicShortLinkUrl(link.shortCode)" target="_blank" rel="noopener noreferrer">{{ publicShortLinkUrl(link.shortCode) }}</a><div class="playground-link-actions"><el-button size="small" @click="copyShortUrl(link.shortCode)">复制短地址</el-button><a :href="publicShortLinkUrl(link.shortCode)" target="_blank" rel="noopener noreferrer">打开短地址 <el-icon aria-hidden="true"><ArrowRight /></el-icon></a></div></div></div>
         <div v-if="desktopAsync" class="playground-async-screenshot-result">
+          <el-alert v-if="trackingStore.resumeError" type="warning" show-icon :closable="false" :title="trackingStore.resumeError" />
           <el-alert v-if="trackingStore.clearError" type="warning" show-icon :closable="false" :title="trackingStore.clearError" />
           <el-alert v-if="trackingStore.submissionError" type="warning" :closable="false" :title="trackingStore.submissionError" />
           <div v-if="desktopSnapshot.jobId !== null || trackingStore.clearing" class="playground-created-actions">
             <el-button
               :loading="trackingStore.clearing"
-              :disabled="trackingStore.clearing || trackingStore.submitting || trackingStore.pendingHandoffJob !== null || trackingStore.creationUncertain"
+              :disabled="trackingStore.clearing || trackingStore.submitting || trackingStore.resuming || trackingStore.pendingHandoffJob !== null || trackingStore.creationUncertain"
               @click="trackingStore.clearCurrentTask()"
             >{{ trackingStore.clearing ? '正在清理…' : '清理当前任务' }}</el-button>
             <span>清理本地跟踪和预览，不取消后端任务。</span>
@@ -609,6 +611,16 @@ onBeforeUnmount(() => {
             <p v-if="desktopSnapshot.queryFailedInfo" role="alert">{{ desktopSnapshot.queryFailedInfo }}</p>
           </template>
           <p v-else-if="!trackingStore.submitting && !trackingStore.pendingHandoffJob && !trackingStore.submissionError">创建异步任务后，切换页面仍会继续跟踪。</p>
+          <div v-if="desktopSnapshot.traceStatus === 'PAUSED' || trackingStore.resuming" class="playground-created-actions">
+            <el-button
+              type="primary"
+              plain
+              :loading="trackingStore.resuming"
+              :disabled="trackingStore.resuming || trackingStore.clearing || trackingStore.submitting || trackingStore.pendingHandoffJob !== null || trackingStore.creationUncertain"
+              @click="trackingStore.resumeCurrentTask(apiKey)"
+            >{{ trackingStore.resuming ? '正在恢复查询…' : '继续查询' }}</el-button>
+            <span>使用上方填写的任务所属 API Key，继续查询原任务，不会重新创建截图。</span>
+          </div>
           <p v-if="trackingStore.resultLoading" role="status">正在获取 PNG 图片…</p>
           <el-alert
             v-else-if="trackingStore.resultError"

@@ -2,6 +2,12 @@
 
 当前复用 `../nexus-console` 的 Vue 源码与 Vite 配置，仅支持本地开发模式。Electron Main 创建窗口并加载 Vue；已接入窗口状态文件持久化，尚未实现安装包、独立构建入口、登录续期和任务通知。
 
+## 真实暂停恢复验收（2026-11-13）
+
+`node scripts/test-resume-acceptance.cjs`在隔离userData的真实Electron中加载正式Main、Preload、Vue和Store，连接本地真实8080。用户在窗口登录，先粘贴完整截图URL，最后一次性粘贴Key；无需手动提交。创建请求由Renderer/Vite到后端，仅Main第一次状态查询被测试入口注入503，后续查询和PNG获取均为真实后端响应。脚本自动点击继续查询，完成后清理本地跟踪和测试登录存储，并自动关闭隔离窗口。真实后端任务不会因本地清理被取消；不自动重试创建。
+
+本轮验收通过：创建POST一次，Main请求全部使用同一个Job ID，状态POLLING→PAUSED→POLLING/RUNNING→TERMINAL/SUCCEEDED；恢复后4次真实状态查询和一次真实PNG获取均200。Renderer没有发起旧状态/结果查询；PNG为79999字节、解码宽度1280，与后端记录的长度和SHA-256一致。证据为忽略目录`.runtime/resume-acceptance-wVsZde/`中的evidence.json、paused.png、completed.png；未记录密码、Key或JWT。下方2026-11-12和此前条目保留对应阶段的验证边界，当前Playground已接Store与状态/取图/清理/恢复界面。
+
 ## Main 截图跟踪（2026-11-12）
 
 Renderer根部同步已接入：开发者实现Pinia screenshotTrackingStore.snapshot、initScreenshotTracking和App挂载/卸载接入；先订阅再读取，以推送计数拒绝迟到的首次读取，清理时标记disposed并取消订阅，不停止Main。`e2e/trackingInitialization.spec.ts`定向5/5通过，覆盖首次读取、路由切换不重复订阅、推送更新、旧读取不覆盖新推送、真实App卸载后迟到读取/已排队回调不更新、没有桌面桥的Web兼容。测试使用真实App/Store和受控桌面桥，不是本轮真实Electron验收。前端与E2E类型检查通过；E2E配置补齐与前端一致的@别名以引用实际类型。Playground提交与展示尚未切换到Store，通知未实现。

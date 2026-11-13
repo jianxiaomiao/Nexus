@@ -12,6 +12,10 @@
 
 ## 多端规划（2026-11-10）
 
+- 真实暂停恢复验收已通过（2026-11-13）：Agent运行`nexus-desktop/scripts/test-resume-acceptance.cjs`，隔离Electron userData，使用正式Main/Preload/Vue/Store，用户在隔离窗口登录并填写真实Key与URL；真实8080创建POST仅一次。测试入口只让Main第一次状态查询返回503，确认PAUSED和继续查询按钮，随后自动恢复，所有请求沿用同一Job ID。后续4次真实查询200并到SUCCEEDED，真实PNG结果200且仅获取一次；79999字节、解码宽1280，长度与SHA-256匹配后端元数据。Renderer旧轮询/结果请求数0。证据在`.runtime/resume-acceptance-wVsZde/`。脚本成功后自动清理本地跟踪和测试登录存储、关闭隔离窗口（用户因此询问窗口消失，已核实正常退出码0）。真实后端任务按原生命周期保留，不重新创建；尚未确定当前后端使用的数据库环境，不将本次验收标记为nexus_test数据库测试。正式业务实现未改动；pendingHandoffJob恢复、creationUncertain处理和系统通知仍待实现。本条更新下方“真实暂停恢复待验收”状态。
+
+- 最新恢复检查点（2026-11-13）：开发者人工验收清理后卡片/图片消失、再创建Job ID变化且新图正常。随后实现Store.resumeCurrentTask(apiKey)、resuming/resumeError和提交/清理互斥；仅PAUSED恢复，复用start桥传入原任务Job ID与页面Key，不重新POST创建，返回快照不写回Store。applySnapshot的图片清理仅在任务ID变化执行，恢复错误在任务变化或离开PAUSED时清除。Agent未改Store业务代码，仅接继续查询/恢复中按钮、错误和Key说明，补上界面互斥。源码/E2E类型检查通过；桌面展示及根部初始化定向28/28通过（真实Vue/Store，模拟桥/HTTP），包含无latestJob的首次暂停、重复恢复去重、与提交/清理互斥、返回先到/终态推送先到、恢复失败和异常后重试、成功推送后异常不误报、旧任务异常隔离及恢复返回前自动取PNG且重复终态不重取。首轮测试27/28，失败为脚本在首次接手完成前注入暂停；补齐等待后完整重跑28/28。真实Electron暂停→恢复→PNG仍待人工验收。恢复未接手任务pendingHandoffJob、创建结果不确定creationUncertain和系统通知仍未实现。本条为下方历史状态的更新。
+
 - 最新清理检查点（2026-11-13）：开发者实现Store.clearCurrentTask、clearing/clearError及提交/取图入口保护；停止返回值仅确认、不写回快照，IDLE推送复用applySnapshot清图与使旧请求失效，失败保留当前状态，已收IDLE后Promise拒绝不误报失败。Agent仅接清理按钮、提示和界面禁用条件，未改Store业务代码。源码/E2E类型检查通过；desktopScreenshotDisplay与trackingInitialization共20/20通过（真实Vue/Store，模拟桥/HTTP），包括IDLE先到和返回先到、失败/异常后重试、已收IDLE后异常、取图中清理拒绝迟到PNG，以及清理完成后第二次POST获得不同Job ID并预览新PNG。真实Electron清理后再创建仍待开发者人工验收。未解决pendingHandoffJob或creationUncertain：清理不解除其防重复提交保护；恢复接手和系统通知仍待实现。本条更新下方此前“页面清理任务尚未接入”的历史状态。
 
 - 最新取图检查点（2026-11-13）：开发者确认真实Electron切换Applications返回后状态恢复并到达完成；随后通过真实Preload/IPC收到80105字节ArrayBuffer及no-store。开发者实现Main的screenshot-result:get（独立取消、8秒超时、流式5MiB上限、PNG签名、run身份校验）及Store自动取图、失败手动重试、请求版本失效。Agent本轮仅接页面加载/重试/预览模板与预览保留说明插槽，未改Store业务代码。源码/E2E类型检查通过；桌面展示、根部订阅和选定Web截图回归共20/20通过，真实Vue/Store配模拟桥/HTTP；新增验证含重复成功推送及直接调用去重、失败不自动重试、手动重试成功、PNG真实解码、离页预览恢复不重取，以及清理后同Job ID旧成功/失败/异常和finally不覆盖新请求。2026-11-13开发者随后反馈真实Electron自动取图、预览、离页返回、放大、取消保存和保存全部正常，并确认返回页面不会重新获取图片；这是开发者人工验收反馈，非Agent新增端到端测试。恢复接手、页面清理任务和系统通知仍未接入。下方2026-11-12条目为此前检查点。
