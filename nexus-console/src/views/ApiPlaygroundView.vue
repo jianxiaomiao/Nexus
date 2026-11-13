@@ -88,6 +88,7 @@ const requestLoading = computed(() =>
 
 const desktopSubmissionBlocked = computed(() =>
     desktopAsync.value && (
+      trackingStore.clearing ||
       trackingStore.pendingHandoffJob !== null ||
       trackingStore.creationUncertain ||
       desktopSnapshot.value.traceStatus !== 'IDLE'
@@ -583,7 +584,16 @@ onBeforeUnmount(() => {
         <div v-if="createdLink" class="playground-created-link"><p class="playground-eyebrow">SHORT LINK CREATED</p><h3>短链接已创建</h3><p>复制后即可分享；到期或禁用后将无法跳转。</p><code>{{ publicShortLinkUrl(createdLink.shortCode) }}</code><div class="playground-created-actions"><el-button type="primary" @click="copyShortUrl(createdLink.shortCode)">复制短地址</el-button><RouterLink :to="{ name: 'short-links', query: { apiKeyId: createdLink.apiKeyId } }">管理这把 Key 的短链 <el-icon aria-hidden="true"><ArrowRight /></el-icon></RouterLink></div></div>
         <div v-if="listedLinks" class="playground-link-list"><h3>这把 Key 的短链接</h3><p v-if="listedLinks.length === 0" class="playground-list-empty">这把 Key 还没有短链接。</p><div v-for="link in listedLinks" :key="link.id" class="playground-link-item"><strong>{{ link.name }}</strong><small>ID {{ link.id }} · {{ link.status === 1 ? '已禁用' : new Date(link.expiresAt).getTime() <= Date.now() ? '已到期' : '自身启用' }} · 到期 {{ formatBeijingTime(link.expiresAt) }}</small><a :href="publicShortLinkUrl(link.shortCode)" target="_blank" rel="noopener noreferrer">{{ publicShortLinkUrl(link.shortCode) }}</a><div class="playground-link-actions"><el-button size="small" @click="copyShortUrl(link.shortCode)">复制短地址</el-button><a :href="publicShortLinkUrl(link.shortCode)" target="_blank" rel="noopener noreferrer">打开短地址 <el-icon aria-hidden="true"><ArrowRight /></el-icon></a></div></div></div>
         <div v-if="desktopAsync" class="playground-async-screenshot-result">
+          <el-alert v-if="trackingStore.clearError" type="warning" show-icon :closable="false" :title="trackingStore.clearError" />
           <el-alert v-if="trackingStore.submissionError" type="warning" :closable="false" :title="trackingStore.submissionError" />
+          <div v-if="desktopSnapshot.jobId !== null || trackingStore.clearing" class="playground-created-actions">
+            <el-button
+              :loading="trackingStore.clearing"
+              :disabled="trackingStore.clearing || trackingStore.submitting || trackingStore.pendingHandoffJob !== null || trackingStore.creationUncertain"
+              @click="trackingStore.clearCurrentTask()"
+            >{{ trackingStore.clearing ? '正在清理…' : '清理当前任务' }}</el-button>
+            <span>清理本地跟踪和预览，不取消后端任务。</span>
+          </div>
           <p v-if="trackingStore.submitting">正在创建任务并交给桌面端跟踪…</p>
           <p v-if="trackingStore.pendingHandoffJob">已创建任务：{{ trackingStore.pendingHandoffJob.jobId }}。尚未确认接手，请勿重复创建。</p>
           <ScreenshotJobStatus
@@ -608,7 +618,7 @@ onBeforeUnmount(() => {
             title="PNG 图片获取失败"
             description="任务状态不受影响。可以重试获取图片；若后端结果已过期，则无法重新获取。"
           >
-            <el-button type="primary" plain size="small" @click="trackingStore.loadScreenshotResult()">重试获取 PNG</el-button>
+            <el-button type="primary" plain size="small" :disabled="trackingStore.clearing" @click="trackingStore.loadScreenshotResult()">重试获取 PNG</el-button>
           </el-alert>
           <ScreenshotPreview
             v-if="trackingStore.resultImage && trackingStore.resultJobId === desktopSnapshot.jobId"

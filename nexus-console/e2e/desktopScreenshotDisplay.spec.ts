@@ -1,9 +1,10 @@
 import { expect, test, type Page } from '@playwright/test'
 import type { Trace } from '../src/api/Trace'
-import type { GetScreenshotResult, ScreenshotTrackingListener, StartScreenshotTrackingResult } from '../src/types/desktop'
+import type { GetScreenshotResult, ScreenshotTrackingListener, StartScreenshotTrackingResult, StopScreenshotTrackingResult } from '../src/types/desktop'
 import { installMockApi, signIn } from './support/mockApi'
 
 const jobId = '11111111-2222-4333-8444-555555555555'
+const secondJobId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
 const created = {
   jobId, status: 'QUEUED', attemptCount: 0,
   createdAt: '2026-11-12T00:00:00Z', updatedAt: '2026-11-12T00:00:00Z',
@@ -17,6 +18,7 @@ type Control = {
   stops: number
   subscriptions: number
   results: { jobId: string; resolve: (value: GetScreenshotResult) => void; reject: () => void }[]
+  stopResults: { resolve: (value: StopScreenshotTrackingResult) => void; reject: () => void }[]
 }
 type TestWindow = Window & { __desktopDisplay: Control }
 
@@ -24,7 +26,7 @@ async function setup(page: Page, mode: Control['mode'] = 'ok') {
   await page.addInitScript(mode => {
     const c: Control = {
       snapshot: { jobId: null, latestJob: null, traceStatus: 'IDLE', queryFailedInfo: null },
-      listener: null, mode, resolveStart: null, starts: 0, stops: 0, subscriptions: 0, results: [],
+      listener: null, mode, resolveStart: null, starts: 0, stops: 0, subscriptions: 0, results: [], stopResults: [],
     }
     ;(window as unknown as TestWindow).__desktopDisplay = c
     window.nexusDesktop = {
@@ -33,7 +35,12 @@ async function setup(page: Page, mode: Control['mode'] = 'ok') {
         c.results.push({ jobId, resolve, reject: () => reject(new Error('Controlled download failure')) })
       }),
       readScreenshotTracking: async () => ({ status: 'ok', snapshot: c.snapshot }),
-      stopScreenshotTracking: async () => { c.stops++; return { status: 'ok', snapshot: c.snapshot } },
+      stopScreenshotTracking: () => {
+        c.stops++
+        return new Promise((resolve, reject) => {
+          c.stopResults.push({ resolve, reject: () => reject(new Error('Controlled stop rejection')) })
+        })
+      },
       onScreenshotTrackingUpdated: listener => {
         c.subscriptions++; c.listener = listener
         return () => { c.listener = null }
@@ -54,7 +61,7 @@ async function setup(page: Page, mode: Control['mode'] = 'ok') {
   let rendererQueries = 0
   await page.route('**/v1/web/screenshot-jobs', async route => {
     posts++
-    await route.fulfill({ status: 202, json: { code: 'SUCCESS', message: 'created', data: created } })
+    await route.fulfill({ status: 202, json: { code: 'SUCCESS', message: 'created', data: { ...created, jobId: posts === 1 ? jobId : secondJobId } } })
   })
   await page.route('**/v1/web/screenshot-jobs/*', async route => {
     rendererQueries++
@@ -69,7 +76,7 @@ async function setup(page: Page, mode: Control['mode'] = 'ok') {
   return { posts: () => posts, rendererQueries: () => rendererQueries }
 }
 
-async function push(page: Page, status: 'RUNNING' | 'SUCCEEDED') {
+async function push(page: Page, status: 'RUNNING' | 'SUCCEEDED', id = jobId) {
   await page.evaluate(({ created, status }) => {
     const c = (window as unknown as TestWindow).__desktopDisplay
     c.snapshot = {
@@ -81,7 +88,7 @@ async function push(page: Page, status: 'RUNNING' | 'SUCCEEDED') {
       },
     }
     c.listener?.(c.snapshot)
-  }, { created, status })
+  }, { created: { ...created, jobId: id }, status })
 }
 
 test('首次查询等待、离开页面后推送及返回展示，不启动Renderer轮询', async ({ page }) => {
@@ -220,3 +227,105 @@ for (const late of ['success', 'failure', 'rejection'] as const) {
     await expect(page.getByAltText('网页截图预览', { exact: true })).toBeVisible()
   })
 }
+
+async function publishIdle(page: Page) {
+  await page.evaluate(() => {
+    const c = (window as unknown as TestWindow).__desktopDisplay
+    c.snapshot = { jobId: null, latestJob: null, traceStatus: 'IDLE', queryFailedInfo: null }
+    c.listener?.(c.snapshot)
+  })
+}
+
+async function finishStop(page: Page, kind: 'ok' | 'fail' | 'reject', index = 0) {
+  await page.evaluate(({ kind, index }) => {
+    const request = (window as unknown as TestWindow).__desktopDisplay.stopResults[index]!
+    if (kind === 'reject') request.reject()
+    else request.resolve(kind === 'fail' ? { status: 'failed', code: 'FORBIDDEN' } : {
+      status: 'ok', snapshot: { jobId: null, latestJob: null, traceStatus: 'IDLE', queryFailedInfo: null },
+    })
+  }, { kind, index })
+}
+
+test('IDLE先到清空图片，但停止返回前阻止提交；返回后可创建并预览新任务', async ({ page }) => {
+  const counts = await setup(page)
+  await push(page, 'SUCCEEDED')
+  await finishPng(page, 0)
+  await expect(page.getByAltText('网页截图预览', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '清理当前任务', exact: true }).click()
+  await publishIdle(page)
+  await expect(page.getByAltText('网页截图预览', { exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '正在清理…', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: '创建异步任务', exact: true })).toBeDisabled()
+  // 直接调用也应被Store保护，不能只依赖按钮禁用。
+  await page.evaluate(async () => {
+    const modulePath = '/src/stores/screenshotTrackingStore.ts'
+    const { useScreenshotTrackingStore } = await import(modulePath)
+    const store = useScreenshotTrackingStore()
+    await store.submitDesktopScreenshot('PLAYWRIGHT_ONLY_MACHINE_KEY', 'https://zhuanlan.zhihu.com/p/123456')
+    await store.clearCurrentTask()
+    await store.loadScreenshotResult()
+  })
+  expect(counts.posts()).toBe(1)
+  expect(await page.evaluate(() => (window as unknown as TestWindow).__desktopDisplay.stops)).toBe(1)
+  await finishStop(page, 'ok')
+  await expect(page.getByRole('button', { name: '创建异步任务', exact: true })).toBeEnabled()
+  await page.getByRole('button', { name: '创建异步任务', exact: true }).click()
+  await expect(page.locator('.playground-response')).toContainText(secondJobId)
+  expect(counts.posts()).toBe(2)
+  await push(page, 'SUCCEEDED', secondJobId)
+  await finishPng(page, 1)
+  await expect(page.getByAltText('网页截图预览', { exact: true })).toBeVisible()
+  expect(counts.rendererQueries()).toBe(0)
+})
+
+test('停止返回先到不应用返回快照，保留图片直到IDLE推送', async ({ page }) => {
+  await setup(page)
+  await push(page, 'SUCCEEDED')
+  await finishPng(page, 0)
+  await page.getByRole('button', { name: '清理当前任务', exact: true }).click()
+  await finishStop(page, 'ok')
+  await expect(page.getByRole('button', { name: '清理当前任务', exact: true })).toBeEnabled()
+  await expect(page.getByAltText('网页截图预览', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '创建异步任务', exact: true })).toBeDisabled()
+  await publishIdle(page)
+  await expect(page.getByAltText('网页截图预览', { exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '创建异步任务', exact: true })).toBeEnabled()
+})
+
+for (const failure of ['fail', 'reject'] as const) {
+  test(`清理${failure}保留任务图片，释放加载状态并允许重试`, async ({ page }) => {
+    await setup(page)
+    await push(page, 'SUCCEEDED')
+    await finishPng(page, 0)
+    await page.getByRole('button', { name: '清理当前任务', exact: true }).click()
+    await finishStop(page, failure)
+    await expect(page.getByText(failure === 'fail' ? '清理请求被拒绝，请重试' : '清理结果暂未确认，请查看当前状态后重试', { exact: true })).toBeVisible()
+    await expect(page.getByAltText('网页截图预览', { exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: '创建异步任务', exact: true })).toBeDisabled()
+    await page.getByRole('button', { name: '清理当前任务', exact: true }).click()
+    await publishIdle(page)
+    await finishStop(page, 'ok', 1)
+    await expect(page.getByRole('button', { name: '创建异步任务', exact: true })).toBeEnabled()
+    await expect(page.getByAltText('网页截图预览', { exact: true })).toHaveCount(0)
+  })
+}
+
+test('IDLE已推送但停止Promise拒绝，保留清理结果不误报失败', async ({ page }) => {
+  await setup(page)
+  await page.getByRole('button', { name: '清理当前任务', exact: true }).click()
+  await publishIdle(page)
+  await finishStop(page, 'reject')
+  await expect(page.getByRole('button', { name: '创建异步任务', exact: true })).toBeEnabled()
+  await expect(page.getByText('清理结果暂未确认，请查看当前状态后重试', { exact: true })).toHaveCount(0)
+})
+
+test('取图中清理，迟到PNG不恢复预览', async ({ page }) => {
+  await setup(page)
+  await push(page, 'SUCCEEDED')
+  await page.getByRole('button', { name: '清理当前任务', exact: true }).click()
+  await publishIdle(page)
+  await finishStop(page, 'ok')
+  await finishPng(page, 0)
+  await expect(page.getByRole('button', { name: '创建异步任务', exact: true })).toBeEnabled()
+  await expect(page.getByAltText('网页截图预览', { exact: true })).toHaveCount(0)
+})

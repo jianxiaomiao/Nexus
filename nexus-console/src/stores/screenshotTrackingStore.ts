@@ -15,6 +15,8 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
     resultError: string | null     // 初始 null
     resultCacheControl: string | null // 初始 null
     resultRequestVersion: number   // 初始 0
+    clearing: boolean       // 初始 false
+    clearError: string | null // 初始 null
   } => ({
     snapshot: {
       jobId: null,
@@ -26,12 +28,16 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
     pendingHandoffJob: null,
     submissionError: null,
     creationUncertain: false,
+
     resultImage: null,       // 初始 null
     resultJobId: null,     // 初始 null
     resultLoading: false,        // 初始 false
     resultError: null,     // 初始 null
     resultCacheControl: null, // 初始 null
-    resultRequestVersion: 0   // 初始 0
+    resultRequestVersion: 0,   // 初始 0
+
+    clearing: false,
+    clearError: null
   }),
 
 
@@ -60,7 +66,7 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
     },
 
     async submitDesktopScreenshot(apiKey: string, url: string) {
-      if (this.submitting || this.pendingHandoffJob !== null || this.creationUncertain) return
+      if (this.submitting || this.pendingHandoffJob !== null || this.creationUncertain || this.clearing) return
 
       const desktop = window.nexusDesktop
       if (!desktop) {
@@ -119,6 +125,8 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
     },
 
     async loadScreenshotResult(){
+      if (this.clearing) return
+
       const desktop = window.nexusDesktop
       if (!desktop) {
         this.resultError = '桌面功能不可用'
@@ -167,9 +175,44 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
         if (version === this.resultRequestVersion && this.snapshot.jobId === jobId)
           this.resultLoading = false
       }
+    },
 
+    async clearCurrentTask(){
+      if (this.clearing || this.submitting) return
 
+      if(this.pendingHandoffJob !== null || this.creationUncertain === true){
+        this.clearError = "保护中"
+        return
+      }
 
+      if (this.snapshot.jobId === null) return
+
+      const desktop = window.nexusDesktop
+
+      if (typeof desktop?.stopScreenshotTracking !== 'function') {
+        this.clearError = '桌面清理功能不可用'
+        return
+      }
+
+      this.clearing = true
+      this.clearError = null
+
+      try{
+        const result = await desktop.stopScreenshotTracking()
+
+        if(result.status === 'failed'){
+          this.clearError = '清理请求被拒绝，请重试'
+        }
+      }catch{
+        const alreadyIdle =
+          this.snapshot.jobId === null &&
+          this.snapshot.traceStatus === 'IDLE'
+        if(!alreadyIdle){
+          this.clearError = '清理结果暂未确认，请查看当前状态后重试'
+        }
+      }finally {
+        this.clearing = false
+      }
     }
   },
 })

@@ -12,6 +12,8 @@
 
 ## 多端规划（2026-11-10）
 
+- 最新清理检查点（2026-11-13）：开发者实现Store.clearCurrentTask、clearing/clearError及提交/取图入口保护；停止返回值仅确认、不写回快照，IDLE推送复用applySnapshot清图与使旧请求失效，失败保留当前状态，已收IDLE后Promise拒绝不误报失败。Agent仅接清理按钮、提示和界面禁用条件，未改Store业务代码。源码/E2E类型检查通过；desktopScreenshotDisplay与trackingInitialization共20/20通过（真实Vue/Store，模拟桥/HTTP），包括IDLE先到和返回先到、失败/异常后重试、已收IDLE后异常、取图中清理拒绝迟到PNG，以及清理完成后第二次POST获得不同Job ID并预览新PNG。真实Electron清理后再创建仍待开发者人工验收。未解决pendingHandoffJob或creationUncertain：清理不解除其防重复提交保护；恢复接手和系统通知仍待实现。本条更新下方此前“页面清理任务尚未接入”的历史状态。
+
 - 最新取图检查点（2026-11-13）：开发者确认真实Electron切换Applications返回后状态恢复并到达完成；随后通过真实Preload/IPC收到80105字节ArrayBuffer及no-store。开发者实现Main的screenshot-result:get（独立取消、8秒超时、流式5MiB上限、PNG签名、run身份校验）及Store自动取图、失败手动重试、请求版本失效。Agent本轮仅接页面加载/重试/预览模板与预览保留说明插槽，未改Store业务代码。源码/E2E类型检查通过；桌面展示、根部订阅和选定Web截图回归共20/20通过，真实Vue/Store配模拟桥/HTTP；新增验证含重复成功推送及直接调用去重、失败不自动重试、手动重试成功、PNG真实解码、离页预览恢复不重取，以及清理后同Job ID旧成功/失败/异常和finally不覆盖新请求。2026-11-13开发者随后反馈真实Electron自动取图、预览、离页返回、放大、取消保存和保存全部正常，并确认返回页面不会重新获取图片；这是开发者人工验收反馈，非Agent新增端到端测试。恢复接手、页面清理任务和系统通知仍未接入。下方2026-11-12条目为此前检查点。
 
 - 最新Renderer检查点（2026-11-12）：开发者已实现snapshot Store、根部订阅初始化、App清理和桌面提交action/页面分流。后端创建成功即保留pendingHandoffJob，Main接手失败保留Job ID；创建结果不确定以creationUncertain阻止重复POST；start返回值不覆盖推送快照。经开发者指定，Agent补上Playground桌面状态展示分支，并将按钮文字统一读取requestLoading。源码/E2E类型检查通过；trackingInitialization.spec.ts与desktopScreenshotDisplay.spec.ts受控桥接测试9/9通过，覆盖首次等待、离页推送返回恢复、接手失败/IPC异常、迟到start返回不覆盖新终态、根部读取和清理。测试使用真实Vue/Store、模拟桌面桥与HTTP，不代表真实Electron离页验收。桌面不再运行旧Renderer轮询；恢复接手、清理当前任务、PNG结果获取和通知尚未接入，真实离页恢复待开发者验证。
