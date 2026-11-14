@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 import type {Trace} from "@/api/Trace.ts";
 import {type CreatedScreenshotJob, submitScreenshotJob} from '@/api/openApi'
 
+const MAX_HANDOFF_RETRIES = 3
+
 export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore', {
   state: (): {
     snapshot: Trace,
@@ -22,6 +24,9 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
 
     resuming: boolean        // 初始 false
     resumeError: string | null // 初始 null
+
+    retryingHandoff: boolean // 初始 false
+    handoffRetryCount: number // 初始 0
   } => ({
     snapshot: {
       jobId: null,
@@ -45,7 +50,10 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
     clearError: null,
 
     resuming: false,        // 初始 false
-    resumeError: null // 初始 null
+    resumeError: null, // 初始 null
+
+    retryingHandoff: false, // 初始 false
+    handoffRetryCount: 0, // 初始 0
   }),
 
 
@@ -78,7 +86,7 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
     },
 
     async submitDesktopScreenshot(apiKey: string, url: string) {
-      if (this.submitting || this.pendingHandoffJob !== null || this.creationUncertain || this.clearing || this.resuming) return
+      if (this.submitting || this.pendingHandoffJob !== null || this.creationUncertain || this.clearing || this.resuming || this.retryingHandoff) return
 
       const desktop = window.nexusDesktop
       if (!desktop) {
@@ -114,6 +122,7 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
         }
 
         this.pendingHandoffJob = res.data
+        this.handoffRetryCount = 0
 
         const result = await desktop.startScreenshotTracking({ jobId: res.data.jobId, apiKey })
 
@@ -190,7 +199,7 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
     },
 
     async clearCurrentTask(){
-      if (this.clearing || this.submitting || this.resuming) return
+      if (this.clearing || this.submitting || this.resuming || this.retryingHandoff) return
 
       if(this.pendingHandoffJob !== null || this.creationUncertain === true){
         this.clearError = "保护中"
@@ -228,7 +237,7 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
     },
 
     async resumeCurrentTask(apiKey: string){
-      if (this.resuming || this.submitting || this.clearing) return
+      if (this.resuming || this.submitting || this.clearing || this.retryingHandoff) return
       if (this.pendingHandoffJob !== null || this.creationUncertain) return
 
       const jobId = this.snapshot.jobId
@@ -272,6 +281,105 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
         }
       }finally {
         this.resuming = false
+      }
+    },
+
+    async retryPendingHandoff(apiKey: string){
+      if (
+        this.submitting ||
+        this.clearing ||
+        this.resuming ||
+        this.retryingHandoff
+      ) return
+
+
+
+      const pending = this.pendingHandoffJob
+      if (!pending) return
+
+      if (this.creationUncertain) return
+
+      const alreadyTracked =
+        this.snapshot.jobId === pending.jobId &&
+        this.snapshot.traceStatus !== 'IDLE'
+
+      if(alreadyTracked){
+        this.pendingHandoffJob = null
+        this.submissionError = null
+        this.handoffRetryCount = 0
+        return
+      }
+
+      const desktop = window.nexusDesktop
+
+      if (typeof desktop?.startScreenshotTracking !== 'function') {
+        this.submissionError = '桌面重试接手功能不可用'
+        return
+      }
+
+      if (this.handoffRetryCount >= MAX_HANDOFF_RETRIES) {
+        this.submissionError = '接手重试次数已达上限，请保留 Job ID 并核对当前任务状态'
+        return
+      }
+
+      const key = apiKey.trim()
+
+      if (!key) {
+        this.submissionError = '请输入该任务使用的完整 API Key'
+        return
+      }
+
+      this.retryingHandoff = true
+      this.submissionError = null
+      this.handoffRetryCount++
+
+      try {
+        const result = await desktop.startScreenshotTracking({
+          jobId: pending.jobId,
+          apiKey: key,
+        })
+
+        if (this.pendingHandoffJob?.jobId !== pending.jobId) return
+
+        const nowTracked =
+          this.snapshot.jobId === pending.jobId &&
+          this.snapshot.traceStatus !== 'IDLE'
+
+        if(nowTracked){
+          this.pendingHandoffJob = null
+          this.submissionError = null
+          this.handoffRetryCount = 0
+          return
+        }else if (result.status === 'ok'){
+          this.pendingHandoffJob = null
+          this.submissionError = null
+          this.handoffRetryCount = 0
+          return
+        }else {
+          const messages = {
+            INVALID_REQUEST: '接手参数格式错误，请检查 API Key 后重试',
+            FORBIDDEN: '桌面调用来源被拒绝，更换 API Key 无法解决',
+            BUSY: 'Main 正在跟踪其他任务，请先核对当前任务状态',
+          }
+
+          this.submissionError = messages[result.code]
+        }
+      }catch {
+        const nowTracked =
+          this.snapshot.jobId === pending.jobId &&
+          this.snapshot.traceStatus !== 'IDLE'
+
+        if (this.pendingHandoffJob?.jobId !== pending.jobId) return
+
+        if(nowTracked){
+          this.pendingHandoffJob = null
+          this.submissionError = null
+          this.handoffRetryCount = 0
+        }else{
+          this.submissionError = "接手结果暂未确认，请勿重新创建"
+        }
+      }finally {
+        this.retryingHandoff = false
       }
     }
   },

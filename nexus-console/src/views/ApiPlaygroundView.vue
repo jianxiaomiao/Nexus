@@ -80,6 +80,11 @@ const desktopAsync = computed(() =>
 )
 
 const desktopSnapshot = computed(() => trackingStore.snapshot)
+const canConfirmHandoff = computed(() =>
+  trackingStore.pendingHandoffJob !== null &&
+  desktopSnapshot.value.jobId === trackingStore.pendingHandoffJob.jobId &&
+  desktopSnapshot.value.traceStatus !== 'IDLE'
+)
 
 const requestLoading = computed(() =>
   loading.value ||
@@ -90,6 +95,7 @@ const desktopSubmissionBlocked = computed(() =>
     desktopAsync.value && (
       trackingStore.clearing ||
       trackingStore.resuming ||
+      trackingStore.retryingHandoff ||
       trackingStore.pendingHandoffJob !== null ||
       trackingStore.creationUncertain ||
       desktopSnapshot.value.traceStatus !== 'IDLE'
@@ -591,13 +597,27 @@ onBeforeUnmount(() => {
           <div v-if="desktopSnapshot.jobId !== null || trackingStore.clearing" class="playground-created-actions">
             <el-button
               :loading="trackingStore.clearing"
-              :disabled="trackingStore.clearing || trackingStore.submitting || trackingStore.resuming || trackingStore.pendingHandoffJob !== null || trackingStore.creationUncertain"
+              :disabled="trackingStore.clearing || trackingStore.submitting || trackingStore.resuming || trackingStore.retryingHandoff || trackingStore.pendingHandoffJob !== null || trackingStore.creationUncertain"
               @click="trackingStore.clearCurrentTask()"
             >{{ trackingStore.clearing ? '正在清理…' : '清理当前任务' }}</el-button>
             <span>清理本地跟踪和预览，不取消后端任务。</span>
           </div>
           <p v-if="trackingStore.submitting">正在创建任务并交给桌面端跟踪…</p>
-          <p v-if="trackingStore.pendingHandoffJob">已创建任务：{{ trackingStore.pendingHandoffJob.jobId }}。尚未确认接手，请勿重复创建。</p>
+          <div v-if="trackingStore.pendingHandoffJob" class="playground-job-result">
+            <p>已创建任务：<code>{{ trackingStore.pendingHandoffJob.jobId }}</code>。{{ canConfirmHandoff ? '已收到该任务的跟踪状态，可以确认接手。' : '尚未确认接手，请勿重复创建。' }}</p>
+            <p>已重试 {{ trackingStore.handoffRetryCount }} 次，最多手动重试 3 次。</p>
+            <div class="playground-created-actions">
+              <el-button
+                type="primary"
+                plain
+                :loading="trackingStore.retryingHandoff"
+                :disabled="trackingStore.submitting || trackingStore.clearing || trackingStore.resuming || trackingStore.retryingHandoff || trackingStore.creationUncertain || (trackingStore.handoffRetryCount >= 3 && !canConfirmHandoff)"
+                @click="trackingStore.retryPendingHandoff(apiKey)"
+              >{{ trackingStore.retryingHandoff ? '正在接手…' : canConfirmHandoff ? '确认已接手' : '重试接手' }}</el-button>
+              <span>{{ canConfirmHandoff ? '仅确认已有状态，不再发送接手请求。' : '使用上方填写的 API Key，只接手原任务，不会再次创建截图。' }}</span>
+            </div>
+            <p v-if="trackingStore.handoffRetryCount >= 3 && !canConfirmHandoff" role="status">已达到重试上限。请保留 Job ID，核对任务状态；收到该任务的跟踪状态后仍可确认接手。</p>
+          </div>
           <ScreenshotJobStatus
             v-if="desktopSnapshot.latestJob"
             :job="desktopSnapshot.latestJob"
@@ -616,7 +636,7 @@ onBeforeUnmount(() => {
               type="primary"
               plain
               :loading="trackingStore.resuming"
-              :disabled="trackingStore.resuming || trackingStore.clearing || trackingStore.submitting || trackingStore.pendingHandoffJob !== null || trackingStore.creationUncertain"
+              :disabled="trackingStore.resuming || trackingStore.clearing || trackingStore.submitting || trackingStore.retryingHandoff || trackingStore.pendingHandoffJob !== null || trackingStore.creationUncertain"
               @click="trackingStore.resumeCurrentTask(apiKey)"
             >{{ trackingStore.resuming ? '正在恢复查询…' : '继续查询' }}</el-button>
             <span>使用上方填写的任务所属 API Key，继续查询原任务，不会重新创建截图。</span>

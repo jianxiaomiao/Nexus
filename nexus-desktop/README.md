@@ -1,8 +1,40 @@
 # Nexus Desktop：阶段 1 开发壳
 
-当前复用 `../nexus-console` 的 Vue 源码与 Vite 配置，仅支持本地开发模式。Electron Main 创建窗口并加载 Vue；已接入窗口状态文件持久化和任务完成通知，尚未实现安装包、独立构建入口和登录续期。
+## 桌面页面构建（2026-11-13）
 
-## 任务完成通知验收（2026-11-13）
+在 `nexus-desktop` 执行 `npm run build:renderer`。脚本先运行现有 Vue 源码的类型检查，再复用 `nexus-console/vite.config.ts` 构建，将产物写入 `nexus-desktop/dist/renderer/`（已忽略）；不覆盖 Web 的 `nexus-console/dist/`。构建需要相邻 `nexus-console` 已安装依赖。
+
+入口是 `dist/renderer/index.html`，JS/CSS 等资源位于其 `assets/` 目录。构建使用根路径 `/`，由标准 `nexus://app/` 协议提供资源并保留 History 路由。构建本身不启动 Vite 服务、Electron 或后端，也不将 Vite 的开发代理带入产物。
+
+静态协议、固定/动态页面 History 回退和 nexus 来源校验已接入。缺失资源和 API 路径不会回退为 HTML。`/api/` 与 `/v1/` 已通过 forwardBackend 固定转发至 localhost:8080；2026-11-14 `/api/` 真实登录与 Application 列表验收通过，随后重构和 `/v1/` 转发通过24项受控处理器检查。`/v1/` 真实调用与 `/s/` 跳转尚未验收/接入。该命令不生成安装包。
+
+当前复用 `../nexus-console` 的 Vue 源码与 Vite 构建配置。Electron Main 创建窗口并加载 Vue；已接入窗口状态文件持久化和任务完成通知，尚未实现安装包和登录续期。
+
+## 独立启动（2026-11-13）
+
+在 `nexus-desktop` 先执行 `npm run build:renderer`，再执行 `npm start`。后者只启动 Electron，通过 `nexus://app/` 加载现有产物，不启动 Vite、后端或数据库；修改 Vue 后需重新构建。未找到入口文件时会提示先构建。这里的“独立”指脱离 Vite 开发服务器，仍需要本地已安装的 Node/Electron，尚不是安装包。
+
+`npm run test:standalone-smoke` 使用同一启动器和正式 Main/Preload，在独立的 `.runtime/standalone-smoke-*` 用户数据目录里启动隐藏测试窗口，等待 `/login` 与真实登录表单挂载，检查 Renderer 无 Node 全局变量，然后退出。测试入口阻断 HTTP/HTTPS，因此不会借助正在运行的 Vite。2026-11-13 重建及该检查通过，HTTP/HTTPS 请求为零。首次受限环境运行出现 Renderer launch-failed/code=49；允许 Electron 子进程执行后通过，未降低浏览器安全设置。测试不提交登录、不验证截图业务，也不代表普通可见窗口的人工验收。
+
+旧 `npm run dev` 仍会启动 Vite，但当前 Main 已固定加载 `nexus://app/`，它不再是独立加载的验收入口。下方旧启动流程、开发代理和验收条目保留当时的背景，以本节为当前入口说明。
+
+### 独立登录验收（2026-11-14）
+
+先启动现有本地后端并确认8080可达，再运行 `node scripts/test-login-acceptance.cjs`。脚本不启动Vite，在隔离用户数据窗口验证真实后端400/401边界及IPC来源，然后等待用户在窗口登录；不要在聊天中发送凭据。成功后验证登录200、Bearer Application列表200、窗口可见与Renderer无HTTP/HTTPS请求，显示通过横幅30秒后自动关闭。证据位于忽略的 `.runtime/login-acceptance-*/evidence.json`；不记录凭据、请求体或响应正文，不创建业务资源或截图任务。
+
+本轮真实验收通过。此前后端因8081被Codex占用而启动失败，开发者将本地management端口改为8082后启动成功；业务转发仍固定8080。当前登录会话在内存中，整页刷新会丢失会话，尚未实现续期或持久登录。机器API与公开短链跳转不在本轮真实验收范围。
+
+## 接手重试真实验收脚本
+
+在`nexus-desktop`目录执行`node scripts/test-resume-acceptance.cjs --handoff`。隔离窗口中登录，填写完整截图URL和API Key，手动关闭VPN，然后点击测试专用浮层的“VPN 已关闭，开始验收”。输入有效且明确点击前，脚本不提交截图；不要点击原页面创建按钮。脚本不会操作VPN或保存/输出凭据。VPN关闭后脚本仍在本机继续运行；窗口结束后可重新打开VPN，再回来核对结果。
+
+本模式只创建一个真实后端任务，测试入口使第一次`screenshot-tracking:start`返回BUSY（受控注入，并非认定有其他真实任务），验证保留Job ID且尚未查询；随后自动点击“重试接手”，放行正式Main处理器，验证第二次start仍使用原Job ID、POST始终仅一次、待接手记录和计数清理，最后检查真实终态、PNG解码/长度/SHA-256和通知。不会再创建第二个任务。完成后保留窗口45秒，再清理本地跟踪和测试登录存储并关闭；后端任务按原生命周期保留，失败也不自动重新创建。证据在忽略目录`.runtime/handoff-acceptance-*/`。2026-11-13真实运行通过：创建POST=1，首次start受控失败、第二次正式接手，Job ID始终一致；5次真实状态查询200到SUCCEEDED，一次PNG结果200，79902字节、解码宽1280，长度与SHA-256匹配后端记录。通知调用1次、show=1、无错误，Renderer旧查询=0；用户确认拿到截图，本轮通知人工可见性未单独确认。证据`.runtime/handoff-acceptance-rf0HxU/`，脚本正常清理退出。并发/三次上限/迟到返回等已有35项定向浏览器测试覆盖。
+
+默认暂停恢复模式和`--notify`模式也采用相同的VPN准备按钮，不再在粘贴Key后立即提交。
+
+## 任务完成通知验收记录（2026-11-13）
+
+真实后端联动：`node scripts/test-resume-acceptance.cjs --notify`复用隔离窗口和真实登录，不注入查询失败；包装真实Notification只观察事件。2026-11-13自动验收通过：只创建一次，Job ID全程一致，4次状态查询200（QUEUED/RUNNING/SUCCEEDED），PNG结果200且仅获取一次，80064字节、解码宽1280，长度和SHA-256匹配后端元数据。通知构造1次、show=1、无failed，Renderer旧查询数0；技术链路已通过，用户随后确认实际看到了本次真实任务的通知。证据`.runtime/screenshot-notification-acceptance-Y9JiQN/`。窗口完成后保留45秒，再清理测试登录存储和本地跟踪并关闭；后端任务按原生命周期保留。正式业务代码未改。
 
 开发者实现Main的notifyScreenshotFinished：成功解析SUCCEEDED/FAILED并推送快照后尝试通知，以进程内Job ID Set去重，尝试前登记，清理跟踪不清空集合；通知异常不更改任务状态。无需新增Preload/IPC；通知不是在PNG获取后触发。RUNNING/EXPIRED不通知，当前失败不自动重试，进程退出后去重集合消失，通知点击跳转尚未实现。
 

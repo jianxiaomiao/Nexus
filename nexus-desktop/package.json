@@ -5,8 +5,11 @@
   "description": "Nexus desktop development shell",
   "main": "main.cjs",
   "scripts": {
+    "start": "node scripts/start.mjs",
     "dev": "node scripts/dev.mjs",
+    "build:renderer": "node scripts/build-renderer.mjs",
     "test:smoke": "node scripts/dev.mjs --smoke",
+    "test:standalone-smoke": "node scripts/start.mjs --smoke",
     "test:save-boundaries": "node scripts/test-save-boundaries.cjs",
     "test:tracking-boundaries": "node scripts/test-tracking-boundaries.cjs"
   },

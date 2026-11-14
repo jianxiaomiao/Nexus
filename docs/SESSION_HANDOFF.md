@@ -1,5 +1,24 @@
 # Nexus Session Handoff
 
+## Electron /v1/ 转发检查点（2026-11-14）
+
+- 开发者将 /api/ 与 /v1/ 转发合并为 forwardBackend，分流位于静态GET限制之前，两个分支均返回Response。预算分别为8秒/1MiB与30秒/8MiB，共用64KiB请求上限。请求头仅复制Content-Type/Accept/Authorization；响应保留Content-Type、截图两个标记与Retry-After，统一no-store。
+- 修正分支顺序、缺少return、前缀边界、响应头方向及重复实现后，语法与24项受控处理器检查通过：两前缀四方法、固定目的地/查询/body/身份头、两套超时参数与响应大小边界、PNG逐字节一致与标记、429 JSON与Retry-After、静态页面与排除路径。使用模拟后端；未创建真实截图任务，不能表述为 /v1/ 真实调用验收。临时复查入口为忽略目录 nexus-desktop/.runtime/check-v1-forward.cjs。
+- /api/真实登录验收见下方前一检查点；重构后本轮仅受控回归。下一步可做独立桌面 /v1/ UUID/Hash 的真实验收，无需重复真实截图任务；/s/公开跳转与安装包尚待设计。
+
+## Electron 管理 API 登录转发验收（2026-11-14）
+
+- 开发者实现协议处理器内 `/api/` 固定转发至 `http://localhost:8080`：GET/POST/PUT/DELETE、查询与请求体保留、请求/响应头允许列表、64KiB 请求与 1MiB 响应上限、8秒整段超时、禁止自动跳转。后端业务错误保留，连接/超限/超时转换为 JSON 错误，不回退 HTML。调用方取消覆盖读取请求体、等待后端、读取响应，监听器 finally 清理；协议入口已复用 isTrustedAppUrl。Agent 的受控处理器与取消边界检查通过，未代写业务转发实现。
+- `node nexus-desktop/scripts/test-login-acceptance.cjs` 使用隔离 userData、正式 Main/Preload/构建后的 Vue 与真实本地后端，不启动 Vite、不记录密码、令牌或响应正文。用户在窗口登录后验收通过：无效登录体400、匿名管理401、真实IPC来源校验ok、真实UI登录200、Bearer Application列表200、窗口可见、Renderer HTTP/HTTPS请求为0。证据保存在忽略目录 `.runtime/login-acceptance-*/evidence.json`，仅记录方法、路径、状态和是否携带Bearer。成功横幅显示30秒后自动关闭；登录会话仍是现有内存方案，不代表刷新续期通过。
+- 首次连接失败由后端未监听8080引起：后端因 management 8081 与 Codex 监听冲突而启动失败。开发者将本地管理端口改为8082后报告启动成功，本轮真实8080请求已验证；未停止Codex或修改业务8080转发地址。
+- 当前验收范围仅 `/api/` 登录/列表；`/v1/` 转发、`/s/` 跳转策略及安装包仍未完成。下一步继续由开发者先设计/编写机器API转发，特别确认JSON/PNG响应头、体积及耗时限制；不重复真实截图任务验收，不修改ECS、数据库或现有截图业务逻辑。
+
+## Electron 独立页面加载（2026-11-13）
+
+- Main 已注册 nexus 标准/安全/Fetch 协议，从 dist/renderer 提供本地产物；开发者实现目录边界校验、已知固定/动态页面 History 回退、isTrustedAppUrl 及 IPC/导航适配。API 和缺失资源不回退 HTML。开发者确认真实重启后登录页刷新正常。处理器直接调用及来源/IPC/导航模拟事件检查已通过，不能等同完整安全端到端验收。
+- 新增 `npm start`（scripts/start.mjs），只启动 Electron，不启动 Vite；需先 `npm run build:renderer`，缺失入口时明确失败。新增 `npm run test:standalone-smoke`，同一启动器使用隔离测试入口/用户数据和正式 Main/Preload，阻断 HTTP/HTTPS。类型检查与构建通过；真实隐藏 Electron 登录表单、History 重定向、无 Node 全局变量检查通过，HTTP/HTTPS 请求为零。已有 Vite 未被关闭；阻断网络证明页面不依赖它。初次受限环境出现子进程 launch-failed/code=49，允许子进程执行后通过，未更改浏览器安全配置。普通可见 npm start 尚未由开发者人工确认。
+- 现阶段仅独立页面加载；Main 固定后端受限转发尚未实现，登录不可据此宣称通过。下一步由开发者先设计/编写转发，暂用 localhost:8080，之后才处理安装包。旧 dev 启动器仍会启动 Vite，但 Main 固定加载 nexus://app/；旧截图验收脚本的开发代理假设不应当作当前独立入口验证。不要重复真实截图验收，不修改 ECS、数据库或截图业务。
+
 ## Electron 开发与窗口持久化检查点（2026-11-11）
 
 - nexus-desktop 复用 nexus-console 的 Vue 与 Vite，固定回环 5178，代理到本地 8080；开发者确认桌面真实登录和 Application 列表加载成功。独立构建和正式转发入口、续期尚未实现；任务完成通知已于2026-11-13实现并验收，见下方最新检查点。
@@ -11,6 +30,12 @@
 - 截图另存为基本闭环完成：开发者实现Preload/contextBridge、受限screenshot:save处理器及Vue能力分流。前端类型检查、现有浏览器下载定向测试1/1通过；开发者确认真实Vue按钮取消安静结束、保存出现成功提示，Agent核对产物80037字节、1280x720、PNG签名/CRC/IDAT解压正常。`npm run test:save-boundaries`补验Main并发BUSY、真实目录写入失败后再次保存成功且PNG字节一致；Playwright使用真实桥接/IPC/文件系统，仅控制对话框返回并隔离userData，不涉及后端。非信任来源等其他边界仍未运行验收。下一候选任务通知，代码继续由开发者先写，Agent解释与审查。
 
 ## 多端规划（2026-11-10）
+
+- 真实接手重试验收通过（2026-11-13）：`node scripts/test-resume-acceptance.cjs --handoff`在隔离Electron连接真实8080，用户登录填入Key/URL，手动关闭VPN并点击测试浮层准备按钮后才提交。仅创建1个任务；测试入口使首次start返回BUSY，确认待接手Job ID保留且状态请求为0；脚本随后点击“重试接手”，第二次start放行正式Main，沿用原Job ID、清理pending记录/次数，未重复POST。5次真实状态查询200并到SUCCEEDED，一次PNG获取200，79902字节、解码宽1280，长度和SHA-256匹配后端元数据；通知attempts=1/shown=1/errors=[]（本轮用户只明确确认拿到截图，不推断本轮通知人工可见性）。Renderer旧查询=0。证据`.runtime/handoff-acceptance-rf0HxU/`，用户报告完成并拿到截图，脚本退出0且已清理关闭隔离窗口。测试不操作VPN、不修改正式业务代码、不取消后端任务。该脚本已为默认/notify模式也加显式准备按钮，避免粘贴Key后立即提交。当前剩余creationUncertain无确认Job ID的恢复尚未实现；三次上限与迟到返回已由35项定向测试覆盖，无需重复创建真实任务验收这些分支。本条更新下方“真实接手重试待执行”状态。
+
+- 最新接手重试检查点（2026-11-13）：开发者实现retryPendingHandoff(apiKey)、retryingHandoff、handoffRetryCount与3次手动上限，Key trim后发送；不重复POST，仅重试start。已有同Job非IDLE推送时优先本地确认，先于次数上限/Key/桥检查；返回及异常后重新判断是否已接手，不写回返回快照；成功清理待接手记录、错误和计数。提交/清理/恢复与重试互斥，取图不被重试锁阻止。Agent未改Store，仅接待接手Job ID、次数、重试按钮/加载状态和确认已接手入口，并补齐界面禁用条件。源码/E2E类型检查通过，桌面展示与根部订阅35/35通过（真实Vue/Store、模拟桥/HTTP）。覆盖并发去重、只创建一次、3次上限/第四次直接调用被阻止、上限后收到推送仍可无Key/无桥本地确认、空Key不计数、异常后手动再试、推送早于ok/reject/FORBIDDEN时保留终态与PNG、返回先到不应用快照、旧请求不污染新待接手记录。该重试流程的真实Electron受控验收尚未执行；creationUncertain无确认Job ID的恢复仍未实现，次数耗尽且无成功推送时保留记录等待人工核对。本条更新下方pendingHandoffJob未解决的历史状态。
+
+- 真实截图+通知联动自动验收通过（2026-11-13）：`node scripts/test-resume-acceptance.cjs --notify`运行正式Main/Preload/Vue/Store与真实8080，用户在隔离窗口登录并填写Key/URL，未注入状态失败或模拟通知；仅包装真实Notification观察事件。创建POST=1，4次Main状态查询200，同一Job ID经历QUEUED/RUNNING/SUCCEEDED；结果获取=1、200，PNG为80064字节、解码宽1280，长度和SHA-256匹配后端元数据。通知attempts=1、shown=1、errors=[]；Renderer旧查询=0。证据`.runtime/screenshot-notification-acceptance-Y9JiQN/`，完成后保留窗口45秒再清理测试登录存储/本地跟踪并正常关闭。用户随后明确确认看到了本次真实任务通知，技术记录与人工可见性均通过；此前受控任务横幅也已确认。数据库环境未独立确认，不标记为nexus_test数据库测试；未修改正式业务代码。本条更新下方“联动尚未验收”的历史状态。
 
 - 最新通知检查点（2026-11-13）：开发者实现Main进程内Job ID去重的任务完成通知，SUCCEEDED/FAILED在推送快照后触发，尝试前登记且stop不清集合；不等待PNG、不新增Preload/IPC。Agent隔离Electron受控验收通过：同Job ID跨stop/re-track不重复，RUNNING/EXPIRED不通知，支持检查/构造/show同步异常及异步failed、不支持均不改TERMINAL/SUCCEEDED且无未处理拒绝。测试入口最初直接重定义Electron.Notification失败，已改成仅为目标模块require注入独立门面；未改开发者业务代码。真实Windows通知起初因DisabledForUser失败，用户打开通知后系统读回Enabled，重测show=1、failed=0，用户截图确认横幅出现。证据`.runtime/notification-boundaries-wpSYVg/`；脚本`node scripts/test-notification-boundaries.cjs --native`保留窗口45秒后关闭，使用受控任务、不访问后端。去重范围仅本次Main进程，失败不自动重试，通知点击唤起/跳转未实现；真实后端截图+通知的一体化验收尚未单独执行。pendingHandoffJob恢复和creationUncertain仍未解决。本条更新下方历史“系统通知待实现”状态。
 

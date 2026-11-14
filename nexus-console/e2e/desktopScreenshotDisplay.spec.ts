@@ -12,7 +12,7 @@ const created = {
 type Control = {
   snapshot: Trace
   listener: ScreenshotTrackingListener | null
-  mode: 'ok' | 'fail' | 'reject' | 'hold'
+  mode: 'ok' | 'fail' | 'reject' | 'hold' | 'handoff-hold'
   resolveStart: ((result: StartScreenshotTrackingResult) => void) | null
   starts: number
   stops: number
@@ -20,6 +20,7 @@ type Control = {
   results: { jobId: string; resolve: (value: GetScreenshotResult) => void; reject: () => void }[]
   stopResults: { resolve: (value: StopScreenshotTrackingResult) => void; reject: () => void }[]
   resumeResults: { jobId: string; resolve: (value: StartScreenshotTrackingResult) => void; reject: () => void }[]
+  handoffs: { jobId: string; keyTrimmed: boolean; resolve: (value: StartScreenshotTrackingResult) => void; reject: () => void }[]
 }
 type TestWindow = Window & { __desktopDisplay: Control }
 
@@ -27,7 +28,7 @@ async function setup(page: Page, mode: Control['mode'] = 'ok') {
   await page.addInitScript(mode => {
     const c: Control = {
       snapshot: { jobId: null, latestJob: null, traceStatus: 'IDLE', queryFailedInfo: null },
-      listener: null, mode, resolveStart: null, starts: 0, stops: 0, subscriptions: 0, results: [], stopResults: [], resumeResults: [],
+      listener: null, mode, resolveStart: null, starts: 0, stops: 0, subscriptions: 0, results: [], stopResults: [], resumeResults: [], handoffs: [],
     }
     ;(window as unknown as TestWindow).__desktopDisplay = c
     window.nexusDesktop = {
@@ -48,6 +49,11 @@ async function setup(page: Page, mode: Control['mode'] = 'ok') {
       },
       startScreenshotTracking: async input => {
         c.starts++
+        if (c.mode === 'handoff-hold') {
+          return new Promise((resolve, reject) => {
+            c.handoffs.push({ jobId: input.jobId, keyTrimmed: input.apiKey === input.apiKey.trim(), resolve, reject: () => reject(new Error('Controlled handoff rejection')) })
+          })
+        }
         if (c.snapshot.jobId === input.jobId && c.snapshot.traceStatus === 'PAUSED') {
           return new Promise((resolve, reject) => {
             c.resumeResults.push({ jobId: input.jobId, resolve, reject: () => reject(new Error('Controlled resume rejection')) })
@@ -465,4 +471,138 @@ test('任务已变化，旧恢复请求的异常不挂到新任务', async ({ pa
   await finishResume(page, 'reject')
   await expect(page.locator('.playground-response')).toContainText(secondJobId)
   await expect(page.getByText('恢复结果暂未确认，请查看当前状态后重试', { exact: true })).toHaveCount(0)
+})
+
+async function setupHandoff(page: Page) {
+  const counts = await setup(page, 'fail')
+  await page.evaluate(() => { (window as unknown as TestWindow).__desktopDisplay.mode = 'handoff-hold' })
+  return counts
+}
+
+async function finishHandoff(page: Page, kind: 'ok' | 'reject' | 'INVALID_REQUEST' | 'FORBIDDEN' | 'BUSY', index = 0) {
+  await page.evaluate(({ kind, index }) => {
+    const request = (window as unknown as TestWindow).__desktopDisplay.handoffs[index]!
+    if (kind === 'reject') request.reject()
+    else request.resolve(kind === 'ok' ? {
+      status: 'ok', snapshot: { jobId: request.jobId, latestJob: null, traceStatus: 'POLLING', queryFailedInfo: null },
+    } : { status: 'failed', code: kind })
+  }, { kind, index })
+}
+
+for (const returned of ['ok', 'reject', 'FORBIDDEN'] as const) {
+  test(`重试接手去重且不创建，终态推送早于${returned}返回时确认成功并保留PNG`, async ({ page }) => {
+    const counts = await setupHandoff(page)
+    await page.getByLabel('API Key', { exact: true }).fill('  PLAYWRIGHT_ONLY_MACHINE_KEY  ')
+    await page.getByRole('button', { name: '重试接手', exact: true }).click()
+    await expect(page.getByRole('button', { name: '正在接手…', exact: true })).toBeDisabled()
+    await page.evaluate(async () => {
+      const modulePath = '/src/stores/screenshotTrackingStore.ts'
+      const { useScreenshotTrackingStore } = await import(modulePath)
+      const store = useScreenshotTrackingStore()
+      await store.retryPendingHandoff('PLAYWRIGHT_ONLY_MACHINE_KEY')
+      await store.submitDesktopScreenshot('PLAYWRIGHT_ONLY_MACHINE_KEY', 'https://zhuanlan.zhihu.com/p/123456')
+      await store.clearCurrentTask()
+      await store.resumeCurrentTask('PLAYWRIGHT_ONLY_MACHINE_KEY')
+    })
+    expect(await page.evaluate(() => {
+      const c = (window as unknown as TestWindow).__desktopDisplay
+      return { starts: c.starts, stops: c.stops, handoffs: c.handoffs.map(r => ({ jobId: r.jobId, keyTrimmed: r.keyTrimmed })) }
+    })).toEqual({ starts: 2, stops: 0, handoffs: [{ jobId, keyTrimmed: true }] })
+    await push(page, 'SUCCEEDED')
+    await finishPng(page, 0)
+    await expect(page.getByAltText('网页截图预览', { exact: true })).toBeVisible()
+    await finishHandoff(page, returned)
+    await expect(page.getByRole('button', { name: '正在接手…', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: '重试接手', exact: true })).toHaveCount(0)
+    await expect(page.locator('.playground-response')).toContainText('截图任务已完成')
+    await expect(page.getByText(/接手未成功|接手结果暂未确认|桌面调用来源被拒绝/)).toHaveCount(0)
+    expect(counts.posts()).toBe(1)
+    expect(await resultCount(page)).toBe(1)
+  })
+}
+
+test('三次上限保留Job ID并禁止第四次请求；成功推送后即使无Key和桥仍可本地确认', async ({ page }) => {
+  const counts = await setupHandoff(page)
+  const codes = ['INVALID_REQUEST', 'FORBIDDEN', 'BUSY'] as const
+  const messages = [
+    '接手参数格式错误，请检查 API Key 后重试',
+    '桌面调用来源被拒绝，更换 API Key 无法解决',
+    'Main 正在跟踪其他任务，请先核对当前任务状态',
+  ]
+  for (let index = 0; index < codes.length; index++) {
+    await page.getByRole('button', { name: '重试接手', exact: true }).click()
+    await finishHandoff(page, codes[index]!, index)
+    await expect(page.getByText(messages[index]!, { exact: true })).toBeVisible()
+    await expect(page.locator('.playground-response')).toContainText(`已重试 ${index + 1} 次`)
+  }
+  await expect(page.getByRole('button', { name: '重试接手', exact: true })).toBeDisabled()
+  await expect(page.locator('.playground-response')).toContainText(jobId)
+  await page.evaluate(async () => {
+    const modulePath = '/src/stores/screenshotTrackingStore.ts'
+    const { useScreenshotTrackingStore } = await import(modulePath)
+    await useScreenshotTrackingStore().retryPendingHandoff('PLAYWRIGHT_ONLY_MACHINE_KEY')
+  })
+  expect(await page.evaluate(() => (window as unknown as TestWindow).__desktopDisplay.handoffs.length)).toBe(3)
+  expect(counts.posts()).toBe(1)
+  await push(page, 'RUNNING')
+  await page.getByLabel('API Key', { exact: true }).fill('')
+  await page.evaluate(() => { delete window.nexusDesktop })
+  await page.getByRole('button', { name: '确认已接手', exact: true }).click()
+  await expect(page.getByRole('button', { name: '确认已接手', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '清理当前任务', exact: true })).toBeEnabled()
+  await expect(page.locator('.playground-response')).toContainText('生成中')
+  expect(await page.evaluate(() => (window as unknown as TestWindow).__desktopDisplay.handoffs.length)).toBe(3)
+})
+
+test('重试接手空Key不发请求且不计次数；异常后可手动再试', async ({ page }) => {
+  const counts = await setupHandoff(page)
+  await page.getByLabel('API Key', { exact: true }).fill('   ')
+  await page.getByRole('button', { name: '重试接手', exact: true }).click()
+  await expect(page.getByText('请输入该任务使用的完整 API Key', { exact: true })).toBeVisible()
+  await expect(page.locator('.playground-response')).toContainText('已重试 0 次')
+  expect(await page.evaluate(() => (window as unknown as TestWindow).__desktopDisplay.starts)).toBe(1)
+  await page.getByLabel('API Key', { exact: true }).fill('PLAYWRIGHT_ONLY_MACHINE_KEY')
+  await page.getByRole('button', { name: '重试接手', exact: true }).click()
+  await finishHandoff(page, 'reject')
+  await expect(page.getByText('接手结果暂未确认，请勿重新创建', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '重试接手', exact: true })).toBeEnabled()
+  await page.getByRole('button', { name: '重试接手', exact: true }).click()
+  await push(page, 'RUNNING')
+  await finishHandoff(page, 'ok', 1)
+  await expect(page.getByRole('button', { name: '清理当前任务', exact: true })).toBeEnabled()
+  expect(counts.posts()).toBe(1)
+})
+
+test('重试接手返回先到仅确认接手，不将返回快照写入Store', async ({ page }) => {
+  const counts = await setupHandoff(page)
+  await page.getByRole('button', { name: '重试接手', exact: true }).click()
+  await finishHandoff(page, 'ok')
+  await expect(page.getByRole('button', { name: '重试接手', exact: true })).toHaveCount(0)
+  const state = await page.evaluate(async () => {
+    const modulePath = '/src/stores/screenshotTrackingStore.ts'
+    const { useScreenshotTrackingStore } = await import(modulePath)
+    const store = useScreenshotTrackingStore()
+    return { jobId: store.snapshot.jobId, pending: store.pendingHandoffJob, count: store.handoffRetryCount }
+  })
+  expect(state).toEqual({ jobId: null, pending: null, count: 0 })
+  await push(page, 'SUCCEEDED')
+  await finishPng(page, 0)
+  await expect(page.getByAltText('网页截图预览', { exact: true })).toBeVisible()
+  expect(counts.posts()).toBe(1)
+})
+
+test('待接手记录变化后，旧请求失败不污染新记录', async ({ page }) => {
+  await setupHandoff(page)
+  await page.getByRole('button', { name: '重试接手', exact: true }).click()
+  await page.evaluate(async ({ created, secondJobId }) => {
+    const modulePath = '/src/stores/screenshotTrackingStore.ts'
+    const { useScreenshotTrackingStore } = await import(modulePath)
+    const store = useScreenshotTrackingStore()
+    store.pendingHandoffJob = { ...created, jobId: secondJobId }
+    store.submissionError = '新任务待核对'
+  }, { created, secondJobId })
+  await finishHandoff(page, 'reject')
+  await expect(page.getByRole('button', { name: '重试接手', exact: true })).toBeEnabled()
+  await expect(page.locator('.playground-response')).toContainText(secondJobId)
+  await expect(page.getByText('新任务待核对', { exact: true })).toBeVisible()
 })
