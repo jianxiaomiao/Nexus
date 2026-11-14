@@ -8,7 +8,13 @@ export type SaveScreenshotResult =
   code: 'INVALID_IMAGE' | 'FORBIDDEN' | 'BUSY' | 'SAVE_FAILED'
 }
 
+export type OpenShortLinkResult =
+  | { status: 'opened' }
+  | { status: 'failed'; code: 'FORBIDDEN' | 'INVALID_REQUEST' | 'OPEN_FAILED' }
+
 export interface NexusDesktop {
+  openShortLink?(shortCode: string): Promise<OpenShortLinkResult>
+
   saveScreenshot(bytes: ArrayBuffer): Promise<SaveScreenshotResult>
 
   startScreenshotTracking(

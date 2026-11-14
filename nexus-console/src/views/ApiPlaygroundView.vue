@@ -14,6 +14,7 @@ import { callShortLinkOpenApi, publicShortLinkUrl, type ShortLink, type ShortLin
 import WebExtractPreview from './WebExtractPreview.vue'
 import ScreenshotJobStatus from './ScreenshotJobStatus.vue'
 import ScreenshotPreview from './ScreenshotPreview.vue'
+import ShortLinkOpenButton from '@/components/ShortLinkOpenButton.vue'
 import '@/assets/playground.css'
 import { useScreenshotTrackingStore } from '@/stores/screenshotTrackingStore'
 
@@ -70,6 +71,7 @@ const screenshotPolling = ref(false)
 const screenshotPollError = ref('')
 const screenshotPollRetryable = ref(false)
 const articleTab = ref('preview')
+const isDesktop = Boolean(window.nexusDesktop)
 const supportsDesktopTracking =
   typeof window.nexusDesktop?.startScreenshotTracking === 'function'
 
@@ -588,8 +590,8 @@ onBeforeUnmount(() => {
       </section>
       <section class="playground-panel playground-response" aria-labelledby="playground-response-title" aria-live="polite"><div class="playground-panel-heading"><h2 id="playground-response-title">响应</h2><div v-if="result?.status !== null && result?.status !== undefined" class="playground-response-meta"><span class="playground-status" :class="{ 'is-error': result.status >= 400 }">{{ result.status }} {{ result.status >= 200 && result.status < 300 ? 'OK' : 'ERROR' }}</span><span v-if="result.durationMs !== null">{{ result.durationMs }} ms</span></div></div>
         <p v-if="result" class="playground-result-message" :class="{ 'is-error': result.status === null || result.status >= 400 || result.invalidImage || result.isError }">{{ result.message }}</p>
-        <div v-if="createdLink" class="playground-created-link"><p class="playground-eyebrow">SHORT LINK CREATED</p><h3>短链接已创建</h3><p>复制后即可分享；到期或禁用后将无法跳转。</p><code>{{ publicShortLinkUrl(createdLink.shortCode) }}</code><div class="playground-created-actions"><el-button type="primary" @click="copyShortUrl(createdLink.shortCode)">复制短地址</el-button><RouterLink :to="{ name: 'short-links', query: { apiKeyId: createdLink.apiKeyId } }">管理这把 Key 的短链 <el-icon aria-hidden="true"><ArrowRight /></el-icon></RouterLink></div></div>
-        <div v-if="listedLinks" class="playground-link-list"><h3>这把 Key 的短链接</h3><p v-if="listedLinks.length === 0" class="playground-list-empty">这把 Key 还没有短链接。</p><div v-for="link in listedLinks" :key="link.id" class="playground-link-item"><strong>{{ link.name }}</strong><small>ID {{ link.id }} · {{ link.status === 1 ? '已禁用' : new Date(link.expiresAt).getTime() <= Date.now() ? '已到期' : '自身启用' }} · 到期 {{ formatBeijingTime(link.expiresAt) }}</small><a :href="publicShortLinkUrl(link.shortCode)" target="_blank" rel="noopener noreferrer">{{ publicShortLinkUrl(link.shortCode) }}</a><div class="playground-link-actions"><el-button size="small" @click="copyShortUrl(link.shortCode)">复制短地址</el-button><a :href="publicShortLinkUrl(link.shortCode)" target="_blank" rel="noopener noreferrer">打开短地址 <el-icon aria-hidden="true"><ArrowRight /></el-icon></a></div></div></div>
+        <div v-if="createdLink" class="playground-created-link"><p class="playground-eyebrow">SHORT LINK CREATED</p><h3>短链接已创建</h3><p>复制后即可分享；到期或禁用后将无法跳转。</p><code>{{ publicShortLinkUrl(createdLink.shortCode) }}</code><div class="playground-created-actions"><el-button type="primary" @click="copyShortUrl(createdLink.shortCode)">复制短地址</el-button><ShortLinkOpenButton v-if="isDesktop" :short-code="createdLink.shortCode" /><RouterLink :to="{ name: 'short-links', query: { apiKeyId: createdLink.apiKeyId } }">管理这把 Key 的短链 <el-icon aria-hidden="true"><ArrowRight /></el-icon></RouterLink></div></div>
+        <div v-if="listedLinks" class="playground-link-list"><h3>这把 Key 的短链接</h3><p v-if="listedLinks.length === 0" class="playground-list-empty">这把 Key 还没有短链接。</p><div v-for="link in listedLinks" :key="link.id" class="playground-link-item"><strong>{{ link.name }}</strong><small>ID {{ link.id }} · {{ link.status === 1 ? '已禁用' : new Date(link.expiresAt).getTime() <= Date.now() ? '已到期' : '自身启用' }} · 到期 {{ formatBeijingTime(link.expiresAt) }}</small><ShortLinkOpenButton :short-code="link.shortCode">{{ publicShortLinkUrl(link.shortCode) }}</ShortLinkOpenButton><div class="playground-link-actions"><el-button size="small" @click="copyShortUrl(link.shortCode)">复制短地址</el-button><ShortLinkOpenButton :short-code="link.shortCode">打开短地址 <el-icon aria-hidden="true"><ArrowRight /></el-icon></ShortLinkOpenButton></div></div></div>
         <div v-if="desktopAsync" class="playground-async-screenshot-result">
           <el-alert v-if="trackingStore.resumeError" type="warning" show-icon :closable="false" :title="trackingStore.resumeError" />
           <el-alert v-if="trackingStore.clearError" type="warning" show-icon :closable="false" :title="trackingStore.clearError" />

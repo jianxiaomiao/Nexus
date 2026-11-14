@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, session, screen, ipcMain, Notification, protocol } = require('electron')
+const { app, BrowserWindow, dialog, session, screen, ipcMain, Notification, protocol, shell } = require('electron')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 const {
@@ -49,11 +49,12 @@ function isTrustedAppUrl(value){
   }
 }
 
-// 当前仅实现开发模式，独立构建的页面入口留到下一检查点。
-app.setPath('userData', path.join(__dirname, '.runtime', 'user-data'))
-if (app.isPackaged) {
-  app.whenReady().then(() => { dialog.showErrorBox('Nexus', '独立构建入口尚未实现，请使用 npm run dev。'); app.exit(1) })
-} else {
+if(app.isPackaged){
+
+}else{
+  // 当前仅实现开发模式，独立构建的页面入口留到下一检查点。
+  app.setPath('userData', path.join(__dirname, '.runtime', 'user-data'))
+}
   if (process.platform === 'win32') {
     app.setAppUserModelId(process.execPath)
   }
@@ -429,10 +430,10 @@ if (app.isPackaged) {
       if (url.pathname.startsWith('/api/')){
         return  forwardBackend(request, url, { timeout: 8 * 1000, responseLimit: 1 * 1024 *1024})
       }
-
       else if(url.pathname.startsWith('/v1/')){
         return  forwardBackend(request, url, { timeout: 30 * 1000, responseLimit: 8 * 1024 *1024})
-      }else if(request.method !== 'GET'){
+      }
+      else if(request.method !== 'GET'){
         return new Response('Not Found', { status: 404 })
       }
 
@@ -571,6 +572,25 @@ if (app.isPackaged) {
           mainWindow.maximize()
         }
         mainWindow.show()
+      }
+    })
+
+    ipcMain.handle('short-link:open', async (event, shortCode) => {
+      if (!isTrustedScreenshotCaller(event)) {
+        return { status: 'failed', code: 'FORBIDDEN' }
+      }
+      // 显式长度检查也拒绝末尾换行；只接受后端生成的12位ASCII短码。
+      if (typeof shortCode !== 'string' || shortCode.length !== 12 || !/^[0-9A-Za-z]{12}$/.test(shortCode)) {
+        return { status: 'failed', code: 'INVALID_REQUEST' }
+      }
+
+      const target = new URL(`/s/${shortCode}`, 'http://localhost:8080').href
+      try {
+        await shell.openExternal(target)
+        // 仅表示交给系统处理，不证明短链有效或目标页面已加载。
+        return { status: 'opened' }
+      } catch {
+        return { status: 'failed', code: 'OPEN_FAILED' }
       }
     })
 
@@ -878,5 +898,4 @@ if (app.isPackaged) {
     if (!smoke) dialog.showErrorBox('Nexus 启动失败', '无法加载本地 Vue 页面，请检查开发终端。')
     app.exit(1)
   })
-}
 app.on('window-all-closed', () => app.quit())

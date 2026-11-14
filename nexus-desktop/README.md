@@ -6,7 +6,7 @@
 
 入口是 `dist/renderer/index.html`，JS/CSS 等资源位于其 `assets/` 目录。构建使用根路径 `/`，由标准 `nexus://app/` 协议提供资源并保留 History 路由。构建本身不启动 Vite 服务、Electron 或后端，也不将 Vite 的开发代理带入产物。
 
-静态协议、固定/动态页面 History 回退和 nexus 来源校验已接入。缺失资源和 API 路径不会回退为 HTML。`/api/` 与 `/v1/` 已通过 forwardBackend 固定转发至 localhost:8080；2026-11-14 `/api/` 真实登录与 Application 列表验收通过，随后重构和 `/v1/` 转发通过24项受控处理器检查，并完成真实UUID与Hash调用验收。`/s/` 跳转尚未接入。该命令不生成安装包。
+静态协议、固定/动态页面 History 回退和 nexus 来源校验已接入。缺失资源和 API 路径不会回退为 HTML。`/api/` 与 `/v1/` 已通过 forwardBackend 固定转发至 localhost:8080；2026-11-14 `/api/` 真实登录与 Application 列表验收通过，随后重构和 `/v1/` 转发通过24项受控处理器检查，并完成真实UUID与Hash调用验收。短链打开Main/Preload能力已实现，页面接入待完成，见下方说明。该命令不生成安装包。
 
 当前复用 `../nexus-console` 的 Vue 源码与 Vite 构建配置。Electron Main 创建窗口并加载 Vue；已接入窗口状态文件持久化和任务完成通知，尚未实现安装包和登录续期。
 
@@ -29,6 +29,22 @@
 运行 `node scripts/test-utils-acceptance.cjs`，在隔离窗口登录，待脚本进入调试台后填写已有完整API Key，再点击测试专用准备按钮；不要手动点击页面发送按钮。脚本只通过真实界面各发送一次UUID和Hash（正常消耗配额并记录Usage），不会创建截图任务，成功提示30秒后关闭。独立测试Main入口限制目的地和调用次数，不收集密码、Key、令牌或响应正文。
 
 本轮通过：无凭据401；有效Key的UUID GET和Hash POST均200/SUCCESS，UUID v4结构正确，含中文输入的SHA256与独立UTF-8计算一致；机器请求只携带ApiKey，两个接口各一次，Renderer HTTP/HTTPS请求为0。证据位于忽略的 `.runtime/utils-acceptance-*/evidence.json`。PNG和Retry-After仍是受控转发检查结论，未重复真实截图任务验收。
+
+## 短链打开能力（2026-11-14）
+
+Main的 `short-link:open` 通过Preload的 `openShortLink(shortCode)` 接收12位ASCII字母数字短码，校验可信窗口、主框架及nexus来源后构造固定本地HTTP短地址，交给系统浏览器；不让应用窗口加载外站，不在协议处理器内代理/s/。`opened`只表示openExternal完成，不能证明后端302或目标页面加载成功；系统打开失败返回OPEN_FAILED。调试台创建结果、查询列表和管理页（含窄屏）的桌面打开按钮已接入窄桥，等待期间禁用，失败可重试；Web保留原有链接与复制行为。
+
+`VITE_SHORT_LINK_PUBLIC_BASE_URL`原先只在 `nexus-console/src/api/shortLinks.ts` 读取，并未设置。现在 `scripts/build-renderer.mjs` 的 `define` 仅向桌面产物注入 `http://localhost:8080`，使显示与复制地址为HTTP短地址；不是运行时环境变量，修改后需重新 `npm run build:renderer`。Web构建仍使用原配置或当前网站origin，不需要新增共享.env文件。
+
+`npm run test:short-link-ui` 验证真实桌面构建产物与正式Main/Preload/IPC的界面接入，后端、剪贴板及系统打开用替身，避免创建真实资源或影响系统剪贴板。2026-11-14通过创建/查询/管理/窄屏按钮、HTTP显示/复制、等待与失败恢复；Vue与E2E类型检查、Web原有短链/调试台10项及桌面桥异常/复制失败2项浏览器测试通过。真实浏览器联动由下方独立验收覆盖。
+
+执行 `npm run test:short-link-boundaries` 可重复运行隔离真实Electron/Preload/IPC测试。2026-11-14通过23种非法输入、固定地址、错误窗口、系统同步/异步失败和恢复、等待Promise完成及协议/s/不打开浏览器等边界；来源辅助函数的隔离检查另覆盖子框架、来源URL、销毁/失效情况。该命令的系统打开使用替身，未启动真实浏览器、调用后端或创建业务资源。
+
+### 短链真实浏览器联动（2026-11-14）
+
+`node scripts/test-short-link-live.cjs`为有真实副作用的验收：在隔离窗口登录并填写已有Key、确认准备后，通过真实界面创建两条指向https://weibo.com/的专用短链，正常消耗配额/记录Usage；一条验证302后禁用，另一条10秒自然到期。Node使用manual检查302/404/410及响应契约，再通过正式管理页按钮调用真实系统浏览器。每次用户查看浏览器后，切回验收面板确认；脚本不收集密码/Key/令牌、不创建截图。
+
+本轮通过，证据`.runtime/short-link-live-Qs7B3j/evidence.json`：302的Location匹配及no-store正确，404/410错误码正确且无Location，三次系统交接完成，用户分别确认了三种浏览器表现。首轮选择控件超时后复用了已创建样本（`.runtime/short-link-live-1FfQje/evidence.json`），累计仍仅两条。记录保留为禁用/已过期，隔离窗口30秒后关闭，外部浏览器标签页由用户自行关闭。系统浏览器的最终视觉效果依据用户确认，不将openExternal完成单独当作网页访问成功。
 
 ## 接手重试真实验收脚本
 

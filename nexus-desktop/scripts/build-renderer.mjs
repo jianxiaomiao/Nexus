@@ -22,6 +22,10 @@ try {
     configFile: path.join(consoleRoot, 'vite.config.ts'),
     // 标准 nexus://app/ 协议从根路径提供资源，并保留 History 路由。
     base: '/',
+    // 仅桌面产物使用本地公开短地址，避免复制出 nexus://app/s/...。
+    define: {
+      'import.meta.env.VITE_SHORT_LINK_PUBLIC_BASE_URL': JSON.stringify('http://localhost:8080'),
+    },
     build: {
       outDir,
       // 仅清空固定的桌面 renderer 产物目录，不覆盖 Web 的 dist。

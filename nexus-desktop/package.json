@@ -10,6 +10,8 @@
     "build:renderer": "node scripts/build-renderer.mjs",
     "test:smoke": "node scripts/dev.mjs --smoke",
     "test:standalone-smoke": "node scripts/start.mjs --smoke",
+    "test:short-link-boundaries": "node scripts/test-short-link-boundaries.cjs",
+    "test:short-link-ui": "node scripts/test-short-link-ui.cjs",
     "test:save-boundaries": "node scripts/test-save-boundaries.cjs",
     "test:tracking-boundaries": "node scripts/test-tracking-boundaries.cjs"
   },

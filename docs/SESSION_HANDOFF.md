@@ -1,5 +1,40 @@
 # Nexus Session Handoff
 
+## Electron 短链真实浏览器联动验收（2026-11-14）
+
+- 用户明确授权创建短链并真实打开系统浏览器。`node nexus-desktop/scripts/test-short-link-live.cjs`使用隔离userData、正式Main/Preload/桌面页面、真实localhost:8080与真实shell.openExternal；用户登录、填写已有Key并点击准备按钮后才创建。测试入口仅允许必要管理读取、两次短链创建、禁用本轮第一条记录及三次指定短地址打开，禁止截图等其他机器API，不记录凭据。
+- 首轮创建第一条成功，选择短有效期的测试控件定位超时，尚未发送第二次创建或打开浏览器。调整为现有测试使用的Element Plus选择器，使用首轮证据恢复，复用第一条，仅补建第二条。累计两条记录（id85、86），未创建重复样本、Key、Application或截图。分别指向固定允许目标 https://weibo.com/；第一条验证302后通过管理页禁用，第二条10秒自然到期，未修改数据库或系统时钟。
+- 最终`.runtime/short-link-live-Qs7B3j/evidence.json`为passed=true、退出0：Node手动重定向检查302/Location匹配/no-store/空正文；禁用后404 SHORT_LINK_NOT_FOUND、自然到期410 SHORT_LINK_EXPIRED均无Location。正式管理页按钮通过真实Preload/IPC触发三次系统打开且全部完成，用户在每次验收面板分别确认目标站跳转、404和410错误表现。Nexus仍在nexus://app/short-links；无测试范围外请求。首轮证据`.runtime/short-link-live-1FfQje/evidence.json`保留供累计创建次数核对。
+- 成功提示30秒后隔离Electron正常关闭；外部浏览器标签页由用户管理。两条样本保留为禁用/已过期，不自动删除或恢复。本次是后端契约+真实系统打开+用户视觉确认，未接管系统浏览器读取其网络面板，不扩大为目标站完整业务可用性证明。数据库环境未独立确认，不标为nexus_test验收。
+- 独立页面加载、/api/登录列表、/v1/UUID/Hash与短链桌面打开已完成各自真实检查点。下一阶段可讨论安装包；Refresh Token、通知点击等仍是独立后续范围，不因这次通过而推定完成。
+
+## Electron 打开短链 Main/Preload 检查点（2026-11-14）
+
+- 开发者先写的协议 /s/ 分支混用了IPC事件与返回值。经明确请求，Agent删除该分支并恢复protocol.handle仅接收request，新增专用 `short-link:open` IPC及 `nexusDesktop.openShortLink(shortCode)` 窄桥和可选能力类型。来源复用现有可信窗口/主框架/nexus地址校验；短码仅允许长度恰好12的ASCII字母数字（含末尾换行也拒绝），Main构造固定 `http://localhost:8080/s/{shortCode}` 后调用shell.openExternal。Promise完成返回opened，仅表示系统交接；同步/异步失败均返回OPEN_FAILED，非法输入INVALID_REQUEST，来源错误FORBIDDEN。
+- `npm run test:short-link-boundaries`通过。隔离Electron加载正式Main/Preload，通过真实IPC验证23种非法输入、固定地址与大小写保留、系统打开同步失败/Promise拒绝/失败后恢复、Promise未完成不提前返回opened、同nexus地址的第二窗口被拒绝、协议/s/请求404且不触发打开。仅shell能力使用替身，未打开实际浏览器/访问后端/创建短链或截图；无未处理拒绝。来源辅助函数另有隔离检查覆盖子框架、不同URL、销毁/缺失窗口和失效框架。证据 `.runtime/short-link-boundaries-LeHoYx/evidence.json`。API转发24项受控回归、Main/Preload语法、Vue源码与E2E类型检查通过。
+- 页面接入现已完成并由Agent独立复核（2026-11-14）：ShortLinkOpenButton用于桌面调试台创建/查询结果与管理页桌面/窄屏入口，只通过桥传shortCode；等待禁用、失败可重试，旧桥缺能力与IPC拒绝均提示，不回退桌面网页导航。桌面构建单独注入HTTP公开短地址，显示/复制与Main打开目标一致；Web保留原链接行为。重建与源码/E2E类型检查通过，真实Electron界面/IPC模拟后端与系统打开能力测试通过（`.runtime/short-link-ui-HuQt4h/evidence.json`），来源边界复跑通过（`.runtime/short-link-boundaries-HmRzjt/evidence.json`），相关浏览器测试12/12通过（shortLinks 7 + desktopShortLinks 2 + playground 3）。未发现本次范围内的阻塞问题，未修改核心实现。
+- 不把opened解释为短链有效，不直接打开originalUrl，不放宽全局新窗口/外部导航策略。以上检查未实际打开系统浏览器或创建真实短链；正式浏览器与后端302/404/410的联动仍未验收。仍按本地8080，之后再处理安装包。
+
+## 当前状态速览与阅读规则（2026-11-14 整理）
+
+> 本节汇总下方已记录的检查点，不是本次新增测试结果。下方历史记录原文保留；其中“尚未实现 / 待验收 / 下一步”仅代表当时状态，不能直接当作当前待办。按同一事项的更新记录及实际代码判断，尤其注意“多端规划”标题日期之下还包含 2026-11-13 的更新。
+
+### 已完成及验证范围
+
+- **真实截图 → PNG → 系统通知**：2026-11-13 的“真实截图+通知联动自动验收通过”记录已覆盖早期“联动尚未验收”；正式 Main/Preload/Vue/Store 连接真实后端通过，开发者明确确认看到通知。不是仅受控通知测试通过。
+- **已知 Job ID 的接手重试**：2026-11-13 的“真实接手重试验收通过”已覆盖早期 `pendingHandoffJob` 未解决/待验收状态；保留原 Job ID，只重试接手，不重复 POST 创建。暂停恢复亦已有真实验收记录。
+- **独立构建与固定后端转发**：页面加载、`/api/` 登录/列表、`/v1/` UUID/Hash 的检查点见下方 2026-11-13 至 2026-11-14 记录。UUID/Hash 已完成真实闭环，覆盖匿名 401 与机器 ApiKey 身份隔离；不扩大为所有机器接口验收。
+- **验证边界**：独立入口及转发改动后的 PNG、响应头与 Retry-After 是受控验证；没有重新执行真实截图到通知的完整链路。历史真实验收与最新改动的验证范围应分别报告。数据库环境未独立确认的验收不标为 `nexus_test`；定向测试不等同最新全量回归。
+
+### 仍开放的事项与执行约束
+
+- `creationUncertain`：未取得确认 Job ID 时已有防重复提交保护，但恢复方案仍未实现，不能直接重发创建 POST。
+- 通知点击唤起/跳转、Refresh Token 与多设备长期会话仍待设计/实现。`/s/` 公开跳转策略及安装包在最近已记录检查点仍待设计；继续前应核对工作区的新改动。
+- 不为清理旧待办而重复创建真实截图任务。已有验收记录足以关闭对应历史待办；新增验证须有具体未覆盖问题及明确授权。
+- 本次只整理交接文档，未运行测试、修改代码、提交、推送或部署。编辑前工作区已有 `nexus-desktop/main.cjs` 修改，未纳入本次验收结论，保持不动。
+
+## 检查点与历史记录（原文保留）
+
 ## Electron /v1/ UUID 与 Hash 真实验收（2026-11-14）
 
 - `node nexus-desktop/scripts/test-utils-acceptance.cjs` 在隔离userData中运行正式Main/Preload/构建Vue，连接真实localhost:8080，不启动Vite。用户在窗口登录、填写已有完整API Key并点击测试准备按钮后，脚本通过真实Playground按钮各调用一次UUID与Hash。

@@ -1,6 +1,10 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('nexusDesktop', {
+    openShortLink: (shortCode) => {
+        return ipcRenderer.invoke('short-link:open', shortCode)
+    },
+
     saveScreenshot: (bytes) => {
         return ipcRenderer.invoke('screenshot:save', bytes)
     },
