@@ -1,5 +1,12 @@
 # Nexus Session Handoff
 
+## Electron /v1/ UUID 与 Hash 真实验收（2026-11-14）
+
+- `node nexus-desktop/scripts/test-utils-acceptance.cjs` 在隔离userData中运行正式Main/Preload/构建Vue，连接真实localhost:8080，不启动Vite。用户在窗口登录、填写已有完整API Key并点击测试准备按钮后，脚本通过真实Playground按钮各调用一次UUID与Hash。
+- 无凭据UUID请求401；有效Key的UUID GET与Hash POST均200/SUCCESS。UUID符合v4结构；固定含中文输入的SHA256与Node按UTF-8独立计算一致，页面显示200及摘要。Main观察记录确认两个接口各一次ApiKey请求、无机器Bearer请求；Renderer HTTP/HTTPS请求0，测试范围外请求0，不调用截图/提取/短链API。成功提示30秒后关闭窗口。凭据与响应正文不保存，仅记录路径、方法、身份类型、状态及校验布尔值；正常调用会使用现有配额/Usage。
+- 测试入口 utils-acceptance-main.cjs 限定固定后端与UUID/Hash，阻止其他机器接口及同接口第二次带Key调用；不修改正式业务代码。
+- 当前 /api/ 登录/列表与 /v1/ UUID/Hash 已完成独立真实闭环；PNG/Retry-After由上一检查点受控验证，未重复真实截图验收。/s/公开跳转策略与安装包仍待设计，不扩大为全部机器接口端到端验收。
+
 ## Electron /v1/ 转发检查点（2026-11-14）
 
 - 开发者将 /api/ 与 /v1/ 转发合并为 forwardBackend，分流位于静态GET限制之前，两个分支均返回Response。预算分别为8秒/1MiB与30秒/8MiB，共用64KiB请求上限。请求头仅复制Content-Type/Accept/Authorization；响应保留Content-Type、截图两个标记与Retry-After，统一no-store。

@@ -6,7 +6,7 @@
 
 入口是 `dist/renderer/index.html`，JS/CSS 等资源位于其 `assets/` 目录。构建使用根路径 `/`，由标准 `nexus://app/` 协议提供资源并保留 History 路由。构建本身不启动 Vite 服务、Electron 或后端，也不将 Vite 的开发代理带入产物。
 
-静态协议、固定/动态页面 History 回退和 nexus 来源校验已接入。缺失资源和 API 路径不会回退为 HTML。`/api/` 与 `/v1/` 已通过 forwardBackend 固定转发至 localhost:8080；2026-11-14 `/api/` 真实登录与 Application 列表验收通过，随后重构和 `/v1/` 转发通过24项受控处理器检查。`/v1/` 真实调用与 `/s/` 跳转尚未验收/接入。该命令不生成安装包。
+静态协议、固定/动态页面 History 回退和 nexus 来源校验已接入。缺失资源和 API 路径不会回退为 HTML。`/api/` 与 `/v1/` 已通过 forwardBackend 固定转发至 localhost:8080；2026-11-14 `/api/` 真实登录与 Application 列表验收通过，随后重构和 `/v1/` 转发通过24项受控处理器检查，并完成真实UUID与Hash调用验收。`/s/` 跳转尚未接入。该命令不生成安装包。
 
 当前复用 `../nexus-console` 的 Vue 源码与 Vite 构建配置。Electron Main 创建窗口并加载 Vue；已接入窗口状态文件持久化和任务完成通知，尚未实现安装包和登录续期。
 
@@ -23,6 +23,12 @@
 先启动现有本地后端并确认8080可达，再运行 `node scripts/test-login-acceptance.cjs`。脚本不启动Vite，在隔离用户数据窗口验证真实后端400/401边界及IPC来源，然后等待用户在窗口登录；不要在聊天中发送凭据。成功后验证登录200、Bearer Application列表200、窗口可见与Renderer无HTTP/HTTPS请求，显示通过横幅30秒后自动关闭。证据位于忽略的 `.runtime/login-acceptance-*/evidence.json`；不记录凭据、请求体或响应正文，不创建业务资源或截图任务。
 
 本轮真实验收通过。此前后端因8081被Codex占用而启动失败，开发者将本地management端口改为8082后启动成功；业务转发仍固定8080。当前登录会话在内存中，整页刷新会丢失会话，尚未实现续期或持久登录。机器API与公开短链跳转不在本轮真实验收范围。
+
+### UUID / Hash 独立真实验收（2026-11-14）
+
+运行 `node scripts/test-utils-acceptance.cjs`，在隔离窗口登录，待脚本进入调试台后填写已有完整API Key，再点击测试专用准备按钮；不要手动点击页面发送按钮。脚本只通过真实界面各发送一次UUID和Hash（正常消耗配额并记录Usage），不会创建截图任务，成功提示30秒后关闭。独立测试Main入口限制目的地和调用次数，不收集密码、Key、令牌或响应正文。
+
+本轮通过：无凭据401；有效Key的UUID GET和Hash POST均200/SUCCESS，UUID v4结构正确，含中文输入的SHA256与独立UTF-8计算一致；机器请求只携带ApiKey，两个接口各一次，Renderer HTTP/HTTPS请求为0。证据位于忽略的 `.runtime/utils-acceptance-*/evidence.json`。PNG和Retry-After仍是受控转发检查结论，未重复真实截图任务验收。
 
 ## 接手重试真实验收脚本
 
