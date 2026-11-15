@@ -1,6 +1,11 @@
 import { expect, test, type Page } from '@playwright/test'
 import { installMockApi, signIn } from './support/mockApi'
 
+test.beforeEach(async ({ page }) => {
+  // Auth contracts use the existing static fallback; loginPlanet.spec.ts covers real WebGL.
+  await page.route('**/components/login-planet/scene.js*', route => route.abort())
+})
+
 async function submitLogin(page: Page) {
   await page.goto('/login')
   await page.getByPlaceholder('请输入邮箱').fill('learner@example.test')
