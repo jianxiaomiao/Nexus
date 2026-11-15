@@ -97,5 +97,8 @@ public class WebhookScheduler implements SmartLifecycle {
         }
     }
 
+    // stop() permanently releases the worker; cached-context pauses must leave it running.
+    @Override public boolean isPauseable() { return false; }
+
     @Override public boolean isRunning() { return running; }
 }

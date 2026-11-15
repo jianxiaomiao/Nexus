@@ -24,6 +24,31 @@ class WebhookSchedulerTests {
         executor.shutdownNow();
     }
 
+    @Test void contextPauseAndRestartPreserveWorkerUntilContextClose() {
+        var scheduler = new WebhookScheduler(dispatcher, recovery, worker, executor, true, "10ms", "10ms");
+        try (var context = new AnnotationConfigApplicationContext()) {
+            context.registerBean("webhookScheduler", WebhookScheduler.class, () -> scheduler);
+            context.refresh();
+            verify(dispatcher, timeout(2000).atLeastOnce()).dispatchDueEvents();
+
+            for (int pause = 0; pause < 2; pause++) {
+                context.pause();
+                assertTrue(scheduler.isRunning(), "A cached context pause must not destroy the one-shot worker");
+                assertFalse(executor.isShutdown());
+                verify(dispatcher, never()).stopAccepting();
+                verify(worker, never()).close();
+
+                assertDoesNotThrow(context::restart);
+                assertTrue(scheduler.isRunning());
+            }
+        }
+
+        assertFalse(scheduler.isRunning());
+        verify(dispatcher).stopAccepting();
+        verify(worker).close();
+        assertTrue(executor.isTerminated());
+    }
+
     @Test void periodicFailureDoesNotStopNextRunAndStopPreventsMoreCalls() throws Exception {
         CountDownLatch calls = new CountDownLatch(2);
         doAnswer(invocation -> { calls.countDown(); if (calls.getCount() == 1) throw new IllegalStateException(); return null; })
