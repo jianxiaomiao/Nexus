@@ -1,6 +1,7 @@
 const fs = require('node:fs/promises')
 const path = require('node:path')
 const vm = require('node:vm')
+const ts = require('../../nexus-console/node_modules/typescript')
 const assert = require('node:assert/strict')
 const { _electron, expect } = require('../../nexus-console/node_modules/@playwright/test')
 const root = path.resolve(__dirname, '..')
@@ -8,8 +9,11 @@ const root = path.resolve(__dirname, '..')
 async function checkSourceGuard() {
   const source = await fs.readFile(path.join(root, 'main.cjs'), 'utf8')
   const context = vm.createContext({ URL, console })
-  const start = source.indexOf('function isTrustedScreenshotCaller(')
-  vm.runInContext(source.slice(start, source.indexOf('// 当前仅实现开发模式', start)), context)
+  const parsed = ts.createSourceFile('main.cjs', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
+  const guards = parsed.statements.filter(node => ts.isFunctionDeclaration(node) &&
+    ['isTrustedScreenshotCaller', 'isTrustedAppUrl'].includes(node.name?.text))
+  assert.equal(guards.length, 2)
+  vm.runInContext(guards.map(node => node.getText(parsed)).join('\n'), context)
   const frame = { url: 'nexus://app/short-links' }
   const contents = { mainFrame: frame }
   const owner = { isDestroyed: () => false, webContents: contents }

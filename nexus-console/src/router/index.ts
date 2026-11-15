@@ -1,5 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useUserStore } from '@/stores/userStore'
+import { ElMessage } from 'element-plus'
+import { configureSessionNavigation } from '@/api/http'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -59,13 +61,32 @@ const router = createRouter({
   ],
 })
 
-router.beforeEach((to) => {
+configureSessionNavigation(router)
+
+router.beforeEach(async (to) => {
   const userStore = useUserStore()
+  if (userStore.clearing || (userStore.accessToken && userStore.expiresAt <= Date.now())) {
+    const result = await userStore.invalidateSession(userStore.clearing
+      ? { reason: 'logout' } // Join the existing clear; do not start another intent.
+      : { reason: 'expired', context: {
+        operationVersion: userStore.operationVersion, mainRevision: userStore.mainRevision,
+      } })
+    if (result.status === 'stale') return false
+    if (result.status === 'ok' && result.operationVersion !== userStore.operationVersion) return false
+    if (result.status === 'failed') {
+      ElMessage.error({ message: userStore.clearError ?? '尚未确认会话清理，请重试。', grouping: true })
+      return false
+    }
+  }
+  if (userStore.clearError) {
+    ElMessage.error({ message: userStore.clearError, grouping: true })
+    return false
+  }
+  // The state may have changed while the clear was pending.
   const signedIn = Boolean(userStore.accessToken) && userStore.expiresAt > Date.now()
-  if (userStore.accessToken && !signedIn) userStore.clearSession()
 
   if (to.matched.some((record) => record.meta.requiresAuth) && !signedIn) {
-    return { name: 'login' }
+    return { name: 'login', replace: true }
   }
   if (signedIn && (to.name === 'login' || to.name === 'register')) {
     return { name: 'applications' }

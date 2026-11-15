@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { isNavigationFailure, RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import type { ScrollbarInstance } from 'element-plus'
 import { useUserStore } from '@/stores/userStore'
 import { Close, Document, Expand, Fold, Grid, Link, Monitor, SwitchButton } from '@element-plus/icons-vue'
@@ -12,6 +12,10 @@ const userStore = useUserStore()
 const collapsed = ref(false)
 const mobileMenuOpen = ref(false)
 const scrollArea = ref<ScrollbarInstance | null>(null)
+const logoutPending = ref(false)
+const logoutError = ref<string | null>(null)
+const logoutMessage = computed(() => logoutError.value ?? userStore.clearError)
+let disposed = false
 
 watch(() => route.fullPath, () => { mobileMenuOpen.value = false })
 watch(() => route.path, async () => {
@@ -24,11 +28,40 @@ function closeMenuOnEscape(event: KeyboardEvent) {
 }
 
 onMounted(() => window.addEventListener('keydown', closeMenuOnEscape))
-onUnmounted(() => window.removeEventListener('keydown', closeMenuOnEscape))
+onUnmounted(() => {
+  disposed = true
+  window.removeEventListener('keydown', closeMenuOnEscape)
+})
 
-function logout() {
-  userStore.clearSession()
-  void router.replace({ name: 'login' })
+async function logout() {
+  if (logoutPending.value || userStore.clearing) return
+  logoutPending.value = true
+  logoutError.value = null
+  let operationVersion = userStore.operationVersion
+  let cleared = false
+  try {
+    const task = userStore.invalidateSession({ reason: 'logout' })
+    operationVersion = userStore.operationVersion
+    const result = await task
+    if (disposed || operationVersion !== userStore.operationVersion || result.status === 'stale') return
+    if (result.status === 'failed') {
+      logoutError.value = userStore.clearError ?? '尚未确认退出，请重试。'
+      return
+    }
+    if (result.operationVersion !== userStore.operationVersion) return
+    cleared = true
+    const failure = await router.replace({ name: 'login' })
+    if (isNavigationFailure(failure) && !disposed && operationVersion === userStore.operationVersion) {
+      logoutError.value = '退出已确认，但页面切换失败，请刷新页面。'
+    }
+  } catch {
+    if (disposed || operationVersion !== userStore.operationVersion) return
+    logoutError.value = cleared
+      ? '退出已确认，但页面切换失败，请刷新页面。'
+      : '尚未确认退出，请重试。'
+  } finally {
+    logoutPending.value = false
+  }
 }
 </script>
 
@@ -97,11 +130,28 @@ function logout() {
             </template>
           </div>
         </div>
-        <el-button text class="logout-button" @click="logout">
+        <el-button
+          text
+          class="logout-button"
+          :loading="logoutPending || userStore.clearing"
+          :disabled="logoutPending || userStore.clearing"
+          @click="logout"
+        >
           <el-icon :size="18" aria-hidden="true"><SwitchButton /></el-icon>
-          <span>退出登录</span>
+          <span>{{ logoutMessage ? '重试退出' : '退出登录' }}</span>
         </el-button>
       </header>
+
+      <el-alert
+        v-if="logoutMessage"
+        class="session-clear-error"
+        :title="logoutMessage"
+        type="error"
+        show-icon
+        :closable="false"
+        role="alert"
+        aria-label="退出登录状态"
+      />
 
       <el-scrollbar ref="scrollArea" class="console-scroll-area" aria-label="控制台内容" :tabindex="0">
         <main class="console-content">
@@ -113,6 +163,7 @@ function logout() {
 </template>
 
 <style scoped>
+.session-clear-error { flex-shrink: 0; width: auto; margin: 12px 24px 0; }
 .console-shell {
   display: flex;
   height: 100vh;

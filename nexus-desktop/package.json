@@ -1,6 +1,6 @@
 {
   "name": "nexus-desktop",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
   "description": "Nexus desktop development shell",
   "main": "main.cjs",
@@ -8,13 +8,21 @@
     "start": "node scripts/start.mjs",
     "dev": "node scripts/dev.mjs",
     "build:renderer": "node scripts/build-renderer.mjs",
+    "pack:dir": "npm run build:renderer && electron-builder --win --x64 --dir --publish never",
+    "pack:win": "npm run build:renderer && electron-builder --win nsis --x64 --publish never",
     "test:smoke": "node scripts/dev.mjs --smoke",
     "test:standalone-smoke": "node scripts/start.mjs --smoke",
+    "test:packaged-smoke": "node scripts/test-packaged-smoke.cjs",
     "test:short-link-boundaries": "node scripts/test-short-link-boundaries.cjs",
     "test:short-link-ui": "node scripts/test-short-link-ui.cjs",
     "test:save-boundaries": "node scripts/test-save-boundaries.cjs",
     "test:tracking-boundaries": "node scripts/test-tracking-boundaries.cjs"
   },
-  "engines": { "node": ">=24.12.0" },
-  "devDependencies": { "electron": "45.2.3" }
+  "engines": {
+    "node": ">=24.12.0"
+  },
+  "devDependencies": {
+    "electron": "45.2.3",
+    "electron-builder": "26.18.0"
+  }
 }

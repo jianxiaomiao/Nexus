@@ -78,9 +78,8 @@ test('管理接口确认 JWT 无效后清除会话', async ({ page }) => {
   await signIn(page)
   api.failures.set('GET /api/application', { status: 401, code: 'INVALID_ACCESS_TOKEN', message: '凭证无效' })
   await page.getByRole('article').filter({ hasText: '示例应用' }).getByRole('link', { name: '查看详情' }).click()
-  await expect(page.locator('.detail-card.error-card')).toContainText('登录已过期，请重新登录')
-  await page.getByRole('link', { name: '返回 Applications' }).click()
   await expect(page).toHaveURL(/\/login$/)
+  await expect(page.getByRole('button', { name: '登录', exact: true })).toBeVisible()
 })
 
 test('其他 401 业务错误不误清会话', async ({ page }) => {

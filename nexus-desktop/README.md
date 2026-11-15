@@ -1,4 +1,71 @@
-# Nexus Desktop：阶段 1 开发壳
+# Nexus Desktop
+
+## Windows 打包配置检查点（2026-11-14）
+
+开发者已调整启动边界：仅开发模式覆盖 `.runtime/user-data`，打包版保留Electron默认userData，两者共用协议/窗口/IPC启动流程。Main的安装版AppUserModelId与 `electron-builder.yml` 同为 `com.nexus.desktop`；开发版沿用Electron可执行路径。冒烟与诊断环境标志仅开发模式生效，安装版不向程序目录写诊断图片。
+
+固定开发依赖electron-builder 26.18.0，目标Windows x64，ASAR归档，输出在忽略的 `release/`。文件清单只含Main、Preload、window-state、Renderer产物及必要package.json；不带测试入口、`.runtime`、相邻前端源码或开发依赖。当前版本为0.0.1，沿用默认Electron图标，没有配置代码签名或自动更新/发布；后端仍需单独运行于localhost:8080。
+
+- `npm run pack:dir`：先检查类型并重建Renderer，再生成 `release/win-unpacked/Nexus Desktop.exe` 及其资源目录。运行时必须保留整个目录，不能只复制exe。
+- `npm run test:packaged-smoke`：直接运行上述exe，使用正式命令行参数将userData隔离在`.runtime/packaged-smoke-*`，检查isPackaged=true、ASAR页面与Preload、可信IPC、History刷新、窗口可见和关闭后的窗口配置写入；不登录后端或创建业务资源。
+- `npm run pack:win`：同样先重建，再生成NSIS安装包，不会自动安装或发布。2026-11-14已生成并完成首次当前用户安装，见下方实际验收。
+
+NSIS采用带向导的当前用户安装，可选择安装目录、创建桌面和开始菜单快捷方式，卸载默认保留用户数据，安装结束不自动运行。`build/installer.nsh`仅通过官方customInstallMode宏固定当前用户模式；不能仅凭oneClick=false/perMachine=false就认定不存在全用户安装选项。当前用户模式且未接自动更新，因此packElevateHelper=false，不带可选提权helper。同版本覆盖、保留数据卸载及0.0.0→0.0.1升级已验收；安装版成功/失败通知与同进程去重也通过受控状态及真实Windows通知验收，见下节。
+
+本轮 `pack:dir`、实际打包exe冒烟、开发入口及短链IPC边界回归通过。ASAR清单51项且全部符合允许范围，包内Main/Preload/window-state字节与源码一致；配置中的8MiB/30秒机器转发和固定后端不因打包改变。依据：[electron-builder v26配置](https://www.electron.build/v26/docs/configuration/)、[NSIS自定义安装模式](https://www.electron.build/v26/docs/nsis/#custom-nsis-script)。
+
+### 首次安装实际验收与执行环境对照（2026-11-14）
+
+NSIS产物约118MiB、版本0.0.0、未签名，已检查哈希与包内容。用户通过向导安装到默认的LocalAppData/Programs/Nexus Desktop，HKCU注册卸载入口；安装载荷与检查过的ASAR哈希一致。桌面和开始菜单快捷方式均指向安装exe，AUMID为com.nexus.desktop；两者均实际启动，用户分别确认正常登录页，测试窗口随后正常关闭。证据`.runtime/nsis-acceptance-20261114-140208/`。NSIS负责安装文件、快捷方式和卸载入口，不自动提供后端服务。
+
+最初由Codex启动安装exe时观察到默认userData保存EXDEV。后续句柄路径与受控矩阵确认：这个上下文的逻辑C盘AppData映射到了D盘Codex包LocalCache，逻辑目标重命名失败、使用实际路径则成功；C盘普通Temp正常。并非C盘整体权限禁止，Encrypted属性也不足以证明加密是原因。
+
+用户随后亲自从桌面启动、移动并关闭，窗口配置成功保存到句柄确认的真实C盘Roaming/nexus-desktop/window-state.json；不再把先前工具启动链失败当作普通用户运行缺陷。证据manual-explorer-state.json与path-matrix.json均在上述验收目录。未修改生产算法、权限或真实目录加密设置，继续保留同目录临时文件+rename。后续正常Windows会话验收见下节。背景：[Microsoft的AppData虚拟化说明](https://learn.microsoft.com/en-us/windows/msix/desktop/desktop-to-uwp-behind-the-scenes)。
+
+### 重启、同版本覆盖安装和卸载通过（2026-11-14）
+
+为避开工具上下文，用户手动执行所有应用/安装/卸载操作，Agent只读核对；不要通过Codex启动流程重现正常Windows用户会话。普通窗口与最大化重启恢复通过，最大化/还原不改变保存的普通矩形。窗口必须完整位于工作区；部分超出工作区时回退居中是当前保留的策略，不能据此判断保存失败。
+
+同一0.0.0安装器覆盖至原目录后，ASAR和用户窗口配置哈希不变，两个快捷方式及应用ID正确；用户从开始菜单确认登录页与布局正常。随后用户从设置卸载：程序目录、快捷方式和进程移除，真实C盘配置仍在且逐字节一致。普通Windows设置和普通cmd均确认卸载项不存在；工具环境仍见旧注册表视图，未为此手动删除注册表。证据`.runtime/nsis-lifecycle-20261114-143143/`。
+
+该轮结束时程序已卸载，用户数据与构建产物保留。后续卸载后重装与跨版本升级见下节，自动更新尚未接入。
+
+### 跨版本升级0.0.0 → 0.0.1通过（2026-11-14）
+
+先保留已验证的0.0.0安装器，用户从正常资源管理器重装旧版，确认保留布局恢复后关闭。再用 `npm version 0.0.1 --no-git-tag-version --ignore-scripts` 同步应用及锁文件版本，`npm run pack:win`生成0.0.1包。appId、包名、用户目录与业务代码保持不变；配置文件里的version1是格式版本，不随应用版本变化。此步骤没有Git提交、标签或发布。
+
+用户不卸载旧版，直接从资源管理器执行0.0.1安装器覆盖原目录；新exe/ASAR版本与产物匹配、快捷方式/AUMID保持、真实C盘窗口配置逐字节不变。用户在正常Windows设置确认单一0.0.1条目，再从桌面确认登录页和布局恢复。工具注册表旧视图仍显示0.0.0，仅作环境差异记录，不据此删键或误判。
+
+证据`.runtime/nsis-upgrade-20261114-145231/`，旧包另存old-installer，新包为 `release/Nexus-Desktop-0.0.1-x64-Setup.exe`。新旧ASAR只有package.json元数据变化；此验收不覆盖未来配置迁移或自动更新。当前保留0.0.1安装、用户数据和两版产物，测试窗口已关闭。
+
+### 安装版通知受控验收通过（2026-11-14）
+
+使用现有安装版的正式Preload、跟踪IPC、响应校验、终态处理和Windows Notification；仅将本地8080后端临时替换为独立模拟服务，不修改Main/Preload/ASAR，不创建截图任务，不获取PNG，不需要登录或真实Key。安装版必须由用户从普通Windows桌面启动，不能由Codex启动或覆盖userData，以避开此前AppData重定向影响。服务及证据仅在项目目录运行；测试代码不进入打包文件清单。
+
+准备命令（均从仓库根目录执行）：
+
+```powershell
+node nexus-desktop/scripts/serve-installed-notification-mock.cjs --self-test
+node nexus-desktop/scripts/serve-installed-notification-mock.cjs --prepare
+```
+
+自检只使用临时端口，无Electron/真实后端；prepare只生成忽略目录`.runtime/installed-notification-mock-*/`中的调用片段。正式验收前由用户暂停真实8080后端，再用prepare打印的`--serve --dir`命令启动模拟服务。仅在127.0.0.1和::1双回环8080同时绑定成功后输出READY；端口冲突立即退出，不停止进程、不改端口、不绑定公网地址。
+
+模拟服务只接受两个固定UUID的GET状态查询和固定假Key；错误来源Host、方法、路径、Key及带正文的查询均拒绝，无HTTP控制入口。状态由服务标准输入命令控制：`success`令成功样例变为SUCCEEDED，`fail`令失败样例变为FAILED，`report`写摘要，`stop`释放两个监听。两样例初始均为RUNNING；成功元数据为虚构值，没有对应PNG。日志不保存请求头、正文、原始URL或真实凭据。
+
+用户手动从桌面打开Nexus后，在主页面开发者工具Console逐项复制生成的文件内容执行；若有粘贴保护，不自动绕过，按界面提示检查代码后操作。不要点击Playground创建任务。每一步均等待人工确认：
+
+1. `01-start-success.js`：要求Main当前没有跟踪任务，开始固定成功样例，等待确认POLLING/RUNNING，此时不应出现通知。
+2. 关闭开发者工具并最小化窗口；Agent向模拟服务输入`success`，等待下一次查询，用户确认真实成功通知。返回Console运行`02-read-state.js`，应为TERMINAL/SUCCEEDED。
+3. `03-retrack-success.js`：只允许上述成功终态，停止后重新跟踪同一ID；应再次得到SUCCEEDED且同一进程不重复通知。结合服务查询记录和用户观察，不把HTTP200当作通知已显示。
+4. `04-start-failure.js`：从成功样例切换到另一个固定失败样例，先确认RUNNING；最小化后Agent输入`fail`，用户确认真实失败通知，再用02读取TERMINAL/FAILED。
+5. `05-cleanup.js`：仅清理这两个测试ID或空跟踪，遇到其他任务拒绝清理。确认IDLE后用户正常关闭Nexus；Agent输入`stop`，确认8080释放后用户再恢复真实后端。无需删除用户配置或通知设置。
+
+注意：根部`screenshotTrackingStore.applySnapshot`收到SUCCEEDED后会自动尝试读取PNG，即使停留登录页也一样；该请求会被模拟服务拒绝为404，不返回图片，不影响Main已完成的终态/通知触发，也不修改正式逻辑来跳过它。清理后重跟踪同一成功ID可能再次尝试取图。
+
+技术证据为`requests.jsonl`、`service-summary.json`和人工提供的脱敏快照；是否看到通知单独记录，不替换或包装真实Notification，也不宣称采集了Main的show/failed事件。服务摘要的passed始终为null，不能单凭模拟服务自报通过。
+
+本轮用户确认RUNNING无通知、SUCCEEDED真实成功通知及TERMINAL/SUCCEEDED、同ID停止后重跟踪无新通知、FAILED真实失败通知及TERMINAL/FAILED。Agent核对同一Main进程身份、两次成功终态查询及一次失败终态查询；共46个GET、非GET为0，两条未匹配GET被404拒绝且无PNG返回。用户执行05确认IDLE并正常关闭后，Agent停止模拟服务并确认无Nexus进程、8080已释放、安装ASAR哈希未变。最终证据`.runtime/installed-notification-mock-T3Q88G/summary.json`为passed=true，人工确认保存在user-observations.json。实际截图任务、通知点击跳转及进程重启后的去重不在本轮范围；真实后端由用户按原方式恢复。
 
 ## 桌面页面构建（2026-11-13）
 
@@ -8,7 +75,27 @@
 
 静态协议、固定/动态页面 History 回退和 nexus 来源校验已接入。缺失资源和 API 路径不会回退为 HTML。`/api/` 与 `/v1/` 已通过 forwardBackend 固定转发至 localhost:8080；2026-11-14 `/api/` 真实登录与 Application 列表验收通过，随后重构和 `/v1/` 转发通过24项受控处理器检查，并完成真实UUID与Hash调用验收。短链打开Main/Preload能力已实现，页面接入待完成，见下方说明。该命令不生成安装包。
 
-当前复用 `../nexus-console` 的 Vue 源码与 Vite 构建配置。Electron Main 创建窗口并加载 Vue；已接入窗口状态文件持久化和任务完成通知，尚未实现安装包和登录续期。
+当前复用 `../nexus-console` 的 Vue 源码与 Vite 构建配置。Electron Main 创建窗口并加载 Vue；已接入窗口状态文件持久化和任务完成通知。NSIS本地安装、快捷方式、重启恢复、同版本覆盖、保留数据卸载/重装及0.0.0→0.0.1升级通过；登录续期与自动更新仍待完成。
+
+## 会话刷新恢复接入中（2026-11-14）
+
+Main内存会话、固定read/write/clear IPC、Preload和console的desktop.d.ts已完成当前检查。共享userStore新增mainRevision、operationVersion和初始化状态，以及applyMainState/initializeSession：只读取并应用Main状态，保留绝对expiresAt，不把恢复写回Main；同一Store并发读取去重，旧读取不覆盖较新的本地登录/清空或Main版本。初始化失败与成功读取空会话区分，失败后可显式重试；调用方await之后还须检查initializationStatus是否ready。
+
+Web没有window.nexusDesktop时仅保留原内存模式，不会因此持久登录。2026-11-15用户已在main.ts接入初始化等待：只有ready才安装Router，等待router.isReady后挂载；非ready显示错误并停止本次启动，当前通过整页刷新重试，没有页内重试按钮。此bootstrap只能按现有入口调用一次，未来添加按钮前需处理实例复用及重入保护。登录已通过beginLogin/completeLogin同步Main且真实刷新恢复通过；Console退出按钮已接invalidateSession，等待Main确认且代次仍匹配才导航，失败可重试、忙碌禁用、旧响应及卸载后不导航。真实Electron主动退出及同进程刷新不恢复也已通过，见下节。Router和HTTP过期/401现已接统一清理并通过受控测试，详见下一段；未实现Refresh Token、落盘记住登录或更新现有0.0.1安装包。
+
+Router等待过期/进行中的清理，失败取消导航，成功按最新状态返回登录路由。HTTP在附Bearer时为每个管理请求保存本地authContext（operationVersion/mainRevision），只处理带原上下文的管理401/INVALID_ACCESS_TOKEN；旧事件不清新会话，原请求仍失败且不重放。过期请求不发送，清理未确认时阻止后续管理请求；当前清理确认后replace(login)，导航失败单独提示。Main清理IPC抛错或版本冲突后只读一次，合法新版本空会话才确认完成，非空新会话不恢复也不追清。Pinia任务WeakMap使用toRaw(this)以兼容开发工具的action代理。
+
+受控回归在nexus-console目录运行：`node --test scripts/test-auth-session-initialization.mjs scripts/test-auth-session-login.mjs scripts/test-auth-session-invalidation.mjs`（49项）；`npx playwright test e2e/desktopSessionInvalidation.spec.ts e2e/desktopSessionLogout.spec.ts e2e/desktopSessionLogin.spec.ts e2e/auth.spec.ts --workers=2`（42项）。本轮均通过，另有E2E类型检查和桌面build:renderer通过。上述浏览器测试使用模拟API/桌面桥；真实Electron调用方受控验收见下一节，真实后端JWT过期及安装版仍需分别验证。
+
+在nexus-console目录运行`node --test scripts/test-auth-session-initialization.mjs`可验证真实Pinia Store与受控桥：15项通过，覆盖Web分流、空/有效/传输中到期会话、并发/实例隔离、迟到响应、失败重试及版本回滚。无需浏览器、真实Electron、后端或业务资源；应用和E2E类型检查也通过。这不是桌面刷新端到端验收。
+
+### 隔离Electron过期/401受控验收（2026-11-15）
+
+先在desktop目录执行`npm run build:renderer`，然后`node scripts/test-session-invalidation-controlled.cjs`；可用`--case=router-expired`等场景名定向运行。脚本自动用固定假凭据登录，不需用户输入、不需启动/停止真实后端、不绑定8080。测试入口复用正式Main/Preload/协议/构建页面和会话处理器，只把Main fetch替换为固定登录/列表响应，并拒绝范围外API及Renderer HTTP/HTTPS；每个窗口使用D盘.runtime内独立profile，结束自动关闭，不触及安装版用户数据。
+
+六个场景为`router-expired`、`request-expired`、`current-401`、`stale-before-save`、`stale-after-save`、`lost-clear-ack`。过期使用10秒模拟会话自然等待，不改系统时钟、不提前调用会自动清理过期会话的Main read；真实页面路由/分页事件触发守卫和HTTP，过期查询不会发出。旧401测试通过真实Store方法启动第二次登录意图并保存固定假响应，以验证Main保存前后的代次保护，不能当成真实后端重新认证或Refresh Token。丢确认场景在真实clear执行后抛测试异常，观察Store自己的只读核对，而非用诊断read代替它。
+
+本轮`.runtime/session-invalidation-controlled-AWEMKr/evidence.json` passed=true，六场景通过且正常退出。四个清理场景Main/Store变为空/revision2，同PID刷新仍为空；两个旧401场景clear IPC为0，释放前后会话一致，刷新恢复新revision2。18条请求全部为内存模拟（6假登录、12查询、其中4次401），Renderer HTTP/HTTPS及范围外请求0，无真实截图任务或资源创建。窗口可见、DOM/状态自动核对，`humanVisualConfirmation=false`；不是人工逐屏确认、真实后端JWT或安装版验收。
 
 ## 独立启动（2026-11-13）
 
@@ -18,7 +105,21 @@
 
 旧 `npm run dev` 仍会启动 Vite，但当前 Main 已固定加载 `nexus://app/`，它不再是独立加载的验收入口。下方旧启动流程、开发代理和验收条目保留当时的背景，以本节为当前入口说明。
 
-### 独立登录验收（2026-11-14）
+### 真实登录与刷新恢复验收（2026-11-15）
+
+先运行现有真实后端localhost:8080，在desktop目录执行`npm run build:renderer`，再运行`node scripts/test-session-refresh-acceptance.cjs`。测试入口在D盘.runtime创建独立profile，不启动Vite，不修改安装版数据；只允许登录POST和Application列表GET转发，不提供截图或其他资源创建路径。用户只在窗口输入凭据，不在聊天发送；登录成功后按底部面板依次确认开始刷新、进程重开及结束，窗口会自动关闭。不要点业务退出按钮，本轮尚未接其Main同步。
+
+本轮`.runtime/session-refresh-live-KWnmTg/evidence.json`为passed=true。真实登录POST200一次、Main写入一次；同一Main进程刷新后保持/applications、Main/Store一致、revision及原expiresAt不变，无新登录或写入，列表Bearer请求200；完全退出后同隔离profile重开为新进程，回/login且内存会话为空，用户确认三阶段页面正常。共四次列表200，另一次范围外GET被测试入口拒绝、未发后端；未知URL未记录，不将其解释为其他页面已验收。无真实截图/资源创建、无Renderer HTTP/HTTPS请求。首次setup曾在窗口显示前过早检查可见性，验收脚本改为等待后成功；未改业务代码。会话元数据及比较布尔被记录，凭据不离开比较上下文。
+
+这是源码独立Electron验收，未验证安装版、退出后刷新、自然到期、401清理、Refresh Token或跨进程记住登录。结束时测试进程已关闭，真实后端保持运行。
+
+### 真实退出与刷新验收通过（2026-11-15）
+
+真实后端就绪并重建Renderer后，运行`node scripts/test-session-refresh-acceptance.cjs --logout`。该模式在独立`.runtime/session-logout-live-*/profile`中打开正式源码Main/Preload/构建页面，只放行登录POST和Application列表GET，保留脱敏请求/IPC结果观察，不替换会话处理器或操作系统能力。用户登录后按底部面板确认，由脚本点击真实退出按钮，检查Main清空确认及Store状态，再在同Main进程刷新验证不恢复会话；最后人工确认后自动关闭。无--logout时保留上节的登录/刷新/重开流程。
+
+本轮session-logout-live-tsY6IZ/evidence.json为passed=true，用户确认三个页面步骤。Main成功写入/清理各一次，Main/Store状态由revision1有会话变为revision2空会话并回/login；同Main PID43604刷新后仍为空、revision不变，无新增登录/写入/清理，证明主动退出确已同步Main。登录POST先401后200均如实记录，列表Bearer GET200两次，范围外请求及Renderer HTTP/HTTPS请求均0。没有重启Main来掩盖结果、没有截图或资源创建；测试进程已关闭，真实后端仍运行。自然过期/401调用方仍未接入，失败/冲突真实环境及安装版不在本轮验收范围。
+
+### 独立登录验收（2026-11-14，历史检查点）
 
 先启动现有本地后端并确认8080可达，再运行 `node scripts/test-login-acceptance.cjs`。脚本不启动Vite，在隔离用户数据窗口验证真实后端400/401边界及IPC来源，然后等待用户在窗口登录；不要在聊天中发送凭据。成功后验证登录200、Bearer Application列表200、窗口可见与Renderer无HTTP/HTTPS请求，显示通过横幅30秒后自动关闭。证据位于忽略的 `.runtime/login-acceptance-*/evidence.json`；不记录凭据、请求体或响应正文，不创建业务资源或截图任务。
 

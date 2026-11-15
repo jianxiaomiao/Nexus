@@ -9,8 +9,14 @@ const {
 
 
 const DEV_ORIGIN = 'http://127.0.0.1:5178'
-const smoke = process.env.NEXUS_DESKTOP_SMOKE === '1'
+
+const smoke = !app.isPackaged && process.env.NEXUS_DESKTOP_SMOKE === '1'
 let mainWindow
+
+let authState = {
+  revision: 0,
+  session: null,
+}
 
 function createIdleTrace() {
   return {
@@ -49,14 +55,13 @@ function isTrustedAppUrl(value){
   }
 }
 
-if(app.isPackaged){
+  // 放在 app.whenReady() 之前
+  if (!app.isPackaged) {
+    app.setPath('userData', path.join(__dirname, '.runtime', 'user-data'))
+  }
 
-}else{
-  // 当前仅实现开发模式，独立构建的页面入口留到下一检查点。
-  app.setPath('userData', path.join(__dirname, '.runtime', 'user-data'))
-}
   if (process.platform === 'win32') {
-    app.setAppUserModelId(process.execPath)
+    app.setAppUserModelId(app.isPackaged ? 'com.nexus.desktop' : process.execPath)
   }
   protocol.registerSchemesAsPrivileged([
     {
@@ -860,11 +865,91 @@ if(app.isPackaged){
       }
     })
 
+    ipcMain.handle('auth-session:read', async (event) =>{
+      if(!isTrustedScreenshotCaller(event)) return { status: 'failed', code: 'FORBIDDEN' }
+
+      if(authState.session === null) return { status: 'ok', authState : authState,  code: 'SESSION_IS_NULL' }
+      const now = Date.now()
+      if (authState.session.expiresAt <= Date.now()) {
+        authState.session = null
+        authState.revision +=1
+      }
+      return { status: 'ok', authState : authState }
+    })
+
+    ipcMain.handle('auth-session:write', async (event, input) =>{
+      if(!isTrustedScreenshotCaller(event)) return { status: 'failed', code: 'FORBIDDEN' }
+
+      const isRecord = value =>
+          value !== null &&
+          typeof value === 'object' &&
+          !Array.isArray(value)
+
+    // 第一层：确认结构，避免读取字段时抛 TypeError
+      if (!isRecord(input) || !isRecord(input.session)) {
+        return { status: 'failed', code: 'INVALID_REQUEST' }
+      }
+
+      const { expectedRevision, session } = input
+      const { accessToken, tokenType, expiresAt } = session
+
+    // 第二层：确认字段类型与范围
+      if (
+          !Number.isSafeInteger(expectedRevision) ||
+          expectedRevision < 0 ||
+          typeof accessToken !== 'string' ||
+          accessToken.length === 0 ||
+          accessToken.length > 4096 ||
+          tokenType !== 'Bearer' ||
+          !Number.isFinite(expiresAt) ||
+          expiresAt <= Date.now()
+      ) {
+        return { status: 'failed', code: 'INVALID_REQUEST' }
+      }
+
+      if (expectedRevision !== authState.revision) {
+        return { status: 'failed', code: 'SESSION_CHANGED' }
+      }
+
+      authState.session = {
+        accessToken: input.session.accessToken,
+        tokenType: input.session.tokenType,
+        expiresAt: input.session.expiresAt,
+      }
+
+      authState.revision += 1
+
+      return {status: 'ok', authState : authState, code: 'SUCCESS'}
+    })
+
+    ipcMain.handle('auth-session:clear', async (event, input) =>{
+      if(!isTrustedScreenshotCaller(event)) return { status: 'failed', code: 'FORBIDDEN' }
+
+      if (
+          input === null ||
+          typeof input !== 'object' ||
+          Array.isArray(input) ||
+          !Number.isSafeInteger(input.expectedRevision) ||
+          input.expectedRevision < 0
+      ) {
+        return { status: 'failed', code: 'INVALID_REQUEST' }
+      }
+
+      if (input.expectedRevision !== authState.revision) {
+        return { status: 'failed', code: 'SESSION_CHANGED' }
+      }
+
+      // 输入合法且版本匹配，才允许清空
+      authState.session = null
+      authState.revision += 1
+      return {status: 'ok', authState : authState, code: 'SUCCESS'}
+    })
+
     console.log('[desktop main] Loading existing Vue app')
     // await mainWindow.loadURL(DEV_ORIGIN)
     await mainWindow.loadURL('nexus://app/')
     console.log('[desktop main] Document loaded; Vue boots in Renderer')
-    if (process.env.NEXUS_DESKTOP_DIAGNOSE === '1') {
+    if (!app.isPackaged && process.env.NEXUS_DESKTOP_DIAGNOSE === '1') {
       setTimeout(async () => {
         try {
           const state = await mainWindow.webContents.executeJavaScript(`({ path: location.pathname, appLength: document.querySelector('#app')?.innerHTML.length, password: !!document.querySelector('input[type=password]') })`)

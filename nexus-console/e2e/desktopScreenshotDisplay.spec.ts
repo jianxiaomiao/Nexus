@@ -31,7 +31,11 @@ async function setup(page: Page, mode: Control['mode'] = 'ok') {
       listener: null, mode, resolveStart: null, starts: 0, stops: 0, subscriptions: 0, results: [], stopResults: [], resumeResults: [], handoffs: [],
     }
     ;(window as unknown as TestWindow).__desktopDisplay = c
+    const unusedAuth = async (): Promise<never> => { throw Error('Unexpected auth session operation') }
     window.nexusDesktop = {
+      readAuthSession: async () => ({ status: 'ok', authState: { revision: 0, session: null } }),
+      writeAuthSession: async input => ({ status: 'ok', code: 'SUCCESS', authState: { revision: input.expectedRevision + 1, session: input.session } }),
+      clearAuthSession: unusedAuth,
       saveScreenshot: async () => ({ status: 'cancelled' }),
       getScreenshotResult: jobId => new Promise((resolve, reject) => {
         c.results.push({ jobId, resolve, reject: () => reject(new Error('Controlled download failure')) })

@@ -1,0 +1,31 @@
+appId: com.nexus.desktop
+productName: Nexus Desktop
+asar: true
+directories:
+  output: release
+  buildResources: build
+files:
+  - main.cjs
+  - preload.cjs
+  - window-state.cjs
+  - dist/renderer/**/*
+  - package.json
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  # 当前用户安装且未接自动更新，不附带提权辅助程序。
+  packElevateHelper: false
+  allowToChangeInstallationDirectory: true
+  include: build/installer.nsh
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Nexus Desktop
+  deleteAppDataOnUninstall: false
+  runAfterFinish: false
+  artifactName: Nexus-Desktop-${version}-${arch}-Setup.${ext}

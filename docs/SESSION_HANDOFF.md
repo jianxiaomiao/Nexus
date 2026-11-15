@@ -1,5 +1,116 @@
 # Nexus Session Handoff
 
+## 下一单元：后端Refresh Token设计，尚未定稿或实现（2026-11-15）
+
+- 用户开始讨论后端Refresh Token，请先讲和当前刷新恢复的区别，以及会话表、轮换、吊销边界；核心仍按学习分工由用户先设计/实现，本轮未授权写后端核心或迁移。用户已理解页面刷新只从Main恢复原Access Token、Refresh Token用来换新Access Token；把1/3 TTL刷新时机称为轮换、认为退出需刷新RT，以及将“不匹配/过期”统称吊销，需要分别纠正。
+- 已读当前`nexus-server/src/main/java/com/nexus/auth/{service/LoginService.java,token/JwtTokenService.java,web/BearerUserIdResolver.java,dto/LoginResponse.java}`：登录只返回accessToken/tokenType/expiresInSeconds，JWT含issuer/subject/iat/exp，无sid；Bearer解析验签后查当前User，现有迁移V1–V13没有登录会话/RT表。不要将工作区的webhook secret_refresh字段误当认证刷新实现。当前刷新恢复/退出代码和测试已完成下节范围，未改动。
+- 本轮说明/建议，**尚非最终架构决定**：轮换指一次有效RT消费后签发新AT+RT并使旧RT失效，和何时触发刷新不同；Token不是JWT签名密钥，退出应撤销当前后端会话及清客户端，不签新RT。拟用高熵随机不透明RT、MySQL仅存摘要；如要求旧RT重放检测，建议稳定auth_sessions与多代refresh token摘要记录，而非只覆盖当前摘要。同一session代表一次登录实例/凭据链，不是一用户唯一一行，也不直接复用Main内存revision。会话绝对寿命上限和可选闲置期限需再决定，避免无限滑动续期。
+- 未知/伪造RT只拒绝，不能凭客户端给的userId/sessionId吊销他人；确认匹配已消费旧RT时才讨论撤销所属会话链（严格轮换方案），并发刷新要客户端合并+后端事务/条件更新。成功响应丢失后旧RT重试可能触发重放，不能假设数据库摘要能还原新RT；首版可选重新登录或另行设计受限幂等，尚未决定。过期是按时间即时拒绝，不依赖清理定时任务。
+- 最先待用户决定的产品边界：退出是否要求已发出的AT立即失效，还是只禁止续期、允许AT到原到期时间。前者需要JWT关联session并在认证时检查后端会话，当前只有用户检查不能达到；后者更简单但必须明确剩余有效窗口。普通退出当前会话与退出全部会话分开；刷新必须检查当前User状态，不能凭旧RT恢复禁用/删除账号。客户端自动刷新时机、TTLs、接口传输/错误、锁和测试场景须之后逐步讨论，不先生成DDL。
+- 客户端约束仍适用：Electron RT由Main持有，不返回Renderer；Web的HttpOnly Cookie/CSRF另行设计。现有Main转发不支持Cookie/Set-Cookie。AT临近过期/401处理将来才从“直接清理”适配为“受控刷新后再决定”，不对所有401盲刷或无条件重放写请求。跨进程记住登录独立于RT签发，不自动承诺。
+- 参考已核对的IETF RFC 6749 §6及RFC 9700 §4.14（轮换/保留关联/重放检测与撤销），Nexus是自己的第一方认证流程，不因参考这些规则而引入完整OAuth服务器或宣称OAuth实现合规。后端设计是新的学习单元，建议下一轮用本交接及本地代码在新对话继续；不要重复桌面历史验收或创建截图任务。
+
+## 当前单元：过期/401的隔离Electron受控验收通过（2026-11-15）
+
+- 最新用户要求先说明步骤，再准备隔离Electron过期/401测试，禁止真实截图任务。Agent新增独立测试入口`nexus-desktop/scripts/session-invalidation-controlled-main.cjs`和驱动`test-session-invalidation-controlled.cjs`；不修改Main/Preload/Store/Router/HTTP生产实现。测试入口在D盘.runtime隔离每场景profile，保留正式Main/Preload/nexus协议/构建页面/来源校验及会话处理器，只将Main fetch替换为固定假登录与Application查询响应，没有真实fetch回退、不绑定8080，并阻断Renderer HTTP/HTTPS。当前真实后端无需停止，也没有被访问。
+- **六场景均通过**：Router自然过期、HTTP请求前自然过期、当前401、Main保存新会话之前的旧401、Main保存之后的旧401、清空已执行但IPC确认丢失。过期用模拟登录TTL=10秒自然等待，不改系统时间或直接改expiresAt，触发前不调用会自动过期清理的read IPC；分别点击真实开发文档链接和分页条数按钮，让正式守卫/HTTP执行清理，Main clear各一次，过期查询未到达Main fetch。当前401也从真实分页事件进入API与协议转发。四个清理场景都在同PID刷新后仍为空/revision2，无再登录/再写入/再清理。
+- 旧401场景由正式页面发出查询，测试入口延迟该响应；已登录时公共登录路由会被守卫拦回，所以第二次登录意图通过真实Store beginLogin/completeLogin及真实写IPC注入固定假响应（并非再次真实表单登录或后端续期）。分别在Main revision仍1/已2时释放旧401，操作代次已经变化；Main clear为0，Store/Main快照与释放前完全一致。随后刷新恢复revision2的新会话。IPC丢确认场景是正式clear先真实执行，再由测试包装器抛错；在测试自己的诊断read之前，已观察到Store通过真实IPC只读核对一次并确认空状态，避免观察操作掩盖遗漏。
+- 证据`nexus-desktop/.runtime/session-invalidation-controlled-AWEMKr/evidence.json` passed=true/phase=complete，脚本退出0，六窗口closed=true且PID检查均已退出。累计18条模拟Main请求（6次假登录、12次查询，其中4次401），8次成功写IPC、4次清理；范围外请求0、Renderer HTTP/HTTPS尝试0、pageerror0。userData均为本轮场景独立D盘profile，未接触安装版或默认用户配置。`humanVisualConfirmation=false`：窗口真实可见且DOM/状态自动核对，没有用户逐屏视觉确认、没有截图任务或资源创建，也不声称真实JWT/后端/安装版自然过期通过。桌面类型检查/构建及新脚本语法检查通过。
+- 当前客户端“登录→刷新恢复→退出/过期/401清理”的源码检查点已完成其记录范围：真实后端登录/主动退出证据见下方，过期/401为本轮真实Electron+模拟响应。Refresh Token、跨进程记住登录、后端JWT即时吊销及安装版更新仍未实现/验收；若继续长期登录，应先讨论后端Refresh Token的会话、轮换和吊销边界，不重复创建截图任务。
+
+- 用户已明确授权Agent实现Router/HTTP接入及IPC异常后的只读核对，并做受控测试。HTTP附Bearer时复制operationVersion/mainRevision到每请求config.authContext，仅作为本地元数据；明确管理路径、Bearer、401和INVALID_ACCESS_TOKEN且存在原上下文时才调用invalidateSession。新登录刚开始而Main revision尚未改变的旧401也会被丢弃，不清Store、不发IPC、不导航；其他401、403、500、网络错误和缺上下文不误清。原请求始终reject，不自动重放。
+- Router守卫已异步等待过期清理或复用进行中的清理，成功且操作仍有效后按最新状态决定导航；stale或失败取消导航。HTTP请求前发现过期先清理并拒绝发送，clearing/clearError阻止后续管理请求；清理确认后且代次仍匹配才replace(login)，并发结果复用登录导航。导航能力由Router注册到HTTP，HTTP不导入具体页面路由；避免API类型依赖拉入Vue页面。失败沿用Store错误区并有分组提示；Docs页显示提示，未另增全局恢复界面，必要时用户显式刷新重新核对Main。
+- Store在clear IPC抛错或SESSION_CHANGED后只读一次：契约合法、session=null且revision至少原目标+1才确认完成；仍原版本非空或读取失败/坏快照返回CLEAR_FAILED，较新非空返回SESSION_CHANGED。每次等待后核对操作，绝不换成新revision自动重清，也不把非空读取结果恢复进正在退出的Store。结构校验复用isAuthState。
+- 受控浏览器发现Pinia开发工具为各action创建不同this代理，原WeakMap键因此找不到共享清理任务，第二个同目标401被当作stale提前结束。根据本地Pinia patchActionForGrouping实现，改以toRaw(this)作稳定键，同时修复同形初始化去重；保留不同Store实例隔离，新增两个代理级回归。并发浏览器场景现已通过，未关闭开发工具或绕过错误。
+- **本轮验证通过**：真实Pinia Store的初始化/登录/失效脚本共49/49；Chromium模拟API及Main桥的auth、desktopSessionLogin、desktopSessionLogout、新desktopSessionInvalidation四文件42/42（新失效场景21项）；应用类型检查随build:renderer通过，E2E类型检查通过，renderer构建通过，范围内diff检查通过。覆盖原始401仍reject、不重放、上下文不发网络、Main版本未变/已变的旧401、并发去重、Router/请求前过期与失败、IPC丢回执只读确认、冲突不追清、迟到结果与导航取消、无桥Web。首轮并发失败已修复；测试进程默认权限退出等待曾中断，最终完整回归在正常可管理测试子进程的权限下退出0。未访问真实后端、创建截图/其他业务任务、修改Main/Preload/数据库/ECS或更新安装版；构建有现存大chunk提示，未做无关优化。
+- 上述49/42检查当时只覆盖Store和模拟浏览器；后续真实Electron受控调用方验收已补，使用本节最上方独立证据，不扩大为真实后端JWT或安装版。Refresh Token、跨进程记住登录仍未实现。已有真实主动退出/刷新证据继续见下方。
+- 用户授权真实退出验收，Agent重建Renderer通过类型检查/构建，给既有test-session-refresh-acceptance.cjs增加--logout模式并复用受限Main入口，不改业务核心。证据`.runtime/session-logout-live-tsY6IZ/evidence.json`为passed=true/mode=logout/phase=complete，执行会话57047退出0。用户正常登录并逐项点击三个面板，聊天确认全部完成。
+- **真实退出与刷新不恢复通过**：正式页面按钮→Store invalidateSession→真实Preload/IPC→Main clear确认一次；Main/Store由revision1有会话变为revision2空会话、回/login，clearing=false且无clearError。同Main PID43604刷新后仍/login、Main/Store均空、revision仍2，无新登录/写入/清理；不是通过重启Main来掩盖结果。清理完成后测试窗口正常关闭，PID已退出，真实后端127.0.0.1:8080/Java PID24144仍监听；默认安装版及用户数据未动。
+- 请求审计保留两次登录POST（先401后200），成功Main会话写入仅一次、清理一次，列表Bearer GET200两次、范围外请求0、Renderer HTTP/HTTPS请求0；没有截图任务或其他资源创建，未记录凭据/正文。此轮真实源代码验收只覆盖主动退出成功及刷新，不等于自然过期、401、失败/冲突真实环境或安装版通过；失败/冲突/迟到结果已有模拟测试。
+- Store统一清理已由另一会话实现（invalidateSession、clearing/clearError、同目标去重、冲突只读核对、新登录阻断及测试脚本）。用户本轮明确要求Agent实现退出按钮，Agent只改ConsoleLayout.vue的调用方和错误/忙碌UI，不修改Store、Main、Preload、Router或http核心：调用invalidateSession({reason:'logout'})后记录本次操作代次，等待结果；stale、代次变化或组件卸载不导航；failed留当前页展示持久错误及重试；只有ok且返回代次仍匹配才router.replace(login)。本地logoutPending覆盖Main已完成但导航未完成的窗口，防重复点击；导航被守卫阻止或抛错时区分为“退出已确认，但页面切换失败”。
+- 新增desktopSessionLogout.spec.ts，受控Main状态放在Node测试侧以跨页面刷新保存，验证等待/去重、成功后刷新不恢复、拒绝/异常后重试、冲突不追清、迟到确认不覆盖新本地会话、组件卸载、导航阻止。新7项浏览器场景7/7通过；此前同轮原Web认证12项及桌面登录2项均通过，应用/E2E类型检查通过。测试定位曾误匹配登录成功toast及重试后的旧按钮文案，已精确到退出错误区和稳定按钮；未改业务来绕过失败。模拟回归未访问真实后端；之后真实补验结果见上。
+- 后端仍无Refresh接口/会话迁移，真正续期还需分别设计后端、桌面Main及Web适配，跨进程记住登录另行决定。当前过期/401调用方已按上方记录实现，并通过模拟浏览器及真实Electron受控验证。
+- 默认核心由用户先写；其已明确逐项授权Agent实现Store初始化、退出按钮，以及本轮Router/HTTP和清理异常核对。这些授权不延伸到后端续期、数据库、安装版或部署；保留原有未提交修改。
+- 最新代码已在另一对话接入登录同步：beginLogin在HTTP之前记录操作代次和Main版本，completeLogin等待writeAuthSession、核对返回状态后applyMainState；LoginView只在保存成功且操作仍有效时提示成功并导航，Web仍为内存登录。迟到成功写入仅按其返回的确切revision尝试清理，不重放到较新会话；保存失败留在登录页。用户报告另一对话通过24项Store检查、51项模拟浏览器测试及应用/E2E类型检查，本对话只读核对实际代码，未重复运行这些整套检查。
+- 退出、过期及401在源码均已接统一Main清理并通过各自受控检查；过期/401另有本节最上方真实Electron+模拟响应证据。此前session-refresh-live-KWnmTg的真实验收早于退出按钮接入，不能把该证据当作退出/401通过；真实退出使用单独session-logout-live-tsY6IZ证据。main.ts已接显式Main初始化并等待ready；LoginService仍只签发JWT、无Refresh Token。
+- 用户随后启动真实8080后端并授权打开隔离窗口，自行登录。Agent重建Renderer（类型检查及构建通过），新增session-refresh-acceptance-main.cjs和test-session-refresh-acceptance.cjs，仅测试入口隔离userData及观察Main fetch/IPC结果，不改Main/Preload/Store业务代码。只转发固定登录POST和Application列表GET，拒绝其余路径/方法；不记录密码、Token、请求体/响应正文或查询参数。没有启动Vite或使用安装版0.0.1。
+- **真实验收通过**：`.runtime/session-refresh-live-KWnmTg/evidence.json` passed=true、phase=complete，执行会话81677退出0。首次空会话ready/revision0；用户登录POST200一次、Main write成功一次，Main/Store token一致性仅在Renderer内比较并返回布尔，revision1及绝对expiresAt匹配。同Main PID30176刷新后仍/applications，版本和原到期时间不变，无新登录POST/写入，新增Bearer列表请求200；关闭整个进程后用同D盘隔离profile重开为新PID27072，回/login且session=null/revision0。用户通过三个面板按钮逐步确认登录页/刷新页/重开页正常，并在聊天确认全部完成。进程已全部退出、真实后端仍127.0.0.1:8080/Java PID24144监听。
+- 请求审计：共一次真实登录POST200、四次Application列表GET200；另一次范围外GET被测试入口拦截，未发送后端。日志不保留未知原始URL，不能推断具体路径/起因；不掩盖此记录或扩大为其他页面验收。没有创建截图任务或其他资源，Renderer HTTP/HTTPS请求0。首轮`.runtime/session-refresh-live-hW9oph/`在setup检查窗口可见性过早退出，无后端请求；测试改为等待isVisible后重开新隔离窗口成功，不修改应用显示逻辑。此轮没重跑用户报告的24/51套模拟检查，也未进行安装版、退出清理、到期或401真实验收。
+- 用户已选择先单独实现Electron进程内刷新恢复——Main内存保留原有效期会话，可信主页面通过窄IPC恢复，Router等待初始化，过期/退出清空，应用退出后不保留；Web仍用原内存模式。刷新不能重算expiresAt延长JWT寿命，也不将localStorage明文持久化当作续期。
+- 后续真正续期再讨论后端随机不透明Refresh Token、MySQL仅保存摘要、过期/吊销/轮换/重放与并发边界及账号状态；桌面由Main持有长期凭据且不回传Renderer，Web的HttpOnly Cookie/CSRF是另一个客户端适配。当前forwardBackend不转发Cookie/Set-Cookie，不能默认桌面已支持Cookie方案。跨应用重启的记住登录还需单独设计受保护落盘与恢复策略，不随本轮说明自动实施。
+- 用户已补齐Main返回状态：read空会话也status=ok并返回authState（附带SESSION_IS_NULL code）；write/clear成功均返回修改后authState及SUCCESS。clear现在接收对象{expectedRevision}，不再是裸数字；普通非法字段返回INVALID_REQUEST、合法但不匹配版本返回SESSION_CHANGED。已验证空读→写→清→空读→再登录版本0/1/2/2/3、到期只清一次、快照结构化克隆独立、无效输入及旧版本不改状态、同版本两个write仅一个成功、来源先于输入校验。均为抽取处理器的Node VM隔离检查，不是Electron端到端。
+- 用户移除了clear中校验前的解构，最新复测可信来源的null及省略参数（空/有会话共四种组合）均返回INVALID_REQUEST，session/revision不变；空读及write/clear最新状态、旧clear返回SESSION_CHANGED回归通过，语法通过。Main目前未再发现阻塞问题，可进入Preload/类型声明接线；Agent仍未改核心代码。
+- 用户确认IDEA未解析提示标在input.expectedRevision的属性名上，不是独立变量；当前CJS处理器参数未声明输入结构，代码无可见未声明变量且运行检查通过，解释为符合IDE类型信息不足的情形。建议给回调参数补JSDoc结构说明（如@param {{expectedRevision:number}} input），不关闭检查、不删除运行时校验；无需为提示迁移整个Main到TS。
+- 用户已在Preload既有nexusDesktop对象增加readAuthSession/writeAuthSession/clearAuthSession，频道分别为auth-session:read/write/clear；read无参，write传{expectedRevision,session}、clear传{expectedRevision}，均原样返回invoke Promise，无通用invoke暴露。Agent按明确授权补齐desktop.d.ts的AuthSession/AuthState、两个Input及三个独立Result（read成功code可选SESSION_IS_NULL；write/clear成功code固定SUCCESS；read失败仅FORBIDDEN，修改失败另有INVALID_REQUEST/SESSION_CHANGED），未修改Main/Preload核心代码。
+- 应用类型检查通过；E2E类型检查起初发现三处旧NexusDesktop模拟缺少新增方法，Agent仅机械补齐desktopScreenshotDisplay/desktopShortLinks/trackingInitialization三个fixture为意外调用即抛错的未使用会话方法，复查通过。Preload语法通过；隔离加载真实Preload连到抽取Main处理器，固定频道、无参/对象参数、空会话、最新状态、旧版本及非法输入返回契约通过。未启动真实Electron/浏览器、未运行截图或后端请求，未更新安装包。
+- 当前用户要求先讲Store初始化、登录/退出同步及revision/迟到响应，核心由其先写。核对清理入口包含Console退出按钮、Router过期判断、http请求过期判断及401/INVALID_ACCESS_TOKEN响应，不可仅接按钮而让其他入口只清Pinia。建议由Store集中管理纯本地应用/清空与同步Main的操作，恢复Main快照不再次触发write、不重算expiresAt。
+- 初始化入口建议main.ts在app.use(pinia)后、app.use(router)前await，useUserStore(pinia)明确实例；App.onMounted对首次导航太晚。Main revision未读到前用null而非猜0；初始化幂等/复用Promise，无桌面桥时Web维持内存模式，IPC失败区分于成功读取空会话。本轮先指导用户写Store状态、applyMainState/initializeSession，再审查和接启动流程，不一次代写完整链路。
+- 登录意图开始（HTTP发出之前）捕获本地操作代次和Main版本，HTTP成功后仅当前意图可write，Main成功返回的状态才应用Pinia。退出先使旧本地响应失效、清本地凭据，再同步Main；只有Main确认才宣称退出完成。Main写/清需按序协调前序确认的revision，不能只忽略旧UI响应而遗漏已在Main完成的写入；SESSION_CHANGED不盲目取新版本重放旧意图。Main revision防过时修改，本地操作代次防迟到结果覆盖当前UI，两者职责不同。详细并发规则留到后续同步动作逐步指导。
+- Agent按局部授权实现userStore初始化：mainRevision初始null、operationVersion、initializationStatus idle/loading/ready/failed及静态initializationError；applyMainState校验并只应用Main快照，拒绝低版本回滚，保留原expiresAt，传输中已到期则只清本地凭据、不写/清Main。原expiresInSeconds兼容字段恢复时取剩余秒数，不用它重算expiresAt。initializeSession按每个Store的WeakMap去重进行中Promise，ready后不重复读取；无桥时保留Web内存状态，有桥缺方法/拒绝/异常/坏快照记failed并允许显式重试，不冒充空会话成功；初始化Promise正常完成后调用者仍须检查status=ready，不能只await就安装Router。
+- 为挡住迟到初始化，现有setSession/clearSession只新增operationVersion递增，不增加Main写/清。较新本地动作发生后，旧读取成功或失败均不再应用，初始化回idle；读取期间已有较新Main快照则保留新版本。Agent未接main.ts、LoginView、Router、http，也未修改Main/Preload。测试nexus-console/scripts/test-auth-session-initialization.mjs通过15/15，命令node --test scripts/test-auth-session-initialization.mjs（console目录）：真实Pinia/TS Store、受控桥与固定时钟，无Electron/浏览器/后端；覆盖Web新Store不恢复、快照与到期、并发去重及实例隔离、迟到成功/失败、失败重试、旧桥、低版本回滚等。应用和E2E类型检查通过，diff检查通过。
+- 用户问“Store写在console，网页也具备吗”：共用代码不等于有Electron能力，普通Web无window.nexusDesktop，不会读取Main或因此刷新保持登录。最新源码版登录/刷新恢复已通过上述真实验收；退出/过期/401的Main清理尚待实现，安装版0.0.1未重建。
+- 2026-11-15用户要求先解释main.ts如何等待初始化、ready后再安装Router及失败处理，核心启动逻辑由用户写；Agent仅只读核对，未改main.ts。澄清Vue main.ts只调度启动，不规定Token等实际会话数据：Electron Main持有数据，Store通过桥读取。initializeSession内部捕获失败并正常完成Promise，因此await完成不等于ready；ready可以是session=null。失败或idle均不安装Router，失败需可见错误/显式重试，不伪装成未登录直接跳登录页。建议app/Pinia/ElementPlus只创建安装一次，重试只重跑初始化，成功后Router安装和App挂载也仅一次，可等待router.isReady；不要在App.onMounted才恢复。具体失败面板样式可由Agent后续机械补齐，不自动实现整个阶段。
+- 用户已实现main.ts异步bootstrap：创建app/Pinia、安装Pinia/ElementPlus→await初始化→非ready写失败文字并return→安装Router→await router.isReady→mount，外层catch仅记录错误名称和展示通用失败文本。Agent未改main.ts；类型检查及内存转译隔离检查通过等待/ready门控/失败或idle不导航不挂载/意外异常/新页面只挂载一次。**当前重试是用户整页刷新，不是页内按钮。** 函数内创建app/Pinia且无重入锁；模拟重复调用会两次安装Router并请求mount，但源码目前没有再次调用或按钮绑定，不能据此误报现有启动重复挂载。未来若加按钮需先改为实例只创建一次及防并发/重复挂载。
+- 启动开始使用readAuthSession后，三处此前刻意抛错的E2E桥模拟需要适配；Agent仅将desktopScreenshotDisplay/desktopShortLinks/trackingInitialization的readAuthSession改为成功返回revision0/session=null，write/clear仍意外调用即抛错，未改变业务测试规则。应用和E2E类型检查通过，三文件37项模拟Chromium回归37/37通过（1.4分钟）；没有真实Electron、后端或截图任务，本轮Main.ts未修改。当前“单次启动/失败后整页刷新重试”范围检查通过，不代表已支持页内按钮重试或完整登录刷新恢复。
+- 用户要求先讲统一退出/过期/401清理入口、revision冲突和迟到响应；本轮仅解释及读代码，不实现核心。建议Store集中异步invalidateSession（命名由用户定），区分主动logout与针对旧观察/旧请求的自动失效；自动事件必须在修改本地代次/凭据前核对原operationVersion及mainRevision，不匹配即stale。401还保留管理路径、已发Bearer及401/INVALID_ACCESS_TOKEN条件，不对登录错误、403、机器API或网络错误清管理会话；原请求失败继续reject，不自动重放业务请求。
+- 建议被接受的清理意图推进一次operationVersion并先清本地凭据、保留Main已知revision，再用捕获版本调用clearAuthSession，确认返回空会话及新版本；同目标重复清理去重，共享进行中任务。清理未确认时阻止新登录，现有在途completeLogin仍保留按确切saved.revision清理迟到写入的补偿，不将“忽略UI响应”等同撤销Main修改。Web只清本地即可；桌面IPC失败明确failed，不伪装退出成功。
+- 冲突初步建议：SESSION_CHANGED时可只读一次Main，若当前操作仍有效且Main已空，采纳合法新revision并确认完成；若Main仍非空则返回冲突，不自动换新revision再clear，不把该非空凭据恢复进正在退出的Store。每次await后检查本地操作代次，旧完成不再apply空快照/提示/导航；只在当前清理被确认时由调用方导航，Store不直接依赖Router。第一小步由用户先写Store清理入口与结果，之后再接退出按钮及两个过期入口/401；不一次生成整个阶段。
+- Refresh Token、跨进程记住登录及JWT服务端即时吊销均不在本轮。Main清理只删除客户端持有的会话，不会自动使后端签发的JWT失效。相关文件：nexus-console/src/stores/userStore.ts、src/api/http.ts、src/router/index.ts、views/ConsoleLayout.vue；nexus-desktop/main.cjs、preload.cjs及session-refresh验收脚本。核心继续开发者先写，Agent仅在明确局部授权下实现；不修改ECS、数据库、既有截图业务或自动提交。
+
+## 安装版通知受控验收通过，模拟服务已停止（2026-11-14）
+
+- 用户亲自暂停真实后端、从普通Windows桌面启动已安装的0.0.1，并在主页面Console逐步执行固定测试片段；Agent只运行模拟服务和只读核对，避开Codex启动链及AppData重定向。未修改Main/Preload/Store/ASAR或打包配置，未创建真实截图任务、未连接数据库、未返回PNG。安装ASAR哈希仍为FAD674EBBA737C815D6D470D7F9EB41E5B2929A1E339AB2FD56B7836E8C8CA86。
+- 新增独立脚本nexus-desktop/scripts/serve-installed-notification-mock.cjs：--prepare生成01成功开始/02读状态/03重跟踪去重/04失败开始/05清理；--self-test在临时端口通过状态、双回环、鉴权、Host/正文/路由/方法拒绝、端口冲突和片段语法检查；--serve --dir只在127.0.0.1及::1:8080同时绑定成功后READY。服务仅接受两个假UUID及假Key的GET查询，通过stdin success/fail切换终态，其他请求拒绝，无创建/PNG/HTTP控制接口。测试工具不进入ASAR。
+- 三个场景通过：RUNNING时无通知，SUCCEEDED后用户实际看到成功通知且02为TERMINAL/SUCCEEDED；stop后重跟踪同ID仍为成功终态，用户最小化观察约10秒无新通知，Main PID35404/创建时间/路径保持一致、服务记录两次成功终态响应；另一ID的FAILED后用户实际看到失败通知且02为TERMINAL/FAILED。真实Preload/IPC、Main校验/状态/去重和Windows通知均参与；未替换Notification、未采集其show/failed事件，不把HTTP200单独当作可见性证明。
+- 准备时漏查根Store收到SUCCEEDED会自动尝试取图（即使登录页）；两次成功后共两条未匹配GET被服务404拒绝，与源码该逻辑一致。日志不保存原始URL，不能凭日志单独证明具体路径；没有PNG返回，不修改正式业务绕过该行为，也不把取图失败误记为通知失败。
+- 用户执行05确认IDLE/jobId=null后正常关闭Nexus。Agent向执行会话52478输入stop，服务退出0；只读确认无Nexus进程、无8080监听。共46个GET、两次success/SUCCEEDED和一次failure/FAILED响应、两条404、非GET为0。证据nexus-desktop/.runtime/installed-notification-mock-T3Q88G/summary.json为passed=true，另有requests.jsonl、user-observations.json、调用片段；service-summary.json的passed=null保留为服务自身不判人工结果的设计。
+- **当前0.0.1保持安装，应用关闭、模拟服务已停止，用户已恢复真实后端。** Agent只读确认127.0.0.1:8080由Java进程PID55260（D:\java21\bin\java.exe）监听，已更新summary.json；没有调用业务接口，不将监听恢复表述为业务健康检查。本地安装生命周期及安装版通知检查点均通过，不代表真实截图执行/下载回归、通知点击跳转、进程重启后的去重持久化、签名、自动更新或登录续期已完成。按既有分工，核心设计/代码仍由开发者先写；尚未启动下一功能。
+
+## 跨版本升级0.0.0 → 0.0.1通过；当前新版已安装（2026-11-14）
+
+- 用户要求先重装已卸载的旧版，再做真实升级并保留配置。所有安装器/应用均由用户从资源管理器/桌面手动启动，Agent只构建和只读核对，避开Codex路径及注册表视图差异。证据`.runtime/nsis-upgrade-20261114-145231/summary.json`为passed=true。旧0.0.0安装包已复制留存在该目录old-installer并校验原SHA256不变；用户未找到备份目录时改用release中哈希相同的原旧包，未重复创建资源。
+- 旧版重新安装到原目录后，ASAR哈希与原产物一致，真实C盘保留配置逐字节不变，快捷方式恢复；用户手动启动确认旧版登录页和布局恢复后关闭。这也补验了卸载保留数据→重装旧版的恢复路径。
+- Agent仅机械同步package.json与package-lock.json根/包版本为0.0.1，使用npm version --no-git-tag-version --ignore-scripts，未提交/打标签/发布。appId com.nexus.desktop、name nexus-desktop、productName、打包配置、Main/Preload/window-state与Renderer内容不变；窗口配置格式version仍为1，无数据迁移。
+- `npm run pack:win`通过类型检查/Renderer构建/NSIS生成。新安装包release/Nexus-Desktop-0.0.1-x64-Setup.exe，124160528字节，SHA256 60430AB3465065EFD7DBB1D1C14AF61DF6EA06D7DE265AFF56D94D8BDC82B0B1，未签名；新ASAR SHA256 FAD674EBBA737C815D6D470D7F9EB41E5B2929A1E339AB2FD56B7836E8C8CA86。新旧ASAR逐文件比较仅package.json变化，其他文件字节相同。Windows exe ProductVersion为四段0.0.1.0、FileVersion为0.0.1，应用包版本为0.0.1，不混为版本错误。
+- 用户保持旧版安装，直接手动执行新0.0.1包，没有先卸载；安装目录与两个lnk目标/空参数/AUMID保持一致，安装exe和ASAR均核对为新版本载荷。用户在普通Windows设置确认只有一个Nexus Desktop 0.0.1，再从桌面手动启动，确认登录页和旧布局正常后关闭。关闭后真实C盘配置（x512/y129/1154x868、maximized=false、schema1）哈希仍与升级前一致，配置文件和exe句柄均确认真实C盘。
+- 工具HKCU仍显示旧0.0.0私有/合并视图，记录但不据此误判升级失败或手动删键；正常Windows版本结论依据用户设置界面确认与实际新exe/载荷。版本元数据变化覆盖安装器识别/替换/配置保留，不代表将来配置格式迁移、自动更新、签名/公开发布或新业务兼容性已验收。未新增/重跑真实截图、短链或数据库测试。
+- **当前状态：Nexus Desktop 0.0.1保持安装，测试窗口已关闭，用户配置保留；旧/新安装包与证据保留，源码与锁文件为0.0.1。** 本地安装升级单元已达到当前检查点；用户尚未指定下一任务。默认图标、作者/正式版本策略、签名、自动更新和Refresh Token仍未完成，不自动进入下一大功能。
+
+## 安装生命周期验收通过；当前已卸载（2026-11-14）
+
+- 用户要求避开Codex路径重定向；本轮应用启动/移动/最大化/关闭、同版本安装器与卸载器全部由用户从桌面、资源管理器或Windows设置手动执行，Agent只读核对，不启动应用/安装器/卸载器。证据`.runtime/nsis-lifecycle-20261114-143143/summary.json`为passed=true，相关分阶段JSON同目录；未修改核心代码、窗口策略或系统权限，没有业务API/截图任务验收。
+- 第一轮用户认为位置没保存，实际保存x349/y207/1280x860，底边1067超过当前工作区1019；resolveWindowBounds按“完整位于一个工作区内”规则回退213/79。隔离无窗口Electron查询确认屏幕1707x1067、工作区1707x1019、scaleFactor1.5；重放现有函数得到同一回退。用户明确选择保留规则，改用完全可见窗口验收，不改算法。
+- 用户缩小并移动后关闭/重开，确认布局正常；配置x512/y129/1154x868、maximized=false，完整落在工作区。随后最大化关闭/重开，用户确认与原生IsZoomed均为最大化，配置maximized=true且普通矩形不变。用户还原并关闭后maximized=false，普通矩形仍一致。normal-restart/maximized-restart/before-overwrite记录覆盖上述观察。
+- 用户从资源管理器手动执行同一0.0.0安装包至原目录，属于同版本覆盖重装，不是跨版本升级。安装后载荷ASAR哈希、窗口配置哈希不变，单一卸载项、两个lnk目标/空参数/AUMID正确。用户从开始菜单手动启动，确认登录页与布局恢复后关闭；配置仍逐字节一致。
+- 用户在Windows设置手动卸载并保留数据。程序目录、exe、两个快捷方式及进程均消失；真实C盘Roaming/nexus-desktop/window-state.json句柄确认未重定向，内容哈希与卸载前一致。用户刷新Windows设置确认无Nexus，并从Win+R启动普通cmd执行指定HKCU卸载项reg query，确认找不到注册项。工具上下文仍能读到旧项，HKCU及显式HKU/NtQueryKey均呈相同逻辑名，不能靠逻辑名排除虚拟化；记录为环境视图差异，未手动删键。正常会话结果与Microsoft的HKCU私有写入/合并视图机制相符，不认定为Nexus真实卸载残留。
+- **最终状态：程序已卸载，真实用户数据保留，工作区安装包与win-unpacked产物保留。** 本轮未做跨版本升级、卸载后再安装、签名/自动更新或安装版正式通知验收；版本0.0.0和默认图标仍为本地检查点。用户未指定下一任务，若继续使用需由正常Windows会话重新安装；不要未经新需求重复截图任务或清理用户配置。
+
+## EXDEV 原因已收敛：Codex上下文路径重定向，手动启动保存正常（2026-11-14）
+
+- 对照不是“C盘禁止写入”：D盘项目目录与C盘普通Temp的Node/原生Win32重命名均正常，Codex上下文的Roaming/nexus-desktop失败。ACL显示当前用户FullControl，两个卷为NTFS、支持EFS、NtfsDisableEncryption=0；未发现普通写权限不足证据。带Encrypted属性是相关现象，不作为EFS根因证明。
+- 关键证据为GetFinalPathNameByHandle：工具上下文看到的C:\Users\ggbond\AppData\Roaming\nexus-desktop及临时文件实际落在D:\WpSystem\[用户SID]\AppData\Local\Packages\OpenAI.Codex_2p2nqsd0c76g0\LocalCache\Roaming\nexus-desktop。探针矩阵：逻辑C→逻辑C报EXDEV，物理D→物理D成功，逻辑C→物理D成功，物理D→逻辑C报EXDEV；失败与逻辑目标路径处理相关。不是Node独有，原生MoveFileEx同样返回Win32错误17；.NET Move能成功不证明原子替换，因为其可走复制删除。
+- 安装exe与桌面/开始菜单lnk句柄仍指向真实C盘，安装载荷/快捷方式验收有效。只有应用数据测试路径观察到Codex包LocalCache映射。当前辅助进程GetCurrentPackageFullName返回15700（无包身份），不把“继承包身份”的具体机制当成已证实；未继续追踪重定向层内部实现。
+- 用户按问题卡亲自从桌面启动、移动窗口并正常关闭，真实C:\Users\ggbond\AppData\Roaming\nexus-desktop\window-state.json成功保存（version1，x349/y207/1280x860/maximized=false），句柄最终路径确认真实C盘，文件属性Archive而非Encrypted。证据manual-explorer-state.json；因此此前工具启动链EXDEV不能直接判定为普通用户启动下Nexus持久化缺陷。未修改程序算法、用户数据路径、ACL、真实目录加密属性或系统策略。
+- 证据集中`.runtime/nsis-acceptance-20261114-140208/`：path-matrix.json、package-identity.json、installed-physical-paths.json、manual-explorer-state.json、filesystem-diagnosis.json和更新summary.json。独立探针已清理。一次涉及探针解密的实验被自动审批拒绝、未执行；安全替代仅对全新空Temp探针尝试加密，返回不支持50，不能用于证明EFS因果关系，未解密真实用户数据。
+- 下一步可恢复安装生命周期验收：完整重启恢复、覆盖安装、卸载/数据保留仍需分别验证。保留现有同目录临时文件+rename方案，不为工具上下文特性改成copy+delete。
+
+## NSIS 安装与快捷方式验收；当时发现EXDEV（2026-11-14，原因更新见上）
+
+- 用户授权生成NSIS、检查后交互安装并验收两个快捷方式。`npm run pack:win`成功，release/Nexus-Desktop-0.0.0-x64-Setup.exe，124160467字节，SHA256 3DE4C2472DF110F66A330D6015D28F67CBF8DB38F0251F8C8C4DE8A90CBFB166，NotSigned（预期本地未签名包），有blockmap。PE头、版本、ASAR清单和构建NSIS记录检查通过，无测试/运行数据或提权helper进入载荷。
+- 首次构建在复制默认elevate.exe辅助程序时UNKNOWN失败；缓存文件有Encrypted属性，但系统层根因未确认。当前方案强制当前用户安装且无自动更新，按该需求显式增加nsis.packElevateHelper=false后重建通过，未放宽权限或关闭安全设置。构建器缓存重命名另曾报EXDEV并自行copy+delete恢复；不是应用层原子写入方案已经解决。
+- 安装前无Nexus卸载项/快捷方式；用户完成可见安装向导，退出0。实际安装在C:\Users\ggbond\AppData\Local\Programs\Nexus Desktop；HKCU卸载名Nexus Desktop 0.0.0，卸载命令带/currentuser。卸载项没有可选InstallLocation字段，通过DisplayIcon、卸载命令和快捷方式确认目录。安装ASAR与产物哈希一致；桌面和开始菜单lnk目标正确、参数空、AUMID均com.nexus.desktop。
+- 实际分别从桌面lnk和开始菜单lnk启动，进程路径均为安装目录exe，用户通过问题卡分别确认正常登录页；两次试验窗口均经精确PID+路径核对后CloseMainWindow正常关闭。没有登录业务、创建截图/短链或覆盖/卸载试验。证据集中`.runtime/nsis-acceptance-20261114-140208/`（artifact/installed/desktop-launch/menu-launch/summary等JSON）。程序保持安装，未自动卸载。
+- **尚未通过：默认userData窗口配置持久化。** 正常关闭后C:\Users\ggbond\AppData\Roaming\nexus-desktop\window-state.json未出现。对实际安装exe用Playwright只读定位（不覆盖userData）确认isPackaged=true及默认目录正确，捕获“窗口状态保存失败 EXDEV”；证据default-userdata-probe.json。独立普通Node同目录write+rename实验：D盘项目目录成功，C盘该userData子目录返回EXDEV，源临时文件存在、目标不存在。路径解析未显示目录链接，OS/加密/文件系统层精确原因未建立，不能仅凭EXDEV认定代码真的跨盘。此前隔离到D盘的packaged-smoke通过不覆盖这个C盘场景。
+- 此条记录当时的待排查状态，最新结论见最上方路径重定向及用户手动启动对照：正常用户默认C盘保存已通过，未修改window-state算法。后续仍按原方案验证重启恢复、覆盖安装与卸载，不修改ECS/数据库。
+
+## Electron 打包配置与应用目录检查点（2026-11-14）
+
+- 开发者完成Main启动分支/userData调整：开发模式在ready前覆盖项目.runtime/user-data，打包版保留默认路径；移除打包即退出，统一启动流程。Agent核对通过后按授权完成机械配置：固定electron-builder 26.18.0及锁文件、electron-builder.yml、build/installer.nsh、pack:dir/pack:win命令、release忽略规则。Windows x64、ASAR、appId com.nexus.desktop、productName Nexus Desktop；保持0.0.0版本与默认Electron图标，未配置证书/自动更新/发布。NSIS带向导，通过customInstallMode强制当前用户，可选目录、桌面/开始菜单快捷方式，默认保留userData，安装后不自动运行。
+- Agent补齐安装版固定AppUserModelId，开发版继续process.execPath；smoke/diagnose环境标志仅开发模式生效，避免安装版隐藏/退出或向ASAR写诊断文件。短链边界测试原来按旧注释截取辅助函数，已用现有TypeScript解析函数声明，适配开发者启动段改动；未修改业务转发/窗口算法。
+- `npm run pack:dir`成功，实际产物release/win-unpacked/Nexus Desktop.exe。ASAR共51条且无清单外文件，无测试脚本/.runtime/node_modules；Main、Preload、window-state内容与源码一致。开发启动、真实短链IPC边界回归通过；受控启动检查覆盖开发/打包的路径、应用ID和协议注册。
+- 新增 `npm run test:packaged-smoke`，直接运行实际打包exe，cwd设为独立测试目录且通过--user-data-dir隔离，验证app.isPackaged=true、appPath为ASAR、登录页/Preload/可信IPC/History刷新、窗口可见、Node全局未暴露及窗口状态写入隔离目录；刻意传开发诊断/冒烟标志仍正常运行。通过，证据`.runtime/packaged-smoke-Su2S2h/evidence.json`，进程关闭正常。测试未访问后端、创建短链/截图或触碰默认用户数据。
+- 本轮只配置并验证打包应用目录，未运行pack:win，未生成/安装NSIS安装包，未验证安装/覆盖安装/卸载/快捷方式及正式通知表现。下一步先解释并生成NSIS，再做安装生命周期验收；核心取舍仍开发者先决定，Agent负责机械配置与检查。Electronbuilder安装报告开发依赖树存在moderate审计项，未自动做无关依赖升级；这些npm开发依赖未进入ASAR。
+
 ## Electron 短链真实浏览器联动验收（2026-11-14）
 
 - 用户明确授权创建短链并真实打开系统浏览器。`node nexus-desktop/scripts/test-short-link-live.cjs`使用隔离userData、正式Main/Preload/桌面页面、真实localhost:8080与真实shell.openExternal；用户登录、填写已有Key并点击准备按钮后才创建。测试入口仅允许必要管理读取、两次短链创建、禁用本轮第一条记录及三次指定短地址打开，禁止截图等其他机器API，不记录凭据。

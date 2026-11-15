@@ -35,5 +35,16 @@ contextBridge.exposeInMainWorld('nexusDesktop', {
     getScreenshotResult: (jobId) => {
         return ipcRenderer.invoke('screenshot-result:get', jobId)
     },
+
+    readAuthSession: () =>{
+        return ipcRenderer.invoke('auth-session:read')
+    },
+
+    writeAuthSession: (input) =>{
+        return ipcRenderer.invoke('auth-session:write', input)
+    },
+    clearAuthSession: (input) =>{
+        return ipcRenderer.invoke('auth-session:clear', input)
+    }
 })
 

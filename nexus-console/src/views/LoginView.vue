@@ -47,16 +47,28 @@ const onSubmit = async () => {
   }
 
   submitting.value = true
+  const attempt = userStore.beginLogin()
   try {
     const res: ApiResponse<LoginResponse> = await login(req)
+    if (attempt.operationVersion !== userStore.operationVersion) return
     if (res.code !== 'SUCCESS') {
       ElMessage.error(res.message || '登录失败，请稍后重试')
       return
     }
-    userStore.setSession(res.data)
+    const completion = await userStore.completeLogin(attempt, res.data)
+    if (completion.status !== 'ok' && attempt.operationVersion !== userStore.operationVersion) return
+    if (completion.status === 'stale') return
+    if (completion.status === 'failed') {
+      ElMessage.error(completion.code === 'SESSION_CHANGED'
+        ? '登录会话已变化，请刷新后重新登录'
+        : '无法保存登录会话，请刷新后重新登录')
+      return
+    }
+    if (completion.operationVersion !== userStore.operationVersion) return
     ElMessage.success('登录成功')
     await router.replace({ name: 'applications' })
   } catch (error) {
+    if (attempt.operationVersion !== userStore.operationVersion) return
     if (
       isAxiosError<ApiResponse<unknown>>(error) &&
       error.response?.status === 401 &&

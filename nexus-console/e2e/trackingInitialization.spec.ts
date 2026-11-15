@@ -30,7 +30,11 @@ async function installBridge(page: Page) {
   await page.addInitScript(() => {
     const w = window as unknown as TestWindow
     const control: Control = w.__trackingInitTest = { subscriptions: 0, removals: 0, stopCalls: 0, reads: [], listener: null, lastListener: null }
+    const unusedAuth = async (): Promise<never> => { throw Error('Unexpected auth session operation') }
     w.nexusDesktop = {
+      readAuthSession: async () => ({ status: 'ok', authState: { revision: 0, session: null } }),
+      writeAuthSession: async input => ({ status: 'ok', code: 'SUCCESS', authState: { revision: input.expectedRevision + 1, session: input.session } }),
+      clearAuthSession: unusedAuth,
       saveScreenshot: async () => ({ status: 'cancelled' }),
       getScreenshotResult: async () => ({ status: 'failed', code: 'NOT_READY' }),
       startScreenshotTracking: async () => ({ status: 'failed', code: 'INVALID_REQUEST' }),

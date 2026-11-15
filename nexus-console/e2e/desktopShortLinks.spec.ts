@@ -9,8 +9,12 @@ for (const missing of [false, true]) {
     await page.addInitScript(missing => {
       const control = { calls: [] as string[], reject: true, copyFails: true }
       const unused = async (): Promise<never> => { throw Error('Unexpected screenshot operation') }
+      const unusedAuth = async (): Promise<never> => { throw Error('Unexpected auth session operation') }
       ;(window as unknown as TestWindow).__shortLinkUi = control
       window.nexusDesktop = {
+        readAuthSession: async () => ({ status: 'ok', authState: { revision: 0, session: null } }),
+        writeAuthSession: async input => ({ status: 'ok', code: 'SUCCESS', authState: { revision: input.expectedRevision + 1, session: input.session } }),
+        clearAuthSession: unusedAuth,
         saveScreenshot: unused,
         startScreenshotTracking: unused,
         stopScreenshotTracking: unused,
