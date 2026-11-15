@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LoginPlanetScene from '@/components/LoginPlanetScene.vue'
 import loginIllustration from '@/assets/login_page.png'
 import brandSpark from '@/assets/icons/brand-spark.svg'
 import { RouterLink, useRouter } from 'vue-router'
@@ -84,24 +85,14 @@ const onSubmit = async () => {
 
 <template>
   <main class="login-page">
-    <el-row class="login-layout">
-      <el-col :xs="24" :md="10" class="brand-panel">
-        <div class="brand-mark"><img :src="brandSpark" alt="" aria-hidden="true" /><span>Nexus</span></div>
-
-        <div class="brand-story">
-          <p class="eyebrow">你的开发者空间</p>
-          <h1>让每一次连接，<br />都有清晰的起点。</h1>
-          <p class="brand-description">管理你的 Application、API Key 和开放 API 调用。</p>
-        </div>
-
-        <div class="illustration">
-          <img :src="loginIllustration" alt="橘猫坐在绿色星球上仰望月亮" />
-        </div>
-
+    <div class="login-landscape" aria-hidden="true"><i></i><i></i></div>
+    <header class="brand-mark"><img :src="brandSpark" alt="" aria-hidden="true" /><span>Nexus</span></header>
+    <div class="login-layout">
+      <div class="brand-panel">
+        <LoginPlanetScene :fallback-src="loginIllustration" />
         <p class="brand-footer">一片属于你的开发者小宇宙</p>
-      </el-col>
-
-      <el-col :xs="24" :md="14" class="form-panel">
+      </div>
+      <div class="form-panel">
         <section class="form-wrap" aria-labelledby="login-title">
           <p class="form-eyebrow">欢迎回来</p>
           <h2 id="login-title">登录 Nexus</h2>
@@ -136,229 +127,51 @@ const onSubmit = async () => {
 
           <p class="register-prompt">还没有账号？<RouterLink :to="{ name: 'register' }">创建账号</RouterLink></p>
         </section>
-      </el-col>
-    </el-row>
+      </div>
+    </div>
   </main>
 </template>
 
 <style scoped>
-.login-page,
-.login-layout {
-  min-height: 100vh;
-  min-height: 100dvh;
+.login-page { position: relative; isolation: isolate; min-height: 100dvh; background: radial-gradient(ellipse at 31% 44%,#fffaf0 4%,transparent 59%),linear-gradient(126deg,#f8f2e5,#fbf7ee 60%,#f6efe4); color: var(--nexus-ink); }
+.login-landscape { position: absolute; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+.login-landscape i { position: absolute; width: 70%; height: 15%; bottom: -10%; left: -12%; border-radius: 50%; transform: rotate(8deg); background: #dbe2c8; }
+.login-landscape i + i { left: auto; right: -15%; bottom: -8%; background: #e6e8d6; transform: rotate(-12deg); }
+.brand-mark { position: absolute; top: clamp(22px,4.7vh,54px); left: clamp(25px,5.3vw,100px); display: flex; align-items: center; gap: 10px; font-size: clamp(29px,2.5vw,42px); line-height: 1; font-weight: 750; letter-spacing: -.045em; }
+.brand-mark img { width: 24px; height: 24px; order: 1; }
+.login-layout { max-width: 1610px; margin: auto; min-height: 100dvh; display: grid; grid-template-columns: minmax(0,1.4fr) minmax(320px,1fr); align-items: center; gap: clamp(18px,3.4vw,68px); padding: 88px clamp(32px,7.5vw,134px) 64px clamp(22px,3.8vw,72px); }
+.brand-panel, .form-panel { min-width: 0; }
+.brand-footer { margin: 5px 0 0; text-align: center; color: var(--nexus-muted); font-size: 12px; }
+.form-wrap { width: 100%; max-width: 500px; margin: auto; border: 1px solid #fffdf6; border-radius: 30px; background: linear-gradient(135deg,#fffdf6ee,#fcf6eceb); box-shadow: 0 24px 70px -28px #77582742,0 3px 10px #785a3110,inset 0 0 0 1px #eadfcf79; padding: clamp(28px,3.7vw,58px); }
+.form-eyebrow { margin: 0 0 12px; color: var(--nexus-teal); font-size: 13px; font-weight: 700; letter-spacing: .1em; }
+.form-wrap h2 { margin: 0; color: var(--nexus-ink); font-size: clamp(30px,2.7vw,42px); line-height: 1.3; }
+.form-description { margin: 12px 0 30px; color: var(--nexus-muted); font-size: 14px; line-height: 1.6; }
+.login-form :deep(.el-form-item__label) { color: var(--nexus-ink); font-weight: 600; }
+.login-form :deep(.el-form-item) { margin-bottom: 24px; }
+.login-form :deep(.el-input__wrapper) { min-height: 48px; border-radius: 12px; background: #fffdf8; box-shadow: 0 0 0 1px #c9c5b6 inset; }
+.login-form :deep(.el-input__inner) { font-size: 16px; }
+.login-form :deep(.el-input__wrapper.is-focus) { box-shadow: 0 0 0 2px var(--nexus-teal) inset; }
+.login-form :deep(.submit-item) { margin-top: 28px; margin-bottom: 0; }
+.login-button { width: 100%; min-height: 48px; border-radius: 12px; font-weight: 600; }
+.register-prompt { margin: 22px 0 0; color: var(--nexus-muted); font-size: 14px; text-align: center; }
+.register-prompt a { color: var(--nexus-teal); text-decoration: none; }
+.register-prompt a:hover { text-decoration: underline; }
+@media (max-width: 760px) {
+  .brand-mark { position: relative; inset: auto; justify-content: center; padding: 20px 0 8px; font-size: 29px; }
+  .login-layout { min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 0 22px 26px; }
+  .brand-panel { width: 100%; max-width: 490px; }
+  .brand-footer { display: none; }
+  .form-panel { width: 100%; max-width: 400px; }
+  .form-wrap { padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+  .form-eyebrow { display: none; }
+  .form-wrap h2 { font-size: 30px; text-align: center; }
+  .form-description { text-align: center; font-size: 13px; margin: 8px 0 16px; }
+  .login-form :deep(.el-form-item) { margin-bottom: 20px; }
+  .login-form :deep(.submit-item) { margin-top: 23px; margin-bottom: 0; }
+  .register-prompt { margin-top: 17px; }
 }
-
-.login-page {
-  display: grid;
-  place-items: center;
-  padding: clamp(16px, 3vw, 40px);
-  background: radial-gradient(circle at 3% 7%, #edf2e9 0, transparent 27%), var(--nexus-paper);
-}
-
-.login-layout {
-  width: min(1380px, 100%);
-  min-height: min(760px, calc(100dvh - 48px));
-  overflow: hidden;
-  border: 1px solid var(--nexus-line);
-  border-radius: 22px;
-  background: var(--nexus-surface);
-  box-shadow: 0 18px 54px rgba(32, 59, 55, 0.08);
-}
-
-.brand-panel {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  padding: clamp(32px, 4vw, 64px);
-  overflow: hidden;
-  background: linear-gradient(145deg, #edf2e9, var(--nexus-sage) 65%, #e7eee5);
-  color: var(--nexus-ink);
-}
-
-.brand-mark {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 23px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-
-.brand-mark img {
-  width: 20px;
-  height: 20px;
-}
-
-.brand-story {
-  margin-top: clamp(46px, 7vh, 88px);
-}
-
-.eyebrow,
-.form-eyebrow {
-  margin: 0 0 16px;
-  color: var(--nexus-teal);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-}
-
-.brand-story h1 {
-  margin: 0;
-  font-size: clamp(30px, 2.7vw, 43px);
-  line-height: 1.3;
-  letter-spacing: -0.03em;
-}
-
-.brand-description {
-  max-width: 390px;
-  margin: 20px 0 0;
-  color: var(--nexus-muted);
-  font-size: 15px;
-  line-height: 1.8;
-}
-
-.illustration {
-  display: grid;
-  flex: 1;
-  min-height: 260px;
-  place-items: center;
-}
-
-.illustration img {
-  display: block;
-  width: min(100%, 365px);
-  max-height: min(43vh, 390px);
-  object-fit: contain;
-}
-
-.brand-footer {
-  margin: 0;
-  color: #6a7d72;
-  font-size: 13px;
-}
-
-.form-panel {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: minmax(0, 1fr);
-  min-height: 0;
-  padding: 56px clamp(32px, 6vw, 88px);
-  place-items: center;
-  background: var(--nexus-surface);
-}
-
-.form-wrap {
-  width: min(100%, 430px);
-  min-width: 0;
-}
-
-.form-wrap h2 {
-  margin: 0;
-  color: var(--nexus-ink);
-  font-size: clamp(30px, 2.5vw, 38px);
-  line-height: 1.3;
-}
-
-.form-description {
-  margin: 12px 0 40px;
-  color: var(--nexus-muted);
-  font-size: 15px;
-}
-
-.login-form :deep(.el-form-item__label) {
-  color: var(--nexus-ink);
-  font-weight: 600;
-}
-
-.login-form :deep(.el-form-item) {
-  margin-bottom: 24px;
-}
-
-.login-form :deep(.el-input__wrapper) {
-  border-radius: 10px;
-  box-shadow: 0 0 0 1px #d6e0d7 inset;
-}
-
-.login-form :deep(.submit-item) {
-  margin-top: 32px;
-  margin-bottom: 0;
-}
-
-.login-button {
-  width: 100%;
-  min-height: 46px;
-  border-radius: 10px;
-  font-weight: 600;
-}
-
-.register-prompt {
-  margin: 24px 0 0;
-  color: var(--nexus-muted);
-  font-size: 14px;
-  text-align: center;
-}
-
-.register-prompt a {
-  color: var(--nexus-teal);
-  text-decoration: none;
-}
-
-.register-prompt a:hover {
-  text-decoration: underline;
-}
-
-@media (max-width: 991px) {
-  .login-page { display: block; padding: 0; }
-  .login-layout { min-height: 100dvh; border: 0; border-radius: 0; box-shadow: none; }
-  .brand-panel {
-    min-height: 0;
-    padding: 28px 24px 32px;
-  }
-
-  .brand-story {
-    margin-top: 36px;
-  }
-
-  .illustration {
-    min-height: 0;
-    margin: 20px 0 12px;
-  }
-
-  .illustration img {
-    max-height: 220px;
-  }
-
-  .form-panel {
-    min-height: 0;
-    padding: 56px 24px 72px;
-  }
-}
-
-@media (max-width: 600px) {
-  .brand-panel {
-    padding: 24px;
-  }
-
-  .brand-story {
-    margin-top: 28px;
-  }
-
-  .brand-story h1 {
-    font-size: 26px;
-  }
-
-  .brand-description {
-    margin-top: 10px;
-    font-size: 13px;
-  }
-
-  .illustration,
-  .brand-footer {
-    display: none;
-  }
-
-  .form-panel {
-    padding-top: 48px;
-  }
+@media (min-width: 761px) and (max-height: 610px) {
+  .login-layout { padding-top: 70px; padding-bottom: 24px; }
+  .form-wrap { padding-block: 24px; }
 }
 </style>
