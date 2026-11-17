@@ -6,7 +6,7 @@ import { useUserStore } from '../src/stores/userStore.ts'
 const now = 1_000_000
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
 const stores = []
-const session = { accessToken: 'fixture-restored-token', tokenType: 'Bearer', expiresAt: now + 120_000 }
+const session = { accessToken: 'fixture-restored-token', tokenType: 'Bearer', sessionId: '1', sessionExpiresAt: 9_000_000_000_000, expiresAt: now + 120_000 }
 const login = { accessToken: 'fixture-new-login', tokenType: 'Bearer', expiresInSeconds: 300 }
 
 afterEach(() => {
@@ -27,7 +27,7 @@ function installBridge(read) {
   Object.defineProperty(globalThis, 'window', { configurable: true, value: {
     nexusDesktop: {
       readAuthSession: () => { counts.reads++; return read() },
-      writeAuthSession: () => { counts.writes++; throw Error('Initialization must not write') },
+      loginAuthSession: () => { counts.writes++; throw Error('Initialization must not write') },
       clearAuthSession: () => { counts.clears++; throw Error('Initialization must not clear Main') },
     },
   } })
@@ -111,12 +111,13 @@ test('successful empty snapshot clears local fields and retains Main revision', 
   assert.deepEqual(counts, { reads: 1, writes: 0, clears: 0 })
 })
 
-test('snapshot expired during delivery does not restore local credentials', async t => {
+test('expired snapshot retains identity for Router renewal but is not an authenticated session', async t => {
   const counts = installBridge(async () => ({ status: 'ok', authState: { revision: 8, session: { ...session, expiresAt: now } } }))
   const store = createStore(t)
   await store.initializeSession()
   assert.equal(store.mainRevision, 8)
-  assert.equal(store.accessToken, '')
+  assert.equal(store.accessToken, session.accessToken)
+  assert.equal(store.expiresAt <= now, true)
   assert.equal(store.initializationStatus, 'ready')
   assert.deepEqual(counts, { reads: 1, writes: 0, clears: 0 })
 })

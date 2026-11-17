@@ -5,7 +5,13 @@ const { _electron, expect } = require('../../nexus-console/node_modules/@playwri
 const root = path.resolve(__dirname, '..')
 
 ;(async () => {
-  const executablePath = path.join(root, 'release', 'win-unpacked', 'Nexus Desktop.exe')
+  const executables = {
+    darwin: ['mac', 'Nexus Desktop.app', 'Contents', 'MacOS', 'Nexus Desktop'],
+    win32: ['win-unpacked', 'Nexus Desktop.exe'],
+  }
+  const parts = executables[process.platform]
+  if (!parts) throw new Error(`Unsupported packaged smoke platform: ${process.platform}`)
+  const executablePath = process.argv[2] ? path.resolve(process.argv[2]) : path.join(root, 'release', ...parts)
   await fs.access(executablePath)
   await fs.mkdir(path.join(root, '.runtime'), { recursive: true })
   const dir = await fs.mkdtemp(path.join(root, '.runtime', 'packaged-smoke-'))

@@ -113,7 +113,7 @@ const logoutMode = process.argv.includes('--logout')
     await save()
     await confirm('真实登录和Main保存已通过。请确认当前页面正常，然后开始退出验收。脚本会点击页面右上角真实的“退出登录”，不会直接调用清空IPC。请暂不点击其他业务入口。', '页面正常，开始退出验收')
     const beforeLogout = await collect()
-    const clearsBefore = beforeLogout.ipc.filter(r => r.channel === 'auth-session:clear' && r.status === 'ok').length
+    const clearsBefore = beforeLogout.ipc.filter(r => r.channel === 'auth-session:logout' && r.status === 'ok').length
     evidence.phase = 'logging-out'
     await save()
     await page.getByRole('button', { name: '退出登录', exact: true }).click()
@@ -123,7 +123,7 @@ const logoutMode = process.argv.includes('--logout')
     loggedOut(evidence.afterLogout, evidence.afterLogin.mainRevision + 1)
     assert.equal(instance.process().pid, evidence.runtime.pid)
     const cleared = await collect()
-    assert.equal(cleared.ipc.filter(r => r.channel === 'auth-session:clear' && r.status === 'ok').length, clearsBefore + 1)
+    assert.equal(cleared.ipc.filter(r => r.channel === 'auth-session:logout' && r.status === 'ok').length, clearsBefore + 1)
     evidence.phase = 'logout-verified'
     await save()
     console.log('PASS: real logout button, Main clear acknowledged once, Store/Main empty with matching new revision, same Main process.')
@@ -136,8 +136,8 @@ const logoutMode = process.argv.includes('--logout')
     assert.equal(instance.process().pid, evidence.runtime.pid)
     const refreshed = await collect()
     assert.equal(refreshed.requests.filter(r => r.path === '/api/auth/login').length, loginRequests)
-    assert.equal(refreshed.ipc.filter(r => r.channel === 'auth-session:write' && r.status === 'ok').length, 1)
-    assert.equal(refreshed.ipc.filter(r => r.channel === 'auth-session:clear' && r.status === 'ok').length, clearsBefore + 1)
+    assert.equal(refreshed.ipc.filter(r => r.channel === 'auth-session:login' && r.status === 'ok').length, 1)
+    assert.equal(refreshed.ipc.filter(r => r.channel === 'auth-session:logout' && r.status === 'ok').length, clearsBefore + 1)
     assert.equal(evidence.pageHttpRequests, 0)
     evidence.phase = 'logout-refresh-verified'
     await save()
@@ -166,7 +166,7 @@ const logoutMode = process.argv.includes('--logout')
     loggedIn(evidence.afterLogin)
     const before = await collect()
     assert.ok(before.requests.some(r => r.path === '/api/auth/login' && r.status === 200 && !r.hasBearer))
-    assert.equal(before.ipc.filter(r => r.channel === 'auth-session:write' && r.status === 'ok').length, 1)
+    assert.equal(before.ipc.filter(r => r.channel === 'auth-session:login' && r.status === 'ok').length, 1)
     const loginRequests = before.requests.filter(r => r.path === '/api/auth/login').length
     const applicationResponses = before.requests.filter(r => r.path === '/api/application' && r.status === 200).length
     evidence.phase = 'login-verified'
@@ -190,7 +190,7 @@ const logoutMode = process.argv.includes('--logout')
     assert.equal(evidence.afterRefresh.mainExpiresAt, evidence.afterLogin.mainExpiresAt)
     const refreshed = await collect()
     assert.equal(refreshed.requests.filter(r => r.path === '/api/auth/login').length, loginRequests)
-    assert.equal(refreshed.ipc.filter(r => r.channel === 'auth-session:write' && r.status === 'ok').length, 1)
+    assert.equal(refreshed.ipc.filter(r => r.channel === 'auth-session:login' && r.status === 'ok').length, 1)
     assert.ok(refreshed.requests.every(r => r.allowed))
     evidence.phase = 'refresh-verified'
     await save()

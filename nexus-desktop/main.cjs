@@ -1,5 +1,6 @@
 const { app, BrowserWindow, dialog, session, screen, ipcMain, Notification, protocol, shell } = require('electron')
 const fs = require('node:fs/promises')
+const { createAuthSession, isAuthPath } = require('./auth-session.cjs')
 const path = require('node:path')
 const {
   loadWindowState,
@@ -13,10 +14,7 @@ const DEV_ORIGIN = 'http://127.0.0.1:5178'
 const smoke = !app.isPackaged && process.env.NEXUS_DESKTOP_SMOKE === '1'
 let mainWindow
 
-let authState = {
-  revision: 0,
-  session: null,
-}
+const authSession = createAuthSession({ fetch: (...args) => fetch(...args) })
 
 function createIdleTrace() {
   return {
@@ -57,7 +55,9 @@ function isTrustedAppUrl(value){
 
   // 放在 app.whenReady() 之前
   if (!app.isPackaged) {
-    app.setPath('userData', path.join(__dirname, '.runtime', 'user-data'))
+    // Mac 副本可能带有 Windows 的 Chromium 配置和窗口状态。
+    const profile = process.platform === 'darwin' ? 'user-data-mac' : 'user-data'
+    app.setPath('userData', path.join(__dirname, '.runtime', profile))
   }
 
   if (process.platform === 'win32') {
@@ -431,6 +431,11 @@ function isTrustedAppUrl(value){
 
       if (!isTrustedAppUrl(url) ) {
         return new Response('Not Found', { status: 404 })
+      }
+      // Login is a narrow IPC operation. Refresh is not exposed in this step.
+      if (isAuthPath(url.pathname) && !(url.pathname === '/api/auth/register' && request.method === 'POST' && !url.search)) {
+        return Response.json({ code: 'AUTH_ROUTE_NOT_AVAILABLE', message: 'Unsupported auth route' },
+          { status: 404, headers: { 'Cache-Control': 'no-store' } })
       }
       if (url.pathname.startsWith('/api/')){
         return  forwardBackend(request, url, { timeout: 8 * 1000, responseLimit: 1 * 1024 *1024})
@@ -865,84 +870,29 @@ function isTrustedAppUrl(value){
       }
     })
 
-    ipcMain.handle('auth-session:read', async (event) =>{
-      if(!isTrustedScreenshotCaller(event)) return { status: 'failed', code: 'FORBIDDEN' }
-
-      if(authState.session === null) return { status: 'ok', authState : authState,  code: 'SESSION_IS_NULL' }
-      const now = Date.now()
-      if (authState.session.expiresAt <= Date.now()) {
-        authState.session = null
-        authState.revision +=1
-      }
-      return { status: 'ok', authState : authState }
+    ipcMain.handle('auth-session:read', event => {
+      if (!isTrustedScreenshotCaller(event)) return { status: 'failed', code: 'FORBIDDEN' }
+      return authSession.read()
     })
 
-    ipcMain.handle('auth-session:write', async (event, input) =>{
-      if(!isTrustedScreenshotCaller(event)) return { status: 'failed', code: 'FORBIDDEN' }
-
-      const isRecord = value =>
-          value !== null &&
-          typeof value === 'object' &&
-          !Array.isArray(value)
-
-    // 第一层：确认结构，避免读取字段时抛 TypeError
-      if (!isRecord(input) || !isRecord(input.session)) {
-        return { status: 'failed', code: 'INVALID_REQUEST' }
-      }
-
-      const { expectedRevision, session } = input
-      const { accessToken, tokenType, expiresAt } = session
-
-    // 第二层：确认字段类型与范围
-      if (
-          !Number.isSafeInteger(expectedRevision) ||
-          expectedRevision < 0 ||
-          typeof accessToken !== 'string' ||
-          accessToken.length === 0 ||
-          accessToken.length > 4096 ||
-          tokenType !== 'Bearer' ||
-          !Number.isFinite(expiresAt) ||
-          expiresAt <= Date.now()
-      ) {
-        return { status: 'failed', code: 'INVALID_REQUEST' }
-      }
-
-      if (expectedRevision !== authState.revision) {
-        return { status: 'failed', code: 'SESSION_CHANGED' }
-      }
-
-      authState.session = {
-        accessToken: input.session.accessToken,
-        tokenType: input.session.tokenType,
-        expiresAt: input.session.expiresAt,
-      }
-
-      authState.revision += 1
-
-      return {status: 'ok', authState : authState, code: 'SUCCESS'}
+    ipcMain.handle('auth-session:login', (event, input) => {
+      if (!isTrustedScreenshotCaller(event)) return { status: 'failed', code: 'FORBIDDEN', httpStatus: 403 }
+      return authSession.login(input)
     })
 
-    ipcMain.handle('auth-session:clear', async (event, input) =>{
-      if(!isTrustedScreenshotCaller(event)) return { status: 'failed', code: 'FORBIDDEN' }
+    ipcMain.handle('auth-session:ensure', (event, input) => {
+      if (!isTrustedScreenshotCaller(event)) return { status: 'failed', code: 'FORBIDDEN' }
+      return authSession.ensure(input)
+    })
 
-      if (
-          input === null ||
-          typeof input !== 'object' ||
-          Array.isArray(input) ||
-          !Number.isSafeInteger(input.expectedRevision) ||
-          input.expectedRevision < 0
-      ) {
-        return { status: 'failed', code: 'INVALID_REQUEST' }
-      }
+    ipcMain.handle('auth-session:logout', (event, input) => {
+      if (!isTrustedScreenshotCaller(event)) return { status: 'failed', code: 'FORBIDDEN' }
+      return authSession.logout(input)
+    })
 
-      if (input.expectedRevision !== authState.revision) {
-        return { status: 'failed', code: 'SESSION_CHANGED' }
-      }
-
-      // 输入合法且版本匹配，才允许清空
-      authState.session = null
-      authState.revision += 1
-      return {status: 'ok', authState : authState, code: 'SUCCESS'}
+    ipcMain.handle('auth-session:clear', (event, input) => {
+      if (!isTrustedScreenshotCaller(event)) return { status: 'failed', code: 'FORBIDDEN' }
+      return authSession.clear(input)
     })
 
     console.log('[desktop main] Loading existing Vue app')

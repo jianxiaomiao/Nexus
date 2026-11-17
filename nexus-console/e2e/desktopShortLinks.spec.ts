@@ -13,8 +13,10 @@ for (const missing of [false, true]) {
       ;(window as unknown as TestWindow).__shortLinkUi = control
       window.nexusDesktop = {
         readAuthSession: async () => ({ status: 'ok', authState: { revision: 0, session: null } }),
-        writeAuthSession: async input => ({ status: 'ok', code: 'SUCCESS', authState: { revision: input.expectedRevision + 1, session: input.session } }),
-        clearAuthSession: unusedAuth,
+        loginAuthSession: async input => ({ status: 'ok', code: 'SUCCESS', authState: { revision: input.expectedRevision + 1, session: { accessToken: 'playwright-only-token', tokenType: 'Bearer', expiresAt: Date.now() + 300_000, sessionId: '1', sessionExpiresAt: Date.now() + 86_400_000 } } }),
+        ensureAuthSession: async () => { throw Error('Unexpected renewal') },
+      logoutAuthSession: async () => { throw Error('Unexpected server logout') },
+      clearAuthSession: unusedAuth,
         saveScreenshot: unused,
         startScreenshotTracking: unused,
         stopScreenshotTracking: unused,

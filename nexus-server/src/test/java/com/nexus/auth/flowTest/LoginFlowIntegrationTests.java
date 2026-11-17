@@ -32,8 +32,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @AutoConfigureMockMvc
-@Transactional
 public class LoginFlowIntegrationTests {
+    @Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
+    private Long createdUserId;
+    @org.junit.jupiter.api.AfterEach
+    void cleanupSessionFixture() {
+        if (createdUserId == null) return;
+        jdbc.update("DELETE rt FROM refresh_tokens rt JOIN auth_sessions s ON s.id=rt.session_id WHERE s.user_id=?", createdUserId);
+        jdbc.update("DELETE FROM auth_sessions WHERE user_id=?", createdUserId);
+        jdbc.update("DELETE FROM users WHERE id=?", createdUserId);
+    }
     @Autowired
     private MockMvc mockMvc;
     @Autowired
@@ -78,6 +86,7 @@ public class LoginFlowIntegrationTests {
         user.setPasswordHash(passwordEncoder.encode(password));
         user.setDisplayName("test-login-username");
         userMapper.insert(user);
+        createdUserId = user.getId();
 
         MvcResult result =mockMvc.perform(
                 post("/api/auth/login")
@@ -89,7 +98,9 @@ public class LoginFlowIntegrationTests {
                 .andExpect(jsonPath("$.message").value("登录成功"))
                 .andExpect(jsonPath("$.data.accessToken").isNotEmpty())
                 .andExpect(jsonPath("$.data.tokenType").value("Bearer"))
-                .andExpect(jsonPath("$.data.expiresInSeconds").value(1800L))
+                .andExpect(jsonPath("$.data.expiresInSeconds").value(org.hamcrest.Matchers.greaterThanOrEqualTo(1799)))
+                .andExpect(jsonPath("$.data.refreshToken").isNotEmpty())
+                .andExpect(jsonPath("$.data.sessionId").isString())
                 .andReturn();
 
         // 解析返回的JSON，取出 accessToken

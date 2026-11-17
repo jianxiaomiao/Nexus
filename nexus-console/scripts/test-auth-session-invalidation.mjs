@@ -8,7 +8,7 @@ afterEach(() => {
   if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow)
   else delete globalThis.window
 })
-const session = { accessToken: 'fixture-token', tokenType: 'Bearer', expiresAt: Date.now() + 600000 }
+const session = { accessToken: 'fixture-token', tokenType: 'Bearer', sessionId: '1', sessionExpiresAt: 9_000_000_000_000, expiresAt: Date.now() + 600000 }
 const response = { accessToken: 'fixture-new-token', tokenType: 'Bearer', expiresInSeconds: 300 }
 const empty = revision => ({ status: 'ok', code: 'SUCCESS', authState: { revision, session: null } })
 const changed = { status: 'failed', code: 'SESSION_CHANGED' }
@@ -19,7 +19,7 @@ const deferred = () => {
 }
 function setup(clear, read) {
   Object.defineProperty(globalThis, 'window', { configurable: true, value: clear ? {
-    nexusDesktop: { clearAuthSession: clear, readAuthSession: read },
+    nexusDesktop: { clearAuthSession: clear, logoutAuthSession: clear, readAuthSession: read },
   } : {} })
   const store = useUserStore(createPinia())
   store.applyMainState({ revision: 4, session })

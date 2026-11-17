@@ -40,9 +40,11 @@ contextBridge.exposeInMainWorld('nexusDesktop', {
         return ipcRenderer.invoke('auth-session:read')
     },
 
-    writeAuthSession: (input) =>{
-        return ipcRenderer.invoke('auth-session:write', input)
+    loginAuthSession: (input) =>{
+        return ipcRenderer.invoke('auth-session:login', input)
     },
+    ensureAuthSession: input => ipcRenderer.invoke('auth-session:ensure', input),
+    logoutAuthSession: input => ipcRenderer.invoke('auth-session:logout', input),
     clearAuthSession: (input) =>{
         return ipcRenderer.invoke('auth-session:clear', input)
     }

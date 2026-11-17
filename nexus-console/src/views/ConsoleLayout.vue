@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { isNavigationFailure, RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
-import type { ScrollbarInstance } from 'element-plus'
+import { ElMessage, type ScrollbarInstance } from 'element-plus'
 import { useUserStore } from '@/stores/userStore'
 import { Close, Document, Expand, Fold, Grid, Link, Monitor, SwitchButton } from '@element-plus/icons-vue'
 import brandSpark from '@/assets/icons/brand-spark.svg'
@@ -50,6 +50,7 @@ async function logout() {
     }
     if (result.operationVersion !== userStore.operationVersion) return
     cleared = true
+    if (userStore.sessionNotice) ElMessage.warning(userStore.sessionNotice)
     const failure = await router.replace({ name: 'login' })
     if (isNavigationFailure(failure) && !disposed && operationVersion === userStore.operationVersion) {
       logoutError.value = '退出已确认，但页面切换失败，请刷新页面。'

@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 
 @Service
 @RequiredArgsConstructor
@@ -22,14 +23,25 @@ public class JwtTokenService {
     private final JwtProperties jwtProperties;
     private final Clock clock;
 
-    public IssuedAccessToken issueAccessToken(long userId) {
-        Instant issuedAt = clock.instant();
-        Duration tokenTtl = jwtProperties.accessTokenTtl();
-        Instant expiresAt = issuedAt.plus(tokenTtl);
+    public IssuedAccessToken issueAccessToken(long userId, long sessionId, Instant sessionExpiresAt) {
+        return issueAccessToken(userId, sessionId, sessionExpiresAt, clock.instant());
+    }
+
+    public IssuedAccessToken issueAccessToken(long userId, long sessionId, Instant sessionExpiresAt, Instant now) {
+        if (userId <= 0 || sessionId <= 0) throw new IllegalArgumentException("用户和会话ID必须为正数");
+        Duration tokenTtl = jwtProperties.accessTokenTtl().compareTo(Duration.ofMinutes(30)) > 0
+                ? Duration.ofMinutes(30) : jwtProperties.accessTokenTtl();
+        Instant requestedExpiry = now.plus(tokenTtl);
+        Instant expiresAt = (requestedExpiry.isBefore(sessionExpiresAt) ? requestedExpiry : sessionExpiresAt)
+                .truncatedTo(ChronoUnit.SECONDS);
+        long remainingSeconds = Duration.between(now, expiresAt).toSeconds();
+        if (remainingSeconds <= 0) throw new IllegalArgumentException("剩余寿命不足以签发AT");
+        Instant issuedAt = now.truncatedTo(ChronoUnit.SECONDS);
 
         JwtClaimsSet claims = JwtClaimsSet.builder()
                 .issuer(jwtProperties.issuer())
                 .subject(String.valueOf(userId))
+                .claim("sid", String.valueOf(sessionId))
                 .issuedAt(issuedAt)
                 .expiresAt(expiresAt)
                 .build();
@@ -45,7 +57,7 @@ public class JwtTokenService {
 
         return new IssuedAccessToken(
                 jwt.getTokenValue(),
-                tokenTtl.toSeconds()
+                remainingSeconds
         );
     }
 }

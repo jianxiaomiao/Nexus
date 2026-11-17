@@ -1,7 +1,8 @@
 import axios, { CanceledError, isAxiosError, type AxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
 import { isNavigationFailure, type Router } from 'vue-router'
-import { useUserStore, type SessionContext } from '@/stores/userStore'
+import { useUserStore, type SessionContext, type SessionReadyResult } from '@/stores/userStore'
+import { isWebBrowser } from '@/auth/webSession'
 
 declare module 'axios' {
   interface AxiosRequestConfig {
@@ -39,12 +40,11 @@ function isManagementRequest(config: AxiosRequestConfig): boolean {
   return managementPaths.some((path) => url.pathname === path || url.pathname.startsWith(`${path}/`))
 }
 
-async function invalidateAndNavigate(reason: 'expired' | 'unauthorized', context: SessionContext) {
+async function navigateAfterSessionResult(result: SessionReadyResult) {
   const store = useUserStore()
-  const result = await store.invalidateSession({ reason, context })
-  if (result.status === 'stale') return
+  if (result.status === 'ok' || result.status === 'stale') return
   if (result.status === 'failed') {
-    ElMessage.error({ message: store.clearError ?? '尚未确认会话清理，请重试。', grouping: true })
+    ElMessage.error({ message: store.clearError ?? '无法确认会话状态，请刷新重试。', grouping: true })
     return
   }
   if (result.operationVersion !== store.operationVersion || sessionRouter?.currentRoute.value.name === 'login') return
@@ -71,25 +71,46 @@ async function invalidateAndNavigate(reason: 'expired' | 'unauthorized', context
   }
 }
 
+async function invalidateAndNavigate(reason: 'expired' | 'unauthorized', context: SessionContext) {
+  const store = useUserStore()
+  const desktop = typeof window === 'undefined' ? undefined : window.nexusDesktop
+  if (desktop || isWebBrowser()) {
+    const result = await store.ensureSession(context, reason === 'unauthorized')
+    await navigateAfterSessionResult(result)
+    return result.status === 'ok'
+  }
+  const cleared = await store.invalidateSession({ reason, context })
+  await navigateAfterSessionResult(cleared.status === 'ok'
+    ? { status: 'reauthenticate', operationVersion: cleared.operationVersion } : cleared)
+  return false
+}
+
 http.interceptors.request.use(async (config) => {
   delete config.authContext
   if (!isManagementRequest(config)) return config
 
   const userStore = useUserStore()
+  if (!userStore.checkWebState()) {
+    await navigateAfterSessionResult({ status: 'reauthenticate', operationVersion: userStore.operationVersion })
+    throw new CanceledError('SESSION_CHANGED', config)
+  }
   if (userStore.clearing || userStore.clearError) {
     throw new CanceledError('SESSION_CLEAR_PENDING', config)
   }
   if (!userStore.accessToken) return config
-  const context: SessionContext = {
-    operationVersion: userStore.operationVersion, mainRevision: userStore.mainRevision,
-  }
+  const context = userStore.sessionContext()
   if (userStore.expiresAt <= Date.now()) {
-    await invalidateAndNavigate('expired', context)
-    throw new CanceledError('SESSION_EXPIRED', config)
+    const renewed = await invalidateAndNavigate('expired', context)
+    if (!renewed || userStore.clearing || userStore.clearError || userStore.expiresAt <= Date.now()) {
+      throw new CanceledError('SESSION_EXPIRED', config)
+    }
   }
 
+  if (context.operationVersion !== userStore.operationVersion || userStore.clearing || userStore.clearError) {
+    throw new CanceledError('SESSION_CHANGED', config)
+  }
   config.headers.set('Authorization', `Bearer ${userStore.accessToken}`)
-  config.authContext = context
+  config.authContext = userStore.sessionContext()
   return config
 })
 

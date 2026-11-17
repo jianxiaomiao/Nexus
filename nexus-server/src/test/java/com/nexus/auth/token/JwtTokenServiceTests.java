@@ -85,7 +85,7 @@ class JwtTokenServiceTests {
         long userId = 42L;
 
         IssuedAccessToken issuedToken =
-                jwtTokenService.issueAccessToken(userId);
+                jwtTokenService.issueAccessToken(userId, 7L, FIXED_NOW.plus(Duration.ofHours(24)));
 
         Jwt decodedJwt =
                 jwtDecoder.decode(issuedToken.value());
@@ -102,6 +102,7 @@ class JwtTokenServiceTests {
                         "42",
                         decodedJwt.getSubject()
                 ),
+                () -> assertEquals("7", decodedJwt.getClaimAsString("sid")),
 
                 () -> assertEquals(
                         "nexus",

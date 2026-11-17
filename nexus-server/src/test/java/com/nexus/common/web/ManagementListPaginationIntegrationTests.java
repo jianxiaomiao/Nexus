@@ -5,6 +5,8 @@ import com.nexus.apikey.mapper.ApiKeyMapper;
 import com.nexus.application.entity.Application;
 import com.nexus.application.mapper.ApplicationMapper;
 import com.nexus.auth.token.JwtTokenService;
+import com.nexus.auth.mapper.AuthSessionMapper;
+import com.nexus.testing.TestSessionTokens;
 import com.nexus.shortlink.entity.ShortLink;
 import com.nexus.shortlink.mapper.ShortLinkMapper;
 import com.nexus.user.entity.User;
@@ -33,6 +35,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @Transactional
 class ManagementListPaginationIntegrationTests {
+    @Autowired private AuthSessionMapper authSessions;
     private static final String TEST_JWT_SECRET = Base64.getEncoder().encodeToString(SecureRandom.getSeed(32));
 
     @DynamicPropertySource
@@ -86,8 +89,8 @@ class ManagementListPaginationIntegrationTests {
             shortLinkMapper.insert(link);
             links.add(link);
         }
-        String ownerBearer = "Bearer " + jwtTokenService.issueAccessToken(owner.getId()).value();
-        String otherBearer = "Bearer " + jwtTokenService.issueAccessToken(other.getId()).value();
+        String ownerBearer = "Bearer " + TestSessionTokens.issue(jwtTokenService, authSessions, owner.getId()).value();
+        String otherBearer = "Bearer " + TestSessionTokens.issue(jwtTokenService, authSessions, other.getId()).value();
 
         mockMvc.perform(get("/api/application").header("Authorization", ownerBearer))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(11))

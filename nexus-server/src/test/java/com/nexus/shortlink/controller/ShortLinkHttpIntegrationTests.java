@@ -9,6 +9,8 @@ import com.nexus.quota.QuotaTestCleanup;
 import com.nexus.quota.mapper.ApplicationQuotaMapper;
 import com.nexus.application.mapper.ApplicationMapper;
 import com.nexus.auth.token.JwtTokenService;
+import com.nexus.auth.mapper.AuthSessionMapper;
+import com.nexus.testing.TestSessionTokens;
 import com.nexus.shortlink.dto.CreateShortLinkRequest;
 import com.nexus.shortlink.dto.UpdateShortLinkRequest;
 import com.nexus.shortlink.entity.ShortLink;
@@ -45,6 +47,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class ShortLinkHttpIntegrationTests {
+    @Autowired private AuthSessionMapper authSessions;
     private static final String TEST_JWT_SECRET = newTestSecret();
 
     @DynamicPropertySource
@@ -115,13 +118,13 @@ class ShortLinkHttpIntegrationTests {
             QuotaTestCleanup.deletePeriods(quotaMapper, app.getId());
             applicationMapper.deleteById(app.getId());
         }
-        if (owner != null && owner.getId() != null) userMapper.deleteById(owner.getId());
+        if (owner != null && owner.getId() != null) { TestSessionTokens.deleteForUser(authSessions, owner.getId()); userMapper.deleteById(owner.getId()); }
     }
 
     @Test
     void machineCreatesManagerDisablesAndPublicRedirectNeedsNoCredential() throws Exception {
         String machineAuthorization = "ApiKey " + credential.plaintextKey();
-        String managerAuthorization = "Bearer " + jwtTokenService.issueAccessToken(owner.getId()).value();
+        String managerAuthorization = "Bearer " + TestSessionTokens.issue(jwtTokenService, authSessions, owner.getId()).value();
         String target = "https://www.douyin.com/video/1";
         String createBody = objectMapper.writeValueAsString(new CreateShortLinkRequest(
                 "demo", target, OffsetDateTime.now(ZoneOffset.UTC).plusMinutes(5)));
@@ -202,13 +205,13 @@ class ShortLinkHttpIntegrationTests {
             assertEquals(404, send("DELETE", "/v1/short-links/" + shortLinkId,
                     otherKeyHeader, null).statusCode());
 
-            String otherUserHeader = "Bearer " + jwtTokenService.issueAccessToken(otherUser.getId()).value();
+            String otherUserHeader = "Bearer " + TestSessionTokens.issue(jwtTokenService, authSessions, otherUser.getId()).value();
             assertEquals(404, send("GET", "/api/short-links?apiKeyId=" + key.getId(),
                     otherUserHeader, null).statusCode());
         } finally {
             UsageTestCleanup.deleteEventsAfterPendingWrites(usageExecutor, usageEventMapper, otherKey.getId());
             apiKeyMapper.deleteById(otherKey.getId());
-            userMapper.deleteById(otherUser.getId());
+            { TestSessionTokens.deleteForUser(authSessions, otherUser.getId()); userMapper.deleteById(otherUser.getId()); }
         }
     }
 

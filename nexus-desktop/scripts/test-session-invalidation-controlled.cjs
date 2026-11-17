@@ -136,7 +136,7 @@ if (selected && !scenarios.includes(selected)) throw Error('Unknown controlled s
     current.afterLogin = await snapshot()
     validSession(current.afterLogin, 1)
     const observed = await observe()
-    assert.equal(observed.ipc.filter(r => r.channel === 'auth-session:write' && r.status === 'ok').length, 1)
+    assert.equal(observed.ipc.filter(r => r.channel === 'auth-session:login' && r.status === 'ok').length, 1)
   }
 
   async function queryFromPage() {
@@ -211,7 +211,7 @@ if (selected && !scenarios.includes(selected)) throw Error('Unknown controlled s
     await expect.poll(() => instance.evaluate(() => !!globalThis.__invalidationControlled.release401)).toBe(true)
     current.beforeNewIntent = await snapshot()
     // A second login cannot be entered through the public login route while signed in.
-    // Drive the real Store's login intent/write boundary with fixed test data instead.
+    // Drive the real Store intent and Main login bridge with fixed test data instead.
     await page.evaluate(() => {
       const store = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('userStore')
       window.__controlledLoginAttempt = store.beginLogin()
@@ -226,7 +226,9 @@ if (selected && !scenarios.includes(selected)) throw Error('Unknown controlled s
     assert.deepEqual(current.afterOld401, current.beforeRelease)
     const observed = await observe()
     assert.equal(observed.ipc.filter(r => r.channel === 'auth-session:clear').length, 0)
-    assert.equal(observed.requests.at(-1).status, 401)
+    const oldQuery = observed.requests.filter(r => r.path === '/api/application' && r.mode === 'deferred401')
+    assert.equal(oldQuery.length, 1)
+    assert.equal(oldQuery[0].status, 401)
     if (name === 'stale-before-save') await completeControlledLogin()
     await instance.evaluate(() => { globalThis.__invalidationControlled.mode = 'success' })
     await page.reload({ waitUntil: 'domcontentloaded' })
@@ -239,9 +241,11 @@ if (selected && !scenarios.includes(selected)) throw Error('Unknown controlled s
   async function completeControlledLogin() {
     const result = await page.evaluate(async () => {
       const store = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('userStore')
-      return store.completeLogin(window.__controlledLoginAttempt, {
-        accessToken: 'CONTROLLED_REPLACEMENT_SESSION_ONLY', tokenType: 'Bearer', expiresInSeconds: 600,
-      })
+      // Use the real login bridge; the Main test entry supplies a fixed response.
+      const attempt = window.__controlledLoginAttempt
+      const saved = await window.nexusDesktop.loginAuthSession({ expectedRevision: attempt.mainRevision, email: 'controlled@example.test', password: 'CONTROLLED_TEST_ONLY' })
+      if (saved.status !== 'ok') return saved
+      return store.completeLogin(attempt, { authState: saved.authState })
     })
     assert.equal(result.status, 'ok')
   }

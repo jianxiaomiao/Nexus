@@ -3,12 +3,15 @@ package com.nexus.auth.config;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.security.oauth2.core.*;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.*;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 import java.time.Clock;
+import java.time.Duration;
 import java.util.Base64;
 
 //Spring 配置类，关闭 CGLIB 代理
@@ -55,15 +58,31 @@ public class JwtConfig {
     }
 
     @Bean
-    public JwtDecoder jwtDecoder(SecretKey jwtSigningKey, JwtProperties properties) {
+    @Primary
+    public JwtDecoder jwtDecoder(SecretKey jwtSigningKey, JwtProperties properties, Clock clock) {
         NimbusJwtDecoder decoder = NimbusJwtDecoder
                 .withSecretKey(jwtSigningKey)
                 .macAlgorithm(MacAlgorithm.HS256)
                 .build();
 
-        decoder.setJwtValidator(
-                JwtValidators.createDefaultWithIssuer(properties.issuer())
-        );
+        JwtTimestampValidator timestamps = new JwtTimestampValidator(Duration.ZERO);
+        timestamps.setClock(clock);
+        decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(
+                timestamps, new JwtIssuerValidator(properties.issuer())));
+        return decoder;
+    }
+
+    /** 只供撤销本会话使用：忽略exp，保留验签、issuer及尚未生效时间检查。 */
+    @Bean("logoutJwtDecoder")
+    public JwtDecoder logoutJwtDecoder(SecretKey jwtSigningKey, JwtProperties properties, Clock clock) {
+        NimbusJwtDecoder decoder = NimbusJwtDecoder.withSecretKey(jwtSigningKey)
+                .macAlgorithm(MacAlgorithm.HS256).build();
+        OAuth2TokenValidator<Jwt> notBefore = jwt -> jwt.getNotBefore() != null
+                && clock.instant().isBefore(jwt.getNotBefore())
+                ? OAuth2TokenValidatorResult.failure(new OAuth2Error("invalid_token"))
+                : OAuth2TokenValidatorResult.success();
+        decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(
+                new JwtIssuerValidator(properties.issuer()), notBefore));
         return decoder;
     }
 }

@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useUserStore } from '@/stores/userStore'
 import { ElMessage } from 'element-plus'
 import { configureSessionNavigation } from '@/api/http'
+import { isWebBrowser } from '@/auth/webSession'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -65,6 +66,17 @@ configureSessionNavigation(router)
 
 router.beforeEach(async (to) => {
   const userStore = useUserStore()
+  const desktop = typeof window === 'undefined' ? undefined : window.nexusDesktop
+  if (isWebBrowser() && userStore.accessToken && !userStore.checkWebState()) {
+    return to.name === 'login' ? true : { name: 'login', replace: true }
+  }
+  if ((desktop || isWebBrowser()) && !userStore.clearing && userStore.accessToken && userStore.expiresAt <= Date.now()) {
+    const renewed = await userStore.ensureSession(userStore.sessionContext())
+    if (renewed.status === 'stale' || renewed.status === 'failed') return false
+    if (renewed.status === 'reauthenticate') {
+      return to.name === 'login' ? true : { name: 'login', replace: true }
+    }
+  }
   if (userStore.clearing || (userStore.accessToken && userStore.expiresAt <= Date.now())) {
     const result = await userStore.invalidateSession(userStore.clearing
       ? { reason: 'logout' } // Join the existing clear; do not start another intent.

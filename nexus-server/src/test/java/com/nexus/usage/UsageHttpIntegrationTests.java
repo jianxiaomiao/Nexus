@@ -14,6 +14,8 @@ import com.nexus.usage.metrics.UsageRecordMetrics;
 import com.nexus.application.exception.ApplicationNotFoundException;
 import com.nexus.application.mapper.ApplicationMapper;
 import com.nexus.auth.token.JwtTokenService;
+import com.nexus.auth.mapper.AuthSessionMapper;
+import com.nexus.testing.TestSessionTokens;
 import com.nexus.usage.dto.TimeRange;
 import com.nexus.usage.dto.UsageQueryRequest;
 import com.nexus.usage.dto.UsageQueryResponse;
@@ -65,6 +67,7 @@ import static org.mockito.Mockito.when;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(UsageHttpIntegrationTests.UnhandledUsageController.class)
 class UsageHttpIntegrationTests {
+    @Autowired private AuthSessionMapper authSessions;
     private static final String TEST_JWT_SECRET = Base64.getEncoder()
             .encodeToString(SecureRandom.getSeed(32));
 
@@ -129,7 +132,7 @@ class UsageHttpIntegrationTests {
             QuotaTestCleanup.deletePeriods(quotaMapper, application.getId());
             applicationMapper.deleteById(application.getId());
         }
-        if (owner != null && owner.getId() != null) userMapper.deleteById(owner.getId());
+        if (owner != null && owner.getId() != null) { TestSessionTokens.deleteForUser(authSessions, owner.getId()); userMapper.deleteById(owner.getId()); }
     }
 
     @Test
@@ -250,7 +253,7 @@ class UsageHttpIntegrationTests {
                 + "&timeRange=CUSTOM&customStartTime=2026-10-08T00:00:00"
                 + "&customEndTime=2026-10-11T00:00:00";
         HttpRequest authorized = HttpRequest.newBuilder(URI.create(queryUrl))
-                .header("Authorization", "Bearer " + jwtTokenService.issueAccessToken(owner.getId()).value())
+                .header("Authorization", "Bearer " + TestSessionTokens.issue(jwtTokenService, authSessions, owner.getId()).value())
                 .GET().build();
         HttpResponse<String> httpResponse = httpClient.send(authorized, HttpResponse.BodyHandlers.ofString());
         assertEquals(200, httpResponse.statusCode());
@@ -268,7 +271,7 @@ class UsageHttpIntegrationTests {
 
         HttpRequest invalidRange = HttpRequest.newBuilder(URI.create(queryUrl.replace(
                         "&customStartTime=2026-10-08T00:00:00", "")))
-                .header("Authorization", "Bearer " + jwtTokenService.issueAccessToken(owner.getId()).value())
+                .header("Authorization", "Bearer " + TestSessionTokens.issue(jwtTokenService, authSessions, owner.getId()).value())
                 .GET().build();
         HttpResponse<String> invalidResponse = httpClient.send(invalidRange, HttpResponse.BodyHandlers.ofString());
         assertEquals(400, invalidResponse.statusCode());
@@ -303,7 +306,7 @@ class UsageHttpIntegrationTests {
 
         String url = "http://localhost:" + port + "/api/usage/events?applicationId=" + application.getId()
                 + "&apiKeyId=" + key.getId();
-        String token = jwtTokenService.issueAccessToken(owner.getId()).value();
+        String token = TestSessionTokens.issue(jwtTokenService, authSessions, owner.getId()).value();
         HttpResponse<String> first = getWithBearer(url, token);
         assertEquals(200, first.statusCode());
         var firstData = objectMapper.readTree(first.body()).path("data");
@@ -415,6 +418,7 @@ class UsageHttpIntegrationTests {
 
     @RestController
     static class UnhandledUsageController {
+
         @com.nexus.usage.web.UsageApi(ApiCode.UUID_GENERATE)
         @GetMapping("/v1/test/usage-unhandled")
         String invoke(jakarta.servlet.http.HttpServletRequest request) {

@@ -103,6 +103,8 @@ export async function installMockApi(page: Page, initial?: { applications?: Appl
   const usageEvents = structuredClone(initial?.usageEvents ?? sampleUsageEvents)
   const calls: RecordedRequest[] = []
   const failures = new Map<string, Failure>()
+  let cookieActive = false
+  const sessionExpiresAt = new Date(Date.now() + 86_400_000).toISOString()
   let nextApplicationId = 100
   let nextKeyId = 100
   let nextWebhookId = 100
@@ -131,7 +133,21 @@ export async function installMockApi(page: Page, initial?: { applications?: Appl
     }
 
     if (path === '/api/auth/login' && method === 'POST') {
-      await respond({ accessToken: 'playwright-only-token', tokenType: 'Bearer', expiresInSeconds: 1800 })
+      cookieActive = true
+      await route.fulfill({ headers: { 'Set-Cookie': 'nexus_rt_dev=mock-rt; HttpOnly; SameSite=Strict; Path=/' }, json: {
+        code: 'SUCCESS', message: '成功', data: { accessToken: 'playwright-only-token', tokenType: 'Bearer', expiresInSeconds: 1800,
+          sessionId: '101', sessionExpiresAt },
+      } })
+      return
+    }
+    if (path === '/api/auth/refresh' && method === 'POST') {
+      if (!cookieActive) { await respond(null, 401, 'INVALID_REFRESH_TOKEN'); return }
+      await respond({ accessToken: 'playwright-only-token', tokenType: 'Bearer', expiresInSeconds: 1800, sessionId: '101', sessionExpiresAt })
+      return
+    }
+    if (path === '/api/auth/logout' && method === 'POST') {
+      cookieActive = false
+      await respond({ serverRevocation: 'confirmed' })
       return
     }
     if (path === '/api/auth/register' && method === 'POST') {

@@ -1,222 +1,67 @@
 package com.nexus.auth.service;
 
-import com.nexus.auth.dto.LoginRequest;
-import com.nexus.auth.dto.LoginResponse;
-import com.nexus.auth.exception.AccountForbiddenException;
-import com.nexus.auth.exception.InvalidCredentialsException;
-import com.nexus.auth.token.IssuedAccessToken;
-import com.nexus.auth.token.JwtTokenService;
+import com.nexus.auth.dto.*;
+import com.nexus.auth.exception.*;
 import com.nexus.user.entity.User;
 import com.nexus.user.mapper.UserMapper;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
-
+import java.time.Instant;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class LoginServiceTests {
-
-    private static final String EMAIL = "test-user@example.com";
-    private static final String RAW_PASSWORD = "true-password";
-    private static final String WRONG_PASSWORD = "wrong-password";
-    private static final String STORED_PASSWORD_HASH = "stored-password-hash";
-
-    @Mock
-    private UserMapper userMapper;
-
-    @Mock
-    private PasswordEncoder passwordEncoder;
-
-    @Mock
-    private JwtTokenService jwtTokenService;
-
-    private LoginService loginService;
-
-    @BeforeEach
-    void setUp() {
-        loginService = new LoginService(
-                userMapper,
-                passwordEncoder,
-                jwtTokenService
-        );
+    @Mock UserMapper users;
+    @Mock PasswordEncoder passwords;
+    @Mock AuthSessionService sessions;
+    LoginService service;
+    final LoginRequest request = new LoginRequest(" User@Example.com ", "test-password");
+    @BeforeEach void setUp() { service = new LoginService(users, passwords, sessions); }
+    private User user() {
+        User user = new User(); user.setId(7L); user.setPasswordHash("test-stored-hash");
+        user.setStatus(0); user.setIsDeleted(0); return user;
     }
-
-    @Test
-    void shouldRejectWhenUserDoesNotExist() {
-        LoginRequest request = new LoginRequest(
-                "missing@example.com",
-                "test-password"
-        );
-
-        when(userMapper.selectOne(any()))
-                .thenReturn(null);
-
-        InvalidCredentialsException exception = assertThrows(
-                InvalidCredentialsException.class,
-                () -> loginService.login(request)
-        );
-
-        assertEquals(
-                "邮箱或密码错误",
-                exception.getMessage()
-        );
-
-        verifyNoInteractions(
-                passwordEncoder,
-                jwtTokenService
-        );
+    @Test void unknownUserDoesNotAttemptPasswordOrSessionCreation() {
+        when(users.selectOne(any())).thenReturn(null);
+        assertThrows(InvalidCredentialsException.class, () -> service.login(request));
+        verifyNoInteractions(passwords, sessions);
     }
-
-    @Test
-    void shouldRejectWhenPasswordIsIncorrect() {
-        LoginRequest request = new LoginRequest(
-                EMAIL,
-                WRONG_PASSWORD
-        );
-
-        User user = createActiveUser();
-
-        when(userMapper.selectOne(any())).thenReturn(user);
-        when(passwordEncoder.matches(request.password(), STORED_PASSWORD_HASH))
-                .thenReturn(false);
-
-        InvalidCredentialsException exception = assertThrows(
-                InvalidCredentialsException.class,
-                () -> loginService.login(request)
-        );
-
-        assertEquals(
-                "邮箱或密码错误",
-                exception.getMessage()
-        );
-
-        verifyNoInteractions(
-                jwtTokenService
-        );
+    @Test void wrongPasswordDoesNotCreateASession() {
+        when(users.selectOne(any())).thenReturn(user());
+        when(passwords.matches(request.password(), "test-stored-hash")).thenReturn(false);
+        assertThrows(InvalidCredentialsException.class, () -> service.login(request));
+        verifyNoInteractions(sessions);
     }
-
-    @Test
-    void shouldRejectWhenUserIsDeleted() {
-        LoginRequest request = new LoginRequest(
-                EMAIL,
-                RAW_PASSWORD
-        );
-
-        User user = createActiveUser();
-        user.setIsDeleted(1);
-
-        when(userMapper.selectOne(any())).thenReturn(user);
-        when(passwordEncoder.matches(request.password(), STORED_PASSWORD_HASH))
-                .thenReturn(true);
-
-        InvalidCredentialsException exception = assertThrows(
-                InvalidCredentialsException.class,
-                () -> loginService.login(request)
-        );
-
-        assertEquals(
-                "邮箱或密码错误",
-                exception.getMessage()
-        );
-
-        verifyNoInteractions(
-                jwtTokenService
-        );
+    @Test void deletedUserIsRejectedByTheLockedSessionCreationBoundary() {
+        successfulPassword();
+        when(sessions.create(7L, "test-stored-hash")).thenThrow(new InvalidCredentialsException());
+        assertThrows(InvalidCredentialsException.class, () -> service.login(request));
     }
-
-    @Test
-    void shouldRejectWhenUserIsBanned() {
-        LoginRequest request = new LoginRequest(
-                EMAIL,
-                RAW_PASSWORD
-        );
-
-        User user = createActiveUser();
-        user.setStatus(1);
-
-        when(userMapper.selectOne(any())).thenReturn(user);
-        when(passwordEncoder.matches(request.password(), STORED_PASSWORD_HASH))
-                .thenReturn(true);
-
-        AccountForbiddenException exception = assertThrows(
-                AccountForbiddenException.class,
-                () -> loginService.login(request)
-        );
-
-        assertEquals(
-                "账号已封禁",
-                exception.getMessage()
-        );
-
-        verifyNoInteractions(
-                jwtTokenService
-        );
+    @Test void bannedUserIsRejectedByTheLockedSessionCreationBoundary() {
+        successfulPassword();
+        when(sessions.create(7L, "test-stored-hash")).thenThrow(new AccountForbiddenException());
+        assertThrows(AccountForbiddenException.class, () -> service.login(request));
     }
-
-    @Test
-    void shouldNotRevealBanWhenPasswordIsIncorrect() {
-        LoginRequest request = new LoginRequest(
-                EMAIL,
-                WRONG_PASSWORD
-        );
-
-        User user = createActiveUser();
-        user.setStatus(1);
-
-        when(userMapper.selectOne(any())).thenReturn(user);
-        when(passwordEncoder.matches(request.password(), STORED_PASSWORD_HASH))
-                .thenReturn(false);
-
-        InvalidCredentialsException exception = assertThrows(
-                InvalidCredentialsException.class,
-                () -> loginService.login(request)
-        );
-
-        assertEquals("邮箱或密码错误", exception.getMessage());
-        verifyNoInteractions(jwtTokenService);
+    @Test void wrongPasswordDoesNotRevealBan() {
+        User user = user(); user.setStatus(1); when(users.selectOne(any())).thenReturn(user);
+        when(passwords.matches(request.password(), "test-stored-hash")).thenReturn(false);
+        assertThrows(InvalidCredentialsException.class, () -> service.login(request));
+        verifyNoInteractions(sessions);
     }
-
-    @Test
-    void shouldReturnLoginResponseWhenCredentialsAreValid() {
-        LoginRequest request = new LoginRequest(
-                EMAIL,
-                RAW_PASSWORD
-        );
-
-        User user = createActiveUser();
-
-        when(userMapper.selectOne(any())).thenReturn(user);
-        when(passwordEncoder.matches(request.password(), STORED_PASSWORD_HASH))
-                .thenReturn(true);
-        when(jwtTokenService.issueAccessToken(user.getId()))
-                .thenReturn(new IssuedAccessToken("test-issued-token", 1800L));
-
-        LoginResponse loginResponse = loginService.login(request);
-
-        assertNotNull(loginResponse);
-        assertAll(
-                () -> assertEquals("Bearer", loginResponse.tokenType()),
-                () -> assertEquals("test-issued-token", loginResponse.accessToken()),
-                () -> assertEquals(1800L, loginResponse.expiresInSeconds())
-        );
-
-        verify(passwordEncoder).matches(RAW_PASSWORD, STORED_PASSWORD_HASH);
-        verify(jwtTokenService).issueAccessToken(1L);
+    @Test void verifiedCredentialsDelegateToSessionCreationAndReturnBothTokens() {
+        successfulPassword();
+        AuthTokensResponse response = new AuthTokensResponse("test-at", "Bearer", 600, "test-rt", "9", Instant.parse("2026-11-17T00:00:00Z"));
+        when(sessions.create(7L, "test-stored-hash")).thenReturn(response);
+        assertSame(response, service.login(request));
+        verify(sessions).create(7L, "test-stored-hash");
     }
-
-    private User createActiveUser() {
-        User user = new User();
-        user.setId(1L);
-        user.setEmail(EMAIL);
-        user.setPasswordHash(STORED_PASSWORD_HASH);
-        user.setStatus(0);
-        user.setIsDeleted(0);
-        return user;
+    private void successfulPassword() {
+        when(users.selectOne(any())).thenReturn(user());
+        when(passwords.matches(request.password(), "test-stored-hash")).thenReturn(true);
     }
 }

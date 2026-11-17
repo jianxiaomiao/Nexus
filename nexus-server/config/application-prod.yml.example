@@ -30,12 +30,28 @@ spring:
 
 nexus:
   auth:
+    web:
+      secure-cookie: true
+      cookie-name: __Host-nexus_rt
+      # Exact public HTTPS origin, no trailing slash; frontend and /api must share this origin.
+      allowed-origins:
+        - ${NEXUS_WEB_ORIGIN}
+    session:
+      absolute-ttl: 24h
+      cleanup-enabled: true
+      cleanup-cron: "0 0 3 * * *" # UTC，默认北京时间11:00
+      cleanup-batch-size: 100
     jwt:
       issuer: nexus
       access-token-ttl: 30m
       secret: ${NEXUS_JWT_SECRET}
   screenshot-jobs:
     result-directory: ${NEXUS_SCREENSHOT_JOB_RESULT_DIR}
+  webhook:
+    crypto:
+      current-key-version: ${NEXUS_WEBHOOK_CRYPTO_CURRENT_KEY_VERSION}
+      keys:
+        v1: ${NEXUS_WEBHOOK_CRYPTO_KEYS_V1}
 
 # Use an absolute deployment-host path, such as /opt/nexus/logs on Linux.
 logging:

@@ -1,5 +1,9 @@
 package com.nexus.apikey.flowTest;
 
+import com.nexus.auth.token.JwtTokenService;
+import com.nexus.auth.mapper.AuthSessionMapper;
+import com.nexus.testing.TestSessionTokens;
+
 import com.nexus.apikey.dto.CreateApiKeyRequest;
 import com.nexus.apikey.dto.DeleteApiKeyRequest;
 import com.nexus.apikey.dto.RotateApiKeyRequest;
@@ -57,6 +61,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @Transactional
 class ApiKeyManagementFlowIntegrationTests {
+    @Autowired private JwtTokenService jwtTokenService;
+    @Autowired private AuthSessionMapper authSessions;
     private static final String BASE_PATH = "/api/apiKey";
     private static final String TEST_PASSWORD = "test-api-key-password";
     private static final String TEST_JWT_SECRET = Base64.getEncoder().encodeToString(
@@ -449,7 +455,7 @@ class ApiKeyManagementFlowIntegrationTests {
             executor.shutdownNow();
             apiKeyMapper.deleteById(keyId);
             applicationMapper.deleteById(applicationId);
-            userMapper.deleteById(owner.userId());
+            { TestSessionTokens.deleteForUser(authSessions, owner.userId()); userMapper.deleteById(owner.userId()); }
         }
     }
 
@@ -461,14 +467,8 @@ class ApiKeyManagementFlowIntegrationTests {
         user.setPasswordHash(passwordEncoder.encode(TEST_PASSWORD));
         userMapper.insert(user);
 
-        MvcResult login = mockMvc.perform(post("/api/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new LoginRequest(email, TEST_PASSWORD))))
-                .andExpect(status().isOk())
-                .andReturn();
-        String accessToken = objectMapper.readTree(login.getResponse().getContentAsString())
-                .at("/data/accessToken").asText();
-        return new AuthenticatedUser(user.getId(), accessToken);
+        String token = TestSessionTokens.issue(jwtTokenService, authSessions, user.getId()).value();
+        return new AuthenticatedUser(user.getId(), token);
     }
 
     private long createApplication(long ownerUserId) {

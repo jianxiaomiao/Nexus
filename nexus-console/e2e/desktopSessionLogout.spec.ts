@@ -2,13 +2,13 @@ import { expect, test, type Page } from '@playwright/test'
 import type { Router } from 'vue-router'
 import type {
   AuthState, ClearAuthSessionInput, ClearAuthSessionResult,
-  ReadAuthSessionResult, WriteAuthSessionInput, WriteAuthSessionResult,
+  ReadAuthSessionResult, LoginAuthSessionInput, LoginAuthSessionResult,
 } from '../src/types/desktop'
 import { installMockApi, signIn } from './support/mockApi'
 
 type BridgeWindow = Window & {
   __logoutRead: () => Promise<ReadAuthSessionResult>
-  __logoutWrite: (input: WriteAuthSessionInput) => Promise<WriteAuthSessionResult>
+  __logoutWrite: (input: LoginAuthSessionInput) => Promise<LoginAuthSessionResult>
   __logoutClear: (input: ClearAuthSessionInput) => Promise<ClearAuthSessionResult>
 }
 
@@ -27,9 +27,9 @@ async function setup(page: Page) {
     reads++
     return { status: 'ok', authState: structuredClone(state) }
   })
-  await page.exposeFunction('__logoutWrite', (input: WriteAuthSessionInput): WriteAuthSessionResult => {
+  await page.exposeFunction('__logoutWrite', (input: LoginAuthSessionInput): LoginAuthSessionResult => {
     expect(input.expectedRevision).toBe(state.revision)
-    state = { revision: state.revision + 1, session: structuredClone(input.session) }
+    state = { revision: state.revision + 1, session: { accessToken: 'playwright-only-token', tokenType: 'Bearer', expiresAt: Date.now() + 300_000, sessionId: '1', sessionExpiresAt: Date.now() + 86_400_000 } }
     return { status: 'ok', code: 'SUCCESS', authState: structuredClone(state) }
   })
   await page.exposeFunction('__logoutClear', (input: ClearAuthSessionInput) => {
@@ -42,7 +42,12 @@ async function setup(page: Page) {
     const unused = async (): Promise<never> => { throw Error('Unexpected desktop operation') }
     w.nexusDesktop = {
       readAuthSession: () => w.__logoutRead(),
-      writeAuthSession: input => w.__logoutWrite(input),
+      loginAuthSession: input => w.__logoutWrite(input),
+      ensureAuthSession: unused,
+      logoutAuthSession: async input => {
+        const result = await w.__logoutClear(input)
+        return result.status === 'ok' ? { ...result, serverRevocation: 'confirmed' as const } : result
+      },
       clearAuthSession: input => w.__logoutClear(input),
       openShortLink: unused,
       saveScreenshot: unused,
@@ -76,7 +81,7 @@ async function setup(page: Page) {
     newerSession() {
       if (!pending) throw Error('No pending clear')
       state = { revision: state.revision + 1, session: {
-        accessToken: 'fixture-newer-main-token', tokenType: 'Bearer', expiresAt: Date.now() + 300_000,
+        accessToken: 'fixture-newer-main-token', tokenType: 'Bearer', expiresAt: Date.now() + 300_000, sessionId: '2', sessionExpiresAt: Date.now() + 86_400_000,
       } }
       pending.resolve({ status: 'failed', code: 'SESSION_CHANGED' })
       pending = null

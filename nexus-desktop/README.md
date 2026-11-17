@@ -1,5 +1,55 @@
 # Nexus Desktop
 
+## 当前认证闭环（2026-11-17）
+
+Main 私有保存 AT/RT。`ensureAuthSession` 在路由、页面恢复和管理请求发现 AT 到期时合并续期；当前管理401可强制一次，原业务请求仍失败、不自动重放。`logoutAuthSession` 先清本地再用原 AT 请求后端退出，撤销未确认仍回登录页并保留提示，Renderer刷新也会从Main恢复该提示。只有公开快照跨 IPC，版本检查隔离迟到结果；完整进程退出后仍不保存登录。
+
+验证入口：
+
+- `npm run test:auth-session`：Main纯Node边界，41项。
+- `npm run test:login-session-boundaries`：隔离Electron的IPC来源与RT隔离。
+- `npm run test:session-renewal`：正式Main/Preload/Vue/Store，固定模拟响应，无真实后端。
+- `npm run test:session-renewal:live`：需要8080真实后端。脚本核对当前PID对应启动日志的schema必须为nexus_test，创建一个专用测试账号，只调用认证与Application读取；账号保留，已知会话最终撤销。不使用个人凭据，不创建截图或其他业务资源。
+
+真实验收只在测试入口将客户端等待期限缩短为8秒；后端JWT和配置不改，不能据此宣称JWT自然过期验收。退出/刷新丢响应也是入口注入；不重试旧RT。证据与测试边界见 `docs/SESSION_HANDOFF.md`。旧 `test-session-invalidation-controlled.cjs` 断言的是到期直接清理的历史流程，当前续期验收使用上述新入口。
+
+本轮只更新源码和Renderer构建，没有更新已安装0.0.1。网页端Cookie/CSRF、跨进程记住登录仍待单独设计。以下旧登录检查点中“自动续期未接入”的描述已由本节覆盖。
+
+## 当前桌面登录：Main 私有会话（2026-11-17）
+
+桌面页面通过 `loginAuthSession({ expectedRevision, email, password })` 窄 IPC 登录。Main 请求固定本地后端，校验并在内存整体保存 AT、RT、AT 绝对期限、sessionId 和会话绝对期限；只有保存成功才返回不含 RT 的白名单快照。Renderer 应用快照，不再调用旧 `writeAuthSession`（该接口已移除）。普通 Web 仍走 HTTP/内存登录。
+
+Main 内部 `loginVersion` 隔离尚未提交的登录意图，`revision` 隔离已提交状态；写入前都须匹配。RT 不从 read/login/clear 返回，通用协议拒绝 auth 路径（规范的 POST 注册除外）。Main read 在 AT 到期时保留 RT，在会话绝对到期时清除；本轮不执行续期，Router/HTTP 仍使用原过期清理流程。
+
+可运行 `npm run test:auth-session`（26 项纯 Node 边界）和 `npm run test:login-session-boundaries`（隔离 Electron、固定模拟响应，无真实网络），以及已适配的 `node scripts/test-session-invalidation-controlled.cjs`。Store 51 项、类型/桌面构建及 79 项浏览器回归通过；Mac 没有默认 Playwright Chromium，后者使用本机 Chrome 的隔离配置，见 `.runtime/login-e2e/`。详见 `docs/SESSION_HANDOFF.md`。
+
+这些结果不代表新登录路径真实后端或已安装应用验收；本轮未重新打包。自动续期、服务端退出和跨进程记住登录留待后续单独接入。下方旧会话接入记录按本节覆盖。
+
+## 在 Intel Mac 上运行
+
+直接打开 `Nexus Desktop.app` 即可进入登录页。登录和业务请求需要本机 Nexus 后端运行在 `http://localhost:8080`。从 DMG 安装时，将应用复制到“应用程序”后再打开。当前 x64 版本用于本机部署，使用 ad-hoc 签名，未做 Developer ID 公证。
+
+开发时使用 Node 24.12 或以上的 24.x 版本。在本机这份副本中，可在终端执行 `export PATH="$HOME/Nexus/nexus-desktop/.runtime/node-24/bin:$PATH"` 使用已准备好的 Node 和 npm。新复制的项目需在 Mac 上分别安装两个模块的依赖：
+
+```sh
+cd ~/Nexus/nexus-console
+npm ci
+cd ../nexus-desktop
+npm ci
+node node_modules/electron/install.js
+npm run build:renderer
+npm start
+```
+
+源码版使用 `.runtime/user-data-mac/`。打包版使用 Electron 的用户应用支持目录。关闭最后一个窗口会退出，重新打开时恢复已保存的窗口布局。
+
+| 在 `nexus-desktop` 下执行 | 用途 |
+|---|---|
+| `npm run pack:dir` | 在本机生成 `release/mac/Nexus Desktop.app` |
+| `npm run pack:mac` | 生成以上应用和 `release/Nexus-Desktop-0.0.1-x64.dmg` |
+| `npm run test:packaged-smoke` | 启动实际打包程序，用独立用户目录核对登录页、刷新、Preload、IPC 和窗口状态写入 |
+| `npm run test:notification-boundaries` | 用受控任务状态验证通知去重及错误处理 |
+
 ## Windows 打包配置检查点（2026-11-14）
 
 开发者已调整启动边界：仅开发模式覆盖 `.runtime/user-data`，打包版保留Electron默认userData，两者共用协议/窗口/IPC启动流程。Main的安装版AppUserModelId与 `electron-builder.yml` 同为 `com.nexus.desktop`；开发版沿用Electron可执行路径。冒烟与诊断环境标志仅开发模式生效，安装版不向程序目录写诊断图片。

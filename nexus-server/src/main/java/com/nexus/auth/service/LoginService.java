@@ -2,11 +2,10 @@ package com.nexus.auth.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.nexus.auth.dto.LoginRequest;
-import com.nexus.auth.dto.LoginResponse;
-import com.nexus.auth.exception.AccountForbiddenException;
+import com.nexus.auth.dto.AuthTokensResponse;
 import com.nexus.auth.exception.InvalidCredentialsException;
-import com.nexus.auth.token.IssuedAccessToken;
-import com.nexus.auth.token.JwtTokenService;
+import com.nexus.auth.exception.AuthSessionUnavailableException;
+import org.springframework.dao.DataAccessException;
 import com.nexus.user.entity.User;
 import com.nexus.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
@@ -20,19 +19,25 @@ import java.util.Locale;
 public class LoginService {
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
-    private final JwtTokenService jwtTokenService;
+    private final AuthSessionService sessions;
 
-    public LoginResponse login(LoginRequest request) {
+    public AuthTokensResponse login(LoginRequest request) {
+        AuthSessionTransactions.requireNoOuterTransaction();
         String normalizedEmail = request.email()
                 .strip()
                 .toLowerCase(Locale.ROOT);
 
         String rawPassword = request.password();
 
-        User user = userMapper.selectOne(
+        User user;
+        try {
+            user = userMapper.selectOne(
                 Wrappers.<User>lambdaQuery()
                         .eq(User::getEmail, normalizedEmail)
-        );
+            );
+        } catch (DataAccessException exception) {
+            throw new AuthSessionUnavailableException(exception);
+        }
 
         // 1. 用户不存在
         if (user == null) {
@@ -49,24 +54,7 @@ public class LoginService {
             throw new InvalidCredentialsException();
         }
 
-        // 3. 密码正确，但账号已删除
-        if (Integer.valueOf(1).equals(user.getIsDeleted())) {
-            throw new InvalidCredentialsException();
-        }
-
-        // 4. 密码正确，但账号被封禁
-        if (Integer.valueOf(1).equals(user.getStatus())) {
-            throw new AccountForbiddenException();
-        }
-
-        // 5. 所有检查通过后，才能签发 JWT
-        IssuedAccessToken issuedToken =
-                jwtTokenService.issueAccessToken(user.getId());
-
-        return new LoginResponse(
-                issuedToken.value(),
-                "Bearer",
-                issuedToken.expiresInSeconds()
-        );
+        // 当前账号状态与并发禁用的互斥边界在User行锁内检查。
+        return sessions.create(user.getId(), user.getPasswordHash());
     }
 }

@@ -10,6 +10,8 @@ import com.nexus.quota.QuotaTestCleanup;
 import com.nexus.quota.mapper.ApplicationQuotaMapper;
 import com.nexus.application.mapper.ApplicationMapper;
 import com.nexus.auth.token.JwtTokenService;
+import com.nexus.auth.mapper.AuthSessionMapper;
+import com.nexus.testing.TestSessionTokens;
 import com.nexus.openapi.dto.HashAlgorithm;
 import com.nexus.openapi.dto.HashRequest;
 import com.nexus.usage.UsageTestCleanup;
@@ -44,6 +46,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class OpenApiHttpIntegrationTests {
+    @Autowired private AuthSessionMapper authSessions;
     private static final String UUID_PATH = "/v1/utils/uuid";
     private static final String HASH_PATH = "/v1/utils/hash";
     private static final String TEST_JWT_SECRET = Base64.getEncoder().encodeToString(SecureRandom.getSeed(32));
@@ -106,7 +109,7 @@ class OpenApiHttpIntegrationTests {
             QuotaTestCleanup.deletePeriods(quotaMapper, application.getId());
             applicationMapper.deleteById(application.getId());
         }
-        if (owner != null && owner.getId() != null) userMapper.deleteById(owner.getId());
+        if (owner != null && owner.getId() != null) { TestSessionTokens.deleteForUser(authSessions, owner.getId()); userMapper.deleteById(owner.getId()); }
     }
 
     @Test
@@ -253,7 +256,7 @@ class OpenApiHttpIntegrationTests {
 
     @Test
     void machineKeyAndHumanJwtCannotBeExchanged() throws Exception {
-        String bearer = "Bearer " + jwtTokenService.issueAccessToken(owner.getId()).value();
+        String bearer = "Bearer " + TestSessionTokens.issue(jwtTokenService, authSessions, owner.getId()).value();
         assertUnauthorized(get(UUID_PATH, bearer));
         HttpResponse<String> managementWithKey = get("/api/application", apiKeyHeader());
         assertEquals(401, managementWithKey.statusCode());
@@ -265,7 +268,7 @@ class OpenApiHttpIntegrationTests {
 
     @Test
     void accountStateImmediatelyAffectsExistingJwtAndApiKey() throws Exception {
-        String bearer = "Bearer " + jwtTokenService.issueAccessToken(owner.getId()).value();
+        String bearer = "Bearer " + TestSessionTokens.issue(jwtTokenService, authSessions, owner.getId()).value();
         assertEquals(200, get("/api/application", bearer).statusCode());
         assertEquals(200, get(UUID_PATH, apiKeyHeader()).statusCode());
 

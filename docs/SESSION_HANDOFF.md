@@ -1,14 +1,70 @@
 # Nexus Session Handoff
 
-## 下一单元：后端Refresh Token设计，尚未定稿或实现（2026-11-15）
+## 当前单元：网页 Cookie 登录、自动续期、退出和跨标签（2026-11-17）
 
-- 用户开始讨论后端Refresh Token，请先讲和当前刷新恢复的区别，以及会话表、轮换、吊销边界；核心仍按学习分工由用户先设计/实现，本轮未授权写后端核心或迁移。用户已理解页面刷新只从Main恢复原Access Token、Refresh Token用来换新Access Token；把1/3 TTL刷新时机称为轮换、认为退出需刷新RT，以及将“不匹配/过期”统称吊销，需要分别纠正。
-- 已读当前`nexus-server/src/main/java/com/nexus/auth/{service/LoginService.java,token/JwtTokenService.java,web/BearerUserIdResolver.java,dto/LoginResponse.java}`：登录只返回accessToken/tokenType/expiresInSeconds，JWT含issuer/subject/iat/exp，无sid；Bearer解析验签后查当前User，现有迁移V1–V13没有登录会话/RT表。不要将工作区的webhook secret_refresh字段误当认证刷新实现。当前刷新恢复/退出代码和测试已完成下节范围，未改动。
-- 本轮说明/建议，**尚非最终架构决定**：轮换指一次有效RT消费后签发新AT+RT并使旧RT失效，和何时触发刷新不同；Token不是JWT签名密钥，退出应撤销当前后端会话及清客户端，不签新RT。拟用高熵随机不透明RT、MySQL仅存摘要；如要求旧RT重放检测，建议稳定auth_sessions与多代refresh token摘要记录，而非只覆盖当前摘要。同一session代表一次登录实例/凭据链，不是一用户唯一一行，也不直接复用Main内存revision。会话绝对寿命上限和可选闲置期限需再决定，避免无限滑动续期。
-- 未知/伪造RT只拒绝，不能凭客户端给的userId/sessionId吊销他人；确认匹配已消费旧RT时才讨论撤销所属会话链（严格轮换方案），并发刷新要客户端合并+后端事务/条件更新。成功响应丢失后旧RT重试可能触发重放，不能假设数据库摘要能还原新RT；首版可选重新登录或另行设计受限幂等，尚未决定。过期是按时间即时拒绝，不依赖清理定时任务。
-- 最先待用户决定的产品边界：退出是否要求已发出的AT立即失效，还是只禁止续期、允许AT到原到期时间。前者需要JWT关联session并在认证时检查后端会话，当前只有用户检查不能达到；后者更简单但必须明确剩余有效窗口。普通退出当前会话与退出全部会话分开；刷新必须检查当前User状态，不能凭旧RT恢复禁用/删除账号。客户端自动刷新时机、TTLs、接口传输/错误、锁和测试场景须之后逐步讨论，不先生成DDL。
-- 客户端约束仍适用：Electron RT由Main持有，不返回Renderer；Web的HttpOnly Cookie/CSRF另行设计。现有Main转发不支持Cookie/Set-Cookie。AT临近过期/401处理将来才从“直接清理”适配为“受控刷新后再决定”，不对所有401盲刷或无条件重放写请求。跨进程记住登录独立于RT签发，不自动承诺。
-- 参考已核对的IETF RFC 6749 §6及RFC 9700 §4.14（轮换/保留关联/重放检测与撤销），Nexus是自己的第一方认证流程，不因参考这些规则而引入完整OAuth服务器或宣称OAuth实现合规。后端设计是新的学习单元，建议下一轮用本交接及本地代码在新对话继续；不要重复桌面历史验收或创建截图任务。
+- 用户明确授权按已讨论方案实现 Web Cookie/CSRF、AT内存和跨标签协调，保留 Electron。此节覆盖下方“Web继续原内存/失效行为，Cookie/CSRF尚未接入”的旧状态；Electron私有会话、JSON登录/续期/退出、进程退出后不记住登录的决策不变。详细调用链和取舍见 [WEB_SESSION_DESIGN.md](WEB_SESSION_DESIGN.md)。
+- 同一路径 `/api/auth/login|refresh|logout` 按固定 `X-Nexus-Session-Transport: cookie` 进入网页适配；JSON客户端不读写Cookie。Web响应仅公开AT/type/TTL/sid/绝对期限；RT仅由Set-Cookie写入HttpOnly Cookie。生产固定 `__Host-nexus_rt; Secure; HttpOnly; SameSite=Strict; Path=/`，无Domain/持久期限；要求精确HTTPS Origin、JSON/自定义头，有Sec-Fetch-Site时仅same-origin。拒绝CSRF不修改Cookie/数据库。
+- 新可提交 `src/main/resources/application-local.yml` 仅local profile使用独立 `nexus_rt_dev`、非Secure Cookie，只允许 localhost:5173 与127.0.0.1:5173。选择一个主机名持续使用；测试4173/4174仅由测试进程覆盖。同一Cookie主机配置多个Origin会被拒绝，避免端口间共享RT却没有共享Web Lock。生产示例新增非秘密 `NEXUS_WEB_ORIGIN`，未更改ECS或私有配置。
+- Pinia仅内存AT及公开快照。bootstrap先Cookie refresh再初始导航；到期Router/HTTP边界和当前401接入ensure，原失败业务请求不重放。同标签Promise合并；跨标签Web Locks串行所有凭据操作，各标签依次轮换最新Cookie、各自取得AT，AT/RT不广播或持久化。BroadcastChannel/storage仅通知非秘密状态，Router/HTTP与快照应用也读共享状态，覆盖广播延迟。
+- 共享元数据包含代次、操作ID、阶段、sid、固定期限和撤销状态。退出先清本地/发布持久退出意图，再等锁调用Cookie logout；其他标签即停，迟到登录/续期及补偿不能覆盖新意图。后端RT证明退出复用User→Session→RT锁序和有界重试，已消费RT可用于撤销，不为退出续期；expectedSessionId防追清另一会话。失败保留“服务端撤销未确认”，刷新不靠残留Cookie复活；失败的新登录不抹警告。明确重新登录可恢复新代次，但不证明旧未知会话已撤销。
+- 续期网络/超时/坏响应或持锁标签关闭留下working时，结果按未知处理，不复用旧RT；必须重新登录。锁/广播/本地存储不可用时明确停止，不做无锁降级。Cookie为会话Cookie，浏览器可能恢复它，不能保证关浏览器即退出；跨进程记住登录仍不是本单元承诺。
+- 本次后端认证选择集65/65通过：29项原真实Spring/MySQL会话回归、5项Web真实MySQL/MockMvc、5项Cookie/CSRF策略、原HTTP/登录/退出单元25项，以及1项显式开启的真实浏览器闭环。仅使用nexus_test及既有专用凭据，测试进程随机JWT/Webhook密钥，不输出秘密，不改schema；测试数据按专用用户清理。
+- Chrome模拟回归按文件/标题去重共188个不同场景在分批复核后通过：初次完整185项为178通过、7个WebGL场景失败；测试进程指定SwiftShader后登录背景10项全部通过，连同认证共33项通过；最后网页登录/会话24项通过（含新增的3个边界场景）。不是一次完整188/188的同批运行。初次图形失败和软件渲染复核单列，未改系统GPU设置。隔离Vite拒绝所有未模拟机器/管理请求，不访问真实业务。
+- 真实Chrome→独立Vite4174→随机回环Spring端口→MySQL闭环通过：新登录、真实HttpOnly Cookie不可脚本读取、RT不在响应/localStorage/sessionStorage、重载轮换、双标签各自AT、8秒真实JWT自然到期且旧AT确实401、同标签并发合并/跨标签串行、退出广播、旧AT/RT服务端拒绝和重载不复活。临时用户及会话finally清理并断言为零，浏览器和Vite已关闭，测试Spring已退出。故障注入仍由受控浏览器场景验证，不冒充真实断网/代理验收。
+- Electron回归：Main41/41、Store60/60；最终源码Renderer构建与隔离Electron六场景通过，证据 `nexus-desktop/.runtime/auth-controlled-CWb2qO/evidence.json`（固定模拟后端，无真实账号）。Web/桌面Renderer构建、应用/E2E类型检查通过；构建有既有大包提示。未生成新的发布JAR、未重新打包/更新已安装0.0.1、未部署/提交/推送，不宣称安装版RT或生产HTTPS验收。
+- 可复验入口在 LOCAL_TESTING.md。实际测试证据在忽略的 `nexus-desktop/.runtime/`：`web-session-evidence.json`、`web-e2e/report.json`、`web-graphics/report.json`、`web-last/report.json`、`web-live/browser.log`；后端报告另在 `nexus-server/target/surefire-reports/`。日志可能含测试诊断，勿上传原始日志/存储。
+- 工程功能已到检查点；学习待开发者复述：HttpOnly与Pinia各解决什么、为什么跨标签各自轮换而不是广播AT、退出意图为何先于网络、版本不能阻止Set-Cookie时expectedSid如何闭合，以及本地退出不等于已确认服务端撤销。下一步可先手工使用local来源体验，再讨论生产HTTPS/代理验收；暂不自动扩展记住登录、定时续期或其他基础设施。
+
+## 当前单元：Electron 自动续期、服务端退出与真实后端闭环（2026-11-17）
+
+- 用户明确授权将真实登录验证、桌面自动续期、服务端退出一起完成；本节覆盖下方同日“只实现登录截留、自动续期未做”的检查点。未修改后端业务源码、数据库结构、私有配置或 ECS，未提交/推送，未重新打包或更新已安装的0.0.1。源码 Renderer 已构建。
+- Main auth-session.cjs 新增 ensure/logout：在路由切换、页面刷新恢复或管理请求前发现 AT 到期时，Renderer 通过 ensureAuthSession 请求 Main；当前管理401/INVALID_ACCESS_TOKEN 可强制一次续期。Main 私有 RT 发往固定 /api/auth/refresh，同一 revision+登录代次共享 Promise；成功校验 sessionId/固定绝对期限不变及 RT 已轮换，整体替换并返回白名单公开快照。没有后台定时续期，也不把 RT 返回 Renderer。
+- Main revision 区分已提交状态，loginVersion 隔离尚未提交的新登录/退出意图；提交前都须匹配。同一会话刚续期而确认尚在途时，保留精确的 from→to 关系，旧401可复用已完成结果；退出也可撤销它自己的刚轮换会话，不能追清另一登录。读取在绝对期限到达时清理；过期 AT 快照保留身份交给 Router 续期，未经请求前检查不会附 Bearer。
+- HTTP 请求前续期成功才附新 AT；并发请求等待同一结果。响应401触发续期后，原业务请求仍 reject，不自动重放读写请求。其他401/403/500、无 Bearer、无原 authContext、网络失败和旧登录意图的响应不猜测续期/清理目标。Web 继续原内存/失效行为，Cookie/CSRF 尚未接入。
+- RT 的拒绝、网络/超时、坏响应或无法确认的轮换不重试旧 RT，Main 清空原本地会话并要求重新登录。IPC 确认丢失则尝试对原会话执行退出，取消可能仍在途的结果；不能把 router.replace 当作凭据清理。失败/冲突不冒充成功或追清新登录。
+- logoutAuthSession 先固定原 AT（允许它已经到期）、本地清空并阻止旧结果写回，再调用 /api/auth/logout，不为退出刷新。相同退出共享进行中结果；后端200且 SUCCESS/data=null 才记 confirmed，其他结果记 unconfirmed。Renderer 在本地退出后仍回登录页，但持续显示“服务端撤销未确认”；Main保留撤销状态，Renderer刷新也能恢复警告，后续纯本地清理不能抹去它。IPC 失败沿用一次只读核对，空状态只能确认本地清理。迟到登录的补偿也改为按确切版本请求服务端退出。
+- Node 验证：Main 41/41；Pinia Store 初始化/登录/失效/续期 60/60。应用类型检查、E2E类型检查和最终 Renderer 构建通过。7文件浏览器回归首轮71项中69通过、2项因同时匹配成功toast/警告而失败；收紧到登录面板警告并补四项边界后，续期专项17/17通过。未变的其他6文件58项首轮通过，共75个不同场景分批通过；不是一次全量浏览器运行。使用本机Chrome，Vite中间件阻断未模拟业务请求。初轮及专项记录在 .runtime/session-e2e/initial-report.json、report.json、initial-run.log、renewal-focused.log。
+- 真实隔离 Electron + 固定响应闭环通过：.runtime/auth-controlled-lbJ7Vb/evidence.json。新测试入口 session-renewal-acceptance-main.cjs 复用正式Main/Preload/Vue/Store/Router/HTTP，只允许认证POST和Application GET，阻断Renderer HTTP/HTTPS；旧的六场景“到期直接清理”脚本为历史语义，当前请运行 npm run test:session-renewal，不用旧脚本判定续期行为。独立 login-session-boundaries 脚本另外覆盖新增 ensure/logout 的其他窗口拒绝与 RT 隔离。
+- 用户从 IDEA 启动后端。Agent 将8080监听PID与最新启动日志匹配并确认最终 schema=nexus_test 后，才创建本轮唯一测试账号。真实验收 .runtime/auth-live-owr2QY/evidence.json passed=true：登录/同PID页面刷新保持原期限，路由到期触发一次真实RT轮换，后续调用未重复轮换（RT变化、sessionId和期限不变），真实退出后原AT被后端401拒绝，同进程刷新仍空；真实退出已提交但测试入口丢确认时，本地退出并显示警告；真实刷新已提交但响应被测试入口丢弃时，不重试旧RT并回登录。完整进程重开仍未登录。
+- 真实验收的界限：Main测试入口仅将返回给正式认证模块的 expiresInSeconds 缩短为8秒以触发客户端等待，不改JWT、系统时钟或后端配置；没有等待真实JWT exp，所以 serverJwtNaturalExpiryVerified=false。丢响应均是测试入口注入，正常链路使用真实HTTP/MySQL。没有人工逐屏视觉确认或安装版验收，也没有创建Application/Key/截图任务。
+- 真实客户端审计：登录3次、刷新2次、退出2次、Application读取5次；另有测试入口两次原AT吊销探测GET及一次最终会话清理POST，注册由驱动执行一次。Renderer HTTP/HTTPS=0。三个已知测试会话均经退出/最终清理确认撤销；测试账号仍留在 nexus_test，不自动删除账号。凭据仅进程内生成和传递，不写证据文件。IDEA后端由用户管理，本轮不停止它。
+- 重要边界继续独立：Web Cookie/CSRF与跨标签协调、退出整个进程后记住登录、安装包更新和部署。当前仍是同一认证学习链；可先由开发者沿调用链解释共享Promise、两个版本、响应未知和撤销未确认的区别，再决定是否开始Web方案。
+
+## 当前单元：Electron 登录凭据由 Main 接收和保存（2026-11-17）
+
+- 用户设计并明确授权实现本小步：Main 内存保存 AT、RT、AT 到期时间、sessionId、sessionExpiresAt，Renderer 仅取得不含 RT 的公开快照；删除旧的 Renderer 登录后 write 回 Main 的流程。自动续期、服务端退出调用、Web Cookie/CSRF、跨进程记住登录及安装包更新均不在本轮。
+- 桌面 login API 通过 Preload 的 loginAuthSession → auth-session:login IPC 进入 Main。Main 检查可信主窗口/主框架，auth-session.cjs 只请求固定 localhost:8080/api/auth/login，限制 8 秒和 1 MiB，校验后整体替换私有会话，再白名单投影公开快照。Main 计算绝对 expiresAt，并按 sessionExpiresAt 截短；Renderer 应用原值，不重新计算期限。Web 保留原 HTTP/内存登录行为。
+- 已移除 Main/Preload/类型中的 auth-session:write/writeAuthSession。通用 nexus 协议转发拒绝 auth 路径，仅保留规范的 POST /api/auth/register，避免登录/刷新绕过私有凭据边界。Main 返回及 read/clear 均不带 RT，失败只返回固定 code/status，不透传后端正文。
+- Main 同时检查请求开始的 expectedRevision 和内部 loginVersion；新登录意图、clear 或会话绝对到期会阻止旧异步结果写入。Renderer 的 operationVersion 继续阻止旧 UI 结果生效；若 Main 已保存后才出现本地新意图，迟到快照只按其确切 revision 尝试清理，不追清更新版本。LoginView 不再在 completeLogin 之前丢弃成功结果，以免遗漏该补偿。
+- Main read 在 AT 到期后保留私有会话/RT，绝对会话到期才清；read 不自动续期。本轮 Router/HTTP 仍沿用原过期/401清理行为，因此不能宣称客户端可连续续期。当前 clear 仍只清 Main 内存，未接后端撤销。
+- 验证：Main Node 边界 26/26；真实 Pinia Store 初始化/登录/失效 51/51；应用与 E2E 类型检查、桌面 Renderer 构建通过。默认 Playwright Chromium 在 Mac 缺失，首次未进入应用断言；未安装浏览器，改用已安装 Chrome 的隔离配置，7 文件模拟回归 79/79（零失败/重试/跳过），临时 Vite 中间件阻断所有未模拟 /api、/v1、/s 请求。证据 .runtime/login-e2e/report.json 和 run.log。现有 WebGL 降级日志及构建大 chunk 提示未作无关优化。
+- 真实隔离 Electron + 固定假后端响应：test-login-session-boundaries.cjs 通过正式页面登录、真实 Preload/IPC、公开状态不含 RT、同进程页面刷新保留原期限、旧 write 能力不存在、其他同源窗口拒绝及通用 auth 路径阻断。证据 .runtime/login-session-boundaries-gjAdgP/evidence.json（初轮 KPk7a4 亦通过）。过期/401六场景完整通过，证据 .runtime/session-invalidation-controlled-ZYonSs/evidence.json；旧脚本的“最后请求为401”断言因新增真实模拟登录请求而失效，已改为准确定位原 deferred401 查询，保留会话未变/零 clear 的原断言。首轮失败证据保留于 Fxdsns 目录。
+- 上述 Electron/Chrome 均使用模拟响应，无真实后端/数据库请求、无截图任务，不代表新登录路径的真实后端或安装包验收。未改后端源码、私有配置、ECS 或已安装应用，未提交/推送；打包清单已加入 auth-session.cjs，但未重新打包。现有大量未提交改动保持。
+- 学习重点：共享进行中的 Promise 才能让并发请求等同一次续期，布尔值只表达忙碌；版本须在 Main 写入前检查；router.replace 只负责导航，不清凭据或撤销后端会话。当前仍沿同一认证链路继续；下一小步由用户设计自动续期的触发、合并及失败规则，Agent 按明确授权实现。
+
+## 当前单元：后端登录会话与Refresh Token已实现并通过定向验证（2026-11-16）
+
+- 用户已批准两表字段设计，并明确授权Agent生成Flyway脚本、实现此前讨论确定的后端部分及测试。授权已执行，不要再把编码任务推回用户或重启字段审批。保留工作区全部未提交修改，没有提交/推送，没有操作ECS或日常数据库，没有修改截图业务代码或创建真实截图任务。
+- V14__create_auth_sessions_and_refresh_tokens.sql新增auth_sessions（id/user_id/created_at/expires_at/revoked_at）与refresh_tokens（id/session_id/token_hash/created_at/consumed_at）。BIGINT UNSIGNED自增主键、UTC DATETIME(3)、显式业务时间；摘要ascii_bin CHAR(64)全局唯一；user_id/session_id普通索引与RESTRICT外键。会话时间清理索引及四个CHECK按用户审查版落地，不改V1–V13。
+- LoginService在事务外验证密码；AuthSessionService.create锁User后复核密码摘要及账号当前状态，创建独立Session和RT，签发带真实字符串sid的AT，提交后返回AuthTokensResponse。独立新登录保留其他会话，刷新保留同一sessionId及原expires_at。已删除旧AT-only LoginResponse，共用六字段响应accessToken/tokenType/expiresInSeconds/refreshToken/sessionId/sessionExpiresAt。
+- 默认绝对寿命24h，nexus.auth.session.absolute-ttl配置只影响新会话；无闲置超时。AT最长30分钟，按会话截止截短，JWT exp不晚于会话deadline；按实际可用整秒返回，常规非整秒签发可能为1799秒。剩余不足完整1秒时刷新拒绝且不消费RT。RT不滑动延长，每代继承所属会话截止。
+- RT使用SecureRandom独立32字节、无填充Base64URL 43字符，数据库仅存原文UTF-8的SHA-256小写hex摘要。格式不trim、不改大小写，拒绝非规范尾部位。GeneratedRefreshToken、RefreshRequest、AuthTokensResponse与内部RefreshOutcome诊断不输出凭据。未知RT只拒绝。
+- 刷新只接收RT。先用摘要无锁定位不可变关联，事务中按User→Session→RT取锁，用锁后当前状态/时钟判断。条件消费旧RT、新增下一代RT和签发AT同一事务，任何执行失败回滚。确认已消费RT重放则撤销所属会话，正常返回REPLAY_REVOKED以提交；外层再抛RefreshTokenReplayException。其他独立会话不受影响，普通轮换不立即作废仍有效旧AT。
+- AuthSessionTransactions使用TransactionTemplate并主动拒绝更外层活动事务，保证方法返回时已经提交，避免REQUIRED意外加入外层。登录、刷新、退出、禁用/恢复、清理均遵守所需User→Session→RT锁顺序；同一用户的会话状态变更会串行等待，不保证FIFO或绝无数据库死锁。
+- 失败优先级：未知/格式错误RT、缺失/删除User先INVALID；可信身份的User禁用为ACCOUNT_FORBIDDEN；会话缺失/撤销/到期为INVALID；User与Session有效而RT已消费才撤销并报告REPLAY_REVOKED。数据库/锁/签发异常不是普通业务结果；轮换提交未知不自动重试旧RT。
+- POST /api/auth/login请求不变；POST /api/auth/refresh只传JSON refreshToken；POST /api/auth/logout只传Authorization Bearer AT，无userId/sessionId请求体。登录/刷新响应带Cache-Control:no-store。全局401 INVALID_REFRESH_TOKEN、401 REFRESH_TOKEN_REPLAYED、503 AUTH_SESSION_UNAVAILABLE，复用403 AUTH_ACCOUNT_FORBIDDEN及401 INVALID_ACCESS_TOKEN。重复退出成功，ApiResponse<Void>.data=null。
+- AccessTokenVerifier普通与退出解码器独立，均验证HS256签名、issuer、必要声明、正数sub/sid及时间关系；只有退出忽略exp，仍拒绝未来iat/nbf。普通BearerUserIdResolver还读取当前User和会话归属、撤销、绝对期限；无sid旧AT不兼容，没有subject兜底，不更换签名密钥。撤销提交后的新认证拒绝该会话旧AT，已通过认证的请求仍可能完成。
+- LogoutService先固定原始可信身份，LogoutRetry首次加3次重试、事务外退避200/400/800ms，目标总预算6秒，不为凑够次数超预算继续。死锁/锁超时、临时建连/连接中断等按异常类型、SQLState/vendor code分类；认证/权限/证书/SQL/约束等不重试，线程中断保留中断状态。执行/提交断线可对原sessionId幂等重做，绝不改成新登录会话；最终失败保留cause并报503，客户端既定行为是仍本地退出、提示服务端撤销未确认。
+- LogoutDatabase从当前Hikari数据源配置继承相同库/账号/连接属性，使用独立短连接与JdbcTransactionManager执行User→Session锁及幂等撤销；只此路径设置350ms建连、700ms网络读取、1秒锁等待/事务超时，不修改主池、Main8秒或Axios10秒。真实用户锁阻塞检查在8秒内失败；预算检查不等于对所有DNS/JDBC故障的硬中止保证。
+- user/service/UserStatusService提供可信内部disable/restore入口，不新增普通用户可调用的账号状态HTTP接口。禁用在User锁内更新状态并撤销其全部旧登录会话，原子提交；恢复只改User，不恢复旧会话。机器API Key不被永久撤销/删除，仍检查当前User，恢复后独立有效的Key/Application可用。手工改users.status不能替代此入口。
+- AuthSessionCleanup默认每日UTC03:00（北京时间11:00），启用、cron与批量可配置，使用独立authSessionCleanupScheduler，不借用截图或限流调度器。有效会话保留全部RT历史；结束时刻min(expires_at,revoked_at)，失效满72小时后逐会话短事务先删全部RT、再删Session。两路索引各取至多100个候选去重，锁后复核，删除失败回滚子记录，不重置/复用主键。每日执行通常保留3–4天，失败积压可更久但不延长授权。
+- 用户已同意刷新成功响应丢失时首版要求重新登录，不重试旧RT、不幂等重发令牌。新登录不自动撤销遗留旧会话，也不延长其原期限；不声称远端已撤销。旧会话仍受主动撤销、严格重放撤销、账号禁用及原期限约束。
+- 最终一次离线Maven定向合并检查156/156通过，0 failure/error/skipped，其中AuthSessionIntegrationTests 29项真实Spring/MySQL/事务/HTTP检查。覆盖V14约束、凭据及生命周期、未知/重放、AT即时撤销、过期AT退出、归属隔离、轮换插入/签发回滚、禁用与清理原子回滚、并发刷新/退出/禁用竞争、72小时边界、提交后丢确认的受控恢复、外层事务拒绝、API Key隔离；另含AT验证、重试、DTO/配置/日志单元及原Application/API Key/Open API/短链/Quota/Usage管理回归。没有执行全量截图/外站套件，不称为全量后端回归。
+- 旧CRUD测试此前在测试回滚事务内通过MockMvc登录；现生产会话入口拒绝外层事务，这些CRUD测试改用testing/TestSessionTokens建立真实带sid会话夹具，保留资源归属与认证检查，并先清理会话再删User。独立LoginFlow与新增会话流程继续验证真实登录HTTP/事务，不为旧测试放宽生产保护。
+- 本轮专用临时MySQL 8.4.10仅使用回环13386、全新tmpfs数据盘、nexus_test及其专用账号，实际验证UTC及Flyway V1–V14；未借用既有数据库。最终确认auth_sessions/refresh_tokens/screenshot_jobs/webhook_outbox均0行，14个迁移成功，随后仅删除核对过ID的本轮临时容器和mysql.env测试凭据文件。验证日志在nexus-server/target/auth-session-verification/final-tests.log，安全摘要verification-summary.json，选定XML在target/surefire-reports。用户锁阻塞用例整体耗时4.501秒，其内部断言退出调用小于8秒，不等同所有故障有硬期限保证。首次上下文缺Webhook测试主密钥、Quota旧测试要求固定测试账号名，均通过仅进程/临时库配置修正，未关闭保护；MySQL CHECK错误3819按实际vendor code断言，不假定Spring固定异常子类。
+- 文档：docs/ACCOUNT_STATUS_POLICY.md为当前规则，docs/LOCAL_TESTING.md为配置与验证边界。配置公开示例已同步；保留ignored local既有数据源/JWT等私有配置及其24h会话项，不操作ECS。
+- 后续仍属单独任务：Electron Main截留/保存RT并从Renderer响应剔除、同会话/代次刷新合并、受控401处理及服务端退出调用；Web HttpOnly Cookie/CSRF、跨标签协调、跨进程记住登录另行设计。当前客户端仍是原AT过期/401本地清理流程，不能把后端完成当作客户端自动续期或安装包验收。没有新增互踢、设备识别、会话数限制、闲置超时或管理员HTTP接口。
+- 学习检查点：用户此前已推导一次消费、User锁入口、事务内返回业务结果以保留撤销、固定绝对寿命等核心规则；后续可围绕AuthSessionService.refresh/rotate和真实并发测试逐段检查，无须重新从字段设计开始。当前继续同一认证链路即可，不强制新会话。
 
 ## 当前单元：过期/401的隔离Electron受控验收通过（2026-11-15）
 

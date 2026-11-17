@@ -1,5 +1,9 @@
 package com.nexus.application.flowTest;
 
+import com.nexus.auth.token.JwtTokenService;
+import com.nexus.auth.mapper.AuthSessionMapper;
+import com.nexus.testing.TestSessionTokens;
+
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.nexus.apikey.dto.CreateApiKeyRequest;
 import com.nexus.apikey.dto.CreateApiKeyResponse;
@@ -59,6 +63,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @Transactional
 class ApplicationDeletionFlowIntegrationTests {
+    @Autowired private JwtTokenService jwtTokenService;
+    @Autowired private AuthSessionMapper authSessions;
 
     private static final String TEST_PASSWORD = "test-application-password";
     private static final String TEST_JWT_SECRET = Base64.getEncoder().encodeToString(
@@ -201,7 +207,7 @@ class ApplicationDeletionFlowIntegrationTests {
             apiKeyMapper.delete(Wrappers.<ApiKey>lambdaQuery()
                     .eq(ApiKey::getApplicationId, applicationId));
             applicationMapper.deleteById(applicationId);
-            userMapper.deleteById(owner.userId());
+            { TestSessionTokens.deleteForUser(authSessions, owner.userId()); userMapper.deleteById(owner.userId()); }
         }
     }
 
@@ -300,16 +306,7 @@ class ApplicationDeletionFlowIntegrationTests {
         user.setPasswordHash(passwordEncoder.encode(TEST_PASSWORD));
         assertEquals(1, userMapper.insert(user));
 
-        MvcResult loginResult = mockMvc.perform(post("/api/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(
-                                new LoginRequest(email, TEST_PASSWORD))))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.accessToken").isNotEmpty())
-                .andReturn();
-
-        String token = objectMapper.readTree(loginResult.getResponse().getContentAsString())
-                .at("/data/accessToken").asText();
+        String token = TestSessionTokens.issue(jwtTokenService, authSessions, user.getId()).value();
         return new AuthenticatedUser(user.getId(), token);
     }
 

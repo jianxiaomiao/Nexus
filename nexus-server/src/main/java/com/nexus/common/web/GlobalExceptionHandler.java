@@ -12,9 +12,12 @@ import com.nexus.apikey.exception.InvalidApiKeyDeleteException;
 import com.nexus.apikey.exception.InvalidApiKeyRotationException;
 import com.nexus.apikey.exception.InvalidApiKeyUpdateException;
 import com.nexus.auth.exception.AccountForbiddenException;
+import com.nexus.auth.exception.AuthSessionUnavailableException;
 import com.nexus.auth.exception.EmailAlreadyRegisteredException;
 import com.nexus.auth.exception.InvalidAccessTokenException;
 import com.nexus.auth.exception.InvalidCredentialsException;
+import com.nexus.auth.exception.InvalidRefreshTokenException;
+import com.nexus.auth.exception.RefreshTokenReplayException;
 import com.nexus.auth.exception.InvalidApiKeyCredentialException;
 import com.nexus.auth.exception.ApiKeyForbiddenException;
 import com.nexus.openapi.exception.HashAlgorithmRequiredException;
@@ -304,6 +307,30 @@ public class GlobalExceptionHandler{
     public ApiResponse<Void> handleAccountForbiddenException(AccountForbiddenException exception, HttpServletRequest request) {
         return handled(request, exception, HttpStatus.FORBIDDEN,
                 "AUTH_ACCOUNT_FORBIDDEN", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    @ExceptionHandler(InvalidRefreshTokenException.class)
+    public ApiResponse<Void> handleInvalidRefreshToken(InvalidRefreshTokenException exception,
+                                                       HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.UNAUTHORIZED,
+                "INVALID_REFRESH_TOKEN", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    @ExceptionHandler(RefreshTokenReplayException.class)
+    public ApiResponse<Void> handleRefreshTokenReplay(RefreshTokenReplayException exception,
+                                                      HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.UNAUTHORIZED,
+                "REFRESH_TOKEN_REPLAYED", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
+    @ExceptionHandler(AuthSessionUnavailableException.class)
+    public ApiResponse<Void> handleAuthSessionUnavailable(AuthSessionUnavailableException exception,
+                                                          HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.SERVICE_UNAVAILABLE,
+                "AUTH_SESSION_UNAVAILABLE", exception.getMessage(), null);
     }
 
     @ResponseStatus(HttpStatus.CONFLICT)

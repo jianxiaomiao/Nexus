@@ -1,7 +1,8 @@
 package com.nexus.auth.controller;
 
 import com.nexus.auth.dto.LoginRequest;
-import com.nexus.auth.dto.LoginResponse;
+import com.nexus.auth.dto.AuthTokensResponse;
+import jakarta.servlet.http.HttpServletResponse;
 import com.nexus.auth.service.LoginService;
 import com.nexus.common.web.ApiResponse;
 import jakarta.validation.Valid;
@@ -17,10 +18,12 @@ public class LoginController {
     private final LoginService loginService;
 
     @ResponseStatus(HttpStatus.OK)
-    @PostMapping("/login")
-    public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest loginRequest){
-        LoginResponse loginResponse = loginService.login(loginRequest);
-        return new ApiResponse<LoginResponse>(
+    @PostMapping(value = "/login", headers = "X-Nexus-Session-Transport!=cookie")
+    public ApiResponse<AuthTokensResponse> login(@Valid @RequestBody LoginRequest loginRequest, HttpServletResponse response){
+        response.setHeader("Cache-Control", "no-store");
+        response.setHeader("Pragma", "no-cache");
+        AuthTokensResponse loginResponse = loginService.login(loginRequest);
+        return new ApiResponse<>(
                 "SUCCESS",
                 "登录成功",
                 loginResponse

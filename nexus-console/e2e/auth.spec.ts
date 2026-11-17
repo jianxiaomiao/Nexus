@@ -71,16 +71,18 @@ test('退出登录后无法再访问管理页面', async ({ page }) => {
   await expect(page).toHaveURL(/\/login$/)
 })
 
-test('刷新页面后内存会话消失，需要重新登录', async ({ page }) => {
+test('刷新页面通过Cookie恢复新的内存AT', async ({ page }) => {
   await installMockApi(page)
   await signIn(page)
   await page.reload()
-  await expect(page).toHaveURL(/\/login$/)
+  await expect(page).toHaveURL(/\/applications$/)
+  await expect(page.getByRole('article').filter({ hasText: '示例应用' })).toBeVisible()
 })
 
 test('管理接口确认 JWT 无效后清除会话', async ({ page }) => {
   const api = await installMockApi(page)
   await signIn(page)
+  api.failures.set('POST /api/auth/refresh', { status: 401, code: 'INVALID_REFRESH_TOKEN', message: '失效' })
   api.failures.set('GET /api/application', { status: 401, code: 'INVALID_ACCESS_TOKEN', message: '凭证无效' })
   await page.getByRole('article').filter({ hasText: '示例应用' }).getByRole('link', { name: '查看详情' }).click()
   await expect(page).toHaveURL(/\/login$/)

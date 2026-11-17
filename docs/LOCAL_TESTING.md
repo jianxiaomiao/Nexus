@@ -1,5 +1,11 @@
 # Nexus 本地可重复测试
 
+## Electron认证闭环（2026-11-17）
+
+当前入口为 `nexus-desktop` 的 `npm run test:auth-session`、`npm run test:login-session-boundaries`、`npm run test:session-renewal`。真实后端版本为 `npm run test:session-renewal:live`：先由有配置凭据的终端或IDE启动专用 nexus_test 后端；驱动核对8080 PID与Flyway启动日志，拒绝其他schema，然后创建单个测试账号。它不读取个人密码、不写凭据文件，不创建Application/Key/截图；测试账号保留，已知会话退出撤销。不要把真实凭据放到聊天或命令参数。
+
+真实验收的客户端期限由Main测试入口缩短为8秒，后端JWT和配置不改；真实JWT自然到期未验证。正常登录/刷新/退出是真实HTTP；丢刷新响应和丢退出确认是受控注入。Node 41+60、浏览器75个不同场景分批通过；详细证据及失败修正见 SESSION_HANDOFF.md。这不是全量后端、外站或安装包验收。
+
 以下命令以 Windows PowerShell 为例。后端需要 Java 21、Maven 3.9+ 和本机 MySQL；前端需要 Node.js 24、npm。先在 MySQL 中准备**专用测试库**（例如 `nexus_test`）及只对该库有权限的本地用户。可用 MySQL 管理工具执行以下 SQL，并把占位密码替换成新生成的本机密码：
 
 ```sql
@@ -34,11 +40,26 @@ spring:
       minimum-idle: <按本机资源设置>
 nexus:
   auth:
+    session:
+      absolute-ttl: 24h
+      cleanup-enabled: true
+      cleanup-cron: "0 0 3 * * *" # UTC，默认北京时间11:00
+      cleanup-batch-size: 100
     jwt:
       issuer: nexus
       access-token-ttl: 30m
       secret: ${NEXUS_JWT_SECRET}
 ```
+
+`nexus.auth.session.absolute-ttl` 是登录会话的绝对寿命，默认 `24h`，必须为正数时长。登录创建时固定保存到期时间，配置调整并重启后仅用于新会话。刷新保留原sessionId和绝对期限。AT最长30分钟，按会话期限截短，并按实际可用整秒返回；不足一个完整有效秒时不消费RT。
+
+V14新增`auth_sessions`和`refresh_tokens`，旧版无sid的AT直接失效，需要重新登录。`POST /api/auth/login`和`POST /api/auth/refresh`的成功data均为accessToken/tokenType/expiresInSeconds/refreshToken/sessionId/sessionExpiresAt；refresh只传JSON refreshToken，`POST /api/auth/logout`只传Authorization中的Bearer AT，允许过期AT仅用于撤销自身会话，重复退出成功且data=null。令牌响应带`Cache-Control: no-store`。Web Cookie/CSRF和Electron Main截留/保存RT仍须单独接入，不能将后端通过当作客户端自动续期验收。
+
+退出最多首次加3次重试，事务外退避200/400/800ms，总预算目标6秒；专用短连接继承主数据源的库、账号及连接属性，只为退出设置350ms建连、700ms网络读取、1秒锁等待/事务超时，不改其他业务连接池。预算检查不能宣称对所有DNS/JDBC故障有硬中止保证。最终失败503 `AUTH_SESSION_UNAVAILABLE`；客户端仍应本地退出并提示服务端撤销未确认。该重试策略不用于RT轮换。
+
+清理调度独立使用`authSessionCleanupScheduler`，不借用截图或限流调度器。默认每日UTC03:00运行；每条时间索引先取至多100个候选并去重，按会话逐个短事务锁后复核。会话失效满72小时后，先删其全部RT历史、再删会话；有效会话的已消费RT不单独清理。集成测试可在测试进程设置`NEXUS_AUTH_SESSION_CLEANUP_ENABLED=false`，并将`NEXUS_SCREENSHOT_JOB_RESULT_DIR`指向独立空目录；不为会话测试运行真实截图任务。
+
+仅复核本次会话核心边界时，在完成下述专用测试库、UTC与临时密钥配置后运行`mvn -o "-Dtest=AuthSessionIntegrationTests,AccessTokenVerifierTests,LogoutRetryTests" test`，对应29项真实会话流程及16项凭据/重试检查，不包含真实截图或外站任务。2026-11-16另合并原管理接口等检查共156/156通过；这是定向回归，不是全量后端测试。
 
 在运行 Maven 的同一个 PowerShell 窗口生成本次运行专用的 JWT 密钥，勿把输出写进仓库：
 
@@ -48,6 +69,9 @@ $env:SPRING_PROFILES_ACTIVE = 'local'
 $jwtBytes = [byte[]]::new(32)
 [Security.Cryptography.RandomNumberGenerator]::Fill($jwtBytes)
 $env:NEXUS_JWT_SECRET = [Convert]::ToBase64String($jwtBytes)
+# 完整应用上下文还要求Webhook测试主密钥；仅生成本次测试使用的临时值。
+$env:NEXUS_WEBHOOK_CRYPTO_KEYS_V1 = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+$env:NEXUS_WEBHOOK_CRYPTO_CURRENT_KEY_VERSION = 'v1'
 mvn test
 ```
 
@@ -226,3 +250,28 @@ $env:PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = '1'
 2026-10-10：网页正文提取前端完成后，构建、E2E 类型检查、完整 Playwright 66/66 和后端提取定向测试 14/14 通过；本轮未重跑后端全套。窄屏布局断言改成同一帧读取两张卡片坐标，重复 5/5 通过。真实后端验收确认新 Key 通过认证、无效 Key 401、非白名单目标 400，但真实 CSDN 文章返回 502；本机 DNS 将两个文章主机解析为 `198.18.0.41/42`，安全策略正确拒绝。真实文章成功验收尚未完成，不能把模拟浏览器通过当作真实站点抓取成功。此次 Application 608 已软删除，随机账号留在测试库。
 
 2026-10-10 后续：开发者关闭 VPN 并重启后端后，反馈真实文章文本提取成功，先前的网络环境阻塞已解除。该反馈不代表 Agent 重新运行真实验收脚本，也不代表已确认两站或真实图片展示；本轮未重复运行自动化测试。
+
+## Web Cookie 登录、续期和退出
+
+设计与故障策略见 [WEB_SESSION_DESIGN.md](WEB_SESSION_DESIGN.md)。`local` profile 的可提交配置只允许 `http://localhost:5173`、`http://127.0.0.1:5173`，使用独立的 HttpOnly 开发 Cookie。前端 `/api` 经 Vite 代理，与页面同源；不要直接跨端口访问 Java API，也不要在 localhost 和 127.0.0.1 之间切换期待共享登录。
+
+在已有依赖、JDK21、专用 `nexus_test` 凭据和随机测试 JWT/Webhook 密钥的终端，从 `nexus-server` 运行：
+
+```sh
+./mvnw -o -Dtest=WebSessionPolicyTests,WebSessionIntegrationTests,AuthSessionIntegrationTests,AuthSessionHttpContractTests,LoginControllerTests,LogoutRetryTests test
+```
+
+新增网页/多标签浏览器测试为 `nexus-console/e2e/webSession.spec.ts`；普通 `npm run test:e2e` 包含它。它使用浏览器真实的 Cookie、Web Locks、BroadcastChannel 和 localStorage，但后端响应是受控模拟；不应声称验证了真实数据库或自然 JWT 过期。
+
+真实浏览器闭环需要显式开启，默认跳过。仍在同一专用测试环境中，提供已有 Node 的绝对路径；Chrome 已安装时指定 channel，不会安装浏览器：
+
+```sh
+NEXUS_RUN_WEB_BROWSER=true \
+NEXUS_TEST_NODE=/absolute/path/to/existing/node \
+NEXUS_TEST_CHROME_CHANNEL=chrome \
+./mvnw -o -Dtest=WebSessionBrowserIntegrationTests test
+```
+
+该测试确认 schema 为 `nexus_test` 后创建独立临时用户；启动随机回环端口的真实 Spring 服务、独立 `127.0.0.1:4174` Vite 和隔离浏览器上下文。测试级 JWT TTL 为8秒，等待服务端自然过期后先证明旧 AT 返回401，再验证同标签合并/双标签轮换、刷新页面恢复、RT不在响应/脚本/浏览器持久存储中、退出广播和服务端 AT/RT 撤销。finally 清理用户、RT和会话并停止子进程；不创建 Application、Key、截图或 Webhook任务。Vite只代理 `/api`，阻止机器业务路径；缓存与日志放在忽略的 `nexus-desktop/.runtime/web-live/`。不要上传原始测试日志或浏览器存储，因为失败诊断可能包含测试凭据。
+
+4174被占用、现有Node/Chrome不可用、专用凭据缺失时停止并说明原因，不安装依赖或使用日常库替代。没有生产 HTTPS Cookie、公网代理或已安装 Electron 验收的含义。Mac本次运行记录见 SESSION_HANDOFF.md。

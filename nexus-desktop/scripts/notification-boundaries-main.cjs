@@ -44,11 +44,7 @@ const targets = new Set([
   path.resolve(__dirname, '../main.cjs'),
   path.resolve(__dirname, 'tracking-boundaries-main.cjs'),
 ])
-const facade = {
-  app: electron.app, BrowserWindow: electron.BrowserWindow, dialog: electron.dialog,
-  session: electron.session, screen: electron.screen, ipcMain: electron.ipcMain,
-  Notification: NotificationProbe,
-}
+const facade = Object.create(electron, { Notification: { value: NotificationProbe } })
 const originalLoad = Module._load
 Module._load = function (request, parent, isMain) {
   if (request === 'electron' && targets.has(parent?.filename)) return facade

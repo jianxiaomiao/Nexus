@@ -49,9 +49,14 @@ const onSubmit = async () => {
   submitting.value = true
   const attempt = userStore.beginLogin()
   try {
-    const res: ApiResponse<LoginResponse> = await login(req)
-    if (attempt.operationVersion !== userStore.operationVersion) return
+    if (attempt.blocked) {
+      ElMessage.error('尚未确认会话清理，请先重试清理。')
+      return
+    }
+    const res: ApiResponse<LoginResponse> = await login(req, attempt.mainRevision,
+      () => attempt.operationVersion === userStore.operationVersion && !userStore.clearing)
     if (res.code !== 'SUCCESS') {
+      if (attempt.operationVersion !== userStore.operationVersion) return
       ElMessage.error(res.message || '登录失败，请稍后重试')
       return
     }
@@ -81,6 +86,8 @@ const onSubmit = async () => {
       error.response.data?.code === 'AUTH_ACCOUNT_FORBIDDEN'
     ) {
       ElMessage.error('账号已封禁')
+    } else if (isAxiosError<ApiResponse<unknown>>(error) && error.response?.data?.code === 'SESSION_CHANGED') {
+      ElMessage.error('登录会话已变化，请刷新后重新登录')
     } else if (isAxiosError(error) && error.response?.status === 400) {
       ElMessage.error('请检查邮箱和密码')
     } else if (isAxiosError(error) && !error.response) {
@@ -110,6 +117,7 @@ const onSubmit = async () => {
           <h2 id="login-title">登录 Nexus</h2>
           <p class="form-description">继续管理你的 Application 和 API Key。</p>
 
+          <el-alert v-if="userStore.sessionNotice" :title="userStore.sessionNotice" type="warning" :closable="false" show-icon />
           <el-form
             ref="formRef"
             :model="loginForm"

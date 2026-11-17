@@ -6,10 +6,20 @@ directories:
   buildResources: build
 files:
   - main.cjs
+  - auth-session.cjs
   - preload.cjs
   - window-state.cjs
   - dist/renderer/**/*
   - package.json
+mac:
+  category: public.app-category.developer-tools
+  identity: "-"
+  target:
+    - target: dmg
+      arch:
+        - x64
+dmg:
+  artifactName: Nexus-Desktop-${version}-${arch}.${ext}
 win:
   target:
     - target: nsis

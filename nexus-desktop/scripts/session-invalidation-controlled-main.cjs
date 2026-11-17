@@ -29,7 +29,7 @@ app.on('web-contents-created', (_event, contents) => {
 const realHandle = ipcMain.handle.bind(ipcMain)
 ipcMain.handle = (channel, listener) => realHandle(channel, async (event, ...args) => {
   const result = await listener(event, ...args)
-  if (['auth-session:read', 'auth-session:write', 'auth-session:clear'].includes(channel)) {
+  if (['auth-session:read', 'auth-session:login', 'auth-session:clear'].includes(channel)) {
     const record = {
       channel, status: result?.status ?? null, code: result?.code ?? null,
       expectedRevision: channel === 'auth-session:read' ? null : args[0]?.expectedRevision ?? null,
@@ -78,6 +78,8 @@ globalThis.fetch = async (url, options = {}) => {
     return Response.json({ code: 'SUCCESS', message: 'Controlled login', data: {
       accessToken: `CONTROLLED_TEST_ONLY_${control.loginResponses}`,
       tokenType: 'Bearer', expiresInSeconds: control.ttlSeconds,
+      refreshToken: 'A'.repeat(43), sessionId: String(control.loginResponses),
+      sessionExpiresAt: new Date(Date.now() + 86_400_000).toISOString(),
     } })
   }
   if (!record.hasBearer) throw Error('Controlled management query must have Bearer')

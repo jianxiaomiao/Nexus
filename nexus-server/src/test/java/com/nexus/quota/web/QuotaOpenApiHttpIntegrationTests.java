@@ -8,6 +8,8 @@ import com.nexus.apikey.mapper.ApiKeyMapper;
 import com.nexus.application.entity.Application;
 import com.nexus.application.mapper.ApplicationMapper;
 import com.nexus.auth.token.JwtTokenService;
+import com.nexus.auth.mapper.AuthSessionMapper;
+import com.nexus.testing.TestSessionTokens;
 import com.nexus.quota.QuotaTestCleanup;
 import com.nexus.quota.entity.ApplicationQuota;
 import com.nexus.quota.mapper.ApplicationQuotaMapper;
@@ -46,6 +48,7 @@ import static org.mockito.Mockito.*;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class QuotaOpenApiHttpIntegrationTests {
+    @Autowired private AuthSessionMapper authSessions;
     private static final String ARTICLE = "https://blog.csdn.net/article";
     @Value("${local.server.port}") int port;
     @Autowired UserMapper users;
@@ -97,7 +100,7 @@ class QuotaOpenApiHttpIntegrationTests {
                 applications.deleteById(owned.getId());
             }
         }
-        if (owner != null && owner.getId() != null) users.deleteById(owner.getId());
+        if (owner != null && owner.getId() != null) { TestSessionTokens.deleteForUser(authSessions, owner.getId()); users.deleteById(owner.getId()); }
     }
 
     @Test void uuidAndHashConsumeWhileAuthenticationAndInputFailuresDoNot() throws Exception {
@@ -157,7 +160,7 @@ class QuotaOpenApiHttpIntegrationTests {
         assertEquals(302, request("GET", "/s/" + code, null, null).statusCode());
         assertEquals(200, call("GET", "/v1/short-links", null).statusCode());
         assertEquals(200, call("PUT", "/v1/short-links", "{\"id\":" + id + ",\"name\":\"renamed\"}").statusCode());
-        String bearer = "Bearer " + tokens.issueAccessToken(owner.getId()).value();
+        String bearer = "Bearer " + TestSessionTokens.issue(tokens, authSessions, owner.getId()).value();
         long keyId = json.readTree(created.body()).at("/data/apiKeyId").asLong();
         assertEquals(200, request("GET", "/api/short-links?apiKeyId=" + keyId, bearer, null).statusCode());
         assertEquals(200, call("DELETE", "/v1/short-links/" + id, null).statusCode());
@@ -214,7 +217,7 @@ class QuotaOpenApiHttpIntegrationTests {
     }
 
     @Test void managementResponsesExposeUtcInstantsMatchingStoredApplication() throws Exception {
-        String bearer = "Bearer " + tokens.issueAccessToken(owner.getId()).value();
+        String bearer = "Bearer " + TestSessionTokens.issue(tokens, authSessions, owner.getId()).value();
         var created = request("POST", "/api/application/create", bearer,
                 "{\"name\":\"utc-" + UUID.randomUUID() + "\"}");
         assertEquals(200, created.statusCode());
@@ -247,7 +250,7 @@ class QuotaOpenApiHttpIntegrationTests {
     }
 
     @Test void managerQueryDoesNotCreateOrConsumeAndDisabledHistoryRemainsReadable() throws Exception {
-        String bearer = "Bearer " + tokens.issueAccessToken(owner.getId()).value();
+        String bearer = "Bearer " + TestSessionTokens.issue(tokens, authSessions, owner.getId()).value();
         String path = "/api/application/" + app.getId() + "/quota";
         var empty = request("GET", path, bearer, null);
         assertEquals(200, empty.statusCode());
@@ -276,21 +279,21 @@ class QuotaOpenApiHttpIntegrationTests {
         stranger.setPasswordHash("test-only-placeholder");
         users.insert(stranger);
         try {
-            String bearer = "Bearer " + tokens.issueAccessToken(stranger.getId()).value();
+            String bearer = "Bearer " + TestSessionTokens.issue(tokens, authSessions, stranger.getId()).value();
             assertEquals(404, request("GET", path, bearer, null).statusCode());
         } finally {
-            users.deleteById(stranger.getId());
+            { TestSessionTokens.deleteForUser(authSessions, stranger.getId()); users.deleteById(stranger.getId()); }
         }
         app.setIsDeleted(1);
         app.setDeletedAt(java.time.LocalDateTime.now());
         applications.updateById(app);
-        String ownerBearer = "Bearer " + tokens.issueAccessToken(owner.getId()).value();
+        String ownerBearer = "Bearer " + TestSessionTokens.issue(tokens, authSessions, owner.getId()).value();
         assertEquals(404, request("GET", path, ownerBearer, null).statusCode());
         assertEquals(0, used());
     }
 
     @Test void managerQueryRejectsNonPositiveId() throws Exception {
-        String bearer = "Bearer " + tokens.issueAccessToken(owner.getId()).value();
+        String bearer = "Bearer " + TestSessionTokens.issue(tokens, authSessions, owner.getId()).value();
         var response = request("GET", "/api/application/0/quota", bearer, null);
         assertEquals(400, response.statusCode());
         assertEquals("INVALID_APPLICATION_ID", json.readTree(response.body()).at("/code").asText());
@@ -307,7 +310,7 @@ class QuotaOpenApiHttpIntegrationTests {
             applications.insert(extra);
             last = extra;
         }
-        String bearer = "Bearer " + tokens.issueAccessToken(owner.getId()).value();
+        String bearer = "Bearer " + TestSessionTokens.issue(tokens, authSessions, owner.getId()).value();
         var first = request("GET", "/api/application?current=1&size=10", bearer, null);
         assertEquals(200, first.statusCode());
         var firstData = json.readTree(first.body()).at("/data");
@@ -334,7 +337,7 @@ class QuotaOpenApiHttpIntegrationTests {
         app.setQuota(10); // 已有周期仍使用1000的快照。
         app.setStatus(1);
         applications.updateById(app);
-        String bearer = "Bearer " + tokens.issueAccessToken(owner.getId()).value();
+        String bearer = "Bearer " + TestSessionTokens.issue(tokens, authSessions, owner.getId()).value();
         var list = request("GET", "/api/application?applicationId=" + app.getId(), bearer, null);
         var detail = request("GET", "/api/application/" + app.getId() + "/quota", bearer, null);
         assertEquals(200, list.statusCode());

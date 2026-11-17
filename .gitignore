@@ -6,3 +6,4 @@
 /nexus-server/config/application-prod.yml
 /nexus-server/config/deadlock-observer.local.properties
 /tools/deployment/linux/out/
+/nginx_key/

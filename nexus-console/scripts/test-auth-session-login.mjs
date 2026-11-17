@@ -8,109 +8,104 @@ afterEach(() => {
   if (original) Object.defineProperty(globalThis, 'window', original)
   else delete globalThis.window
 })
-const response = { accessToken: 'fixture-login-token', tokenType: 'Bearer', expiresInSeconds: 300 }
-function setup(write, clear) {
-  Object.defineProperty(globalThis, 'window', { configurable: true, value: write ? {
-    nexusDesktop: { writeAuthSession: write, clearAuthSession: clear },
+const webResponse = { accessToken: 'fixture-token', tokenType: 'Bearer', expiresInSeconds: 300 }
+const savedResponse = () => ({ ...webResponse, authState: { revision: 5, session: {
+  accessToken: webResponse.accessToken, tokenType: 'Bearer', expiresAt: Date.now() + 300_000,
+  sessionId: '7', sessionExpiresAt: Date.now() + 86_400_000,
+} } })
+function setup(clear) {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: clear ? {
+    nexusDesktop: {
+      clearAuthSession: clear,
+      logoutAuthSession: clear,
+      loginAuthSession: () => { throw Error('Completion must not request login again') },
+      writeAuthSession: () => { throw Error('Legacy write must never be used') },
+    },
   } : {} })
   const store = useUserStore(createPinia())
   store.applyMainState({ revision: 4, session: null })
   store.initializationStatus = 'ready'
   return store
 }
-function deferred() {
-  let resolve
-  const promise = new Promise(done => { resolve = done })
-  return { promise, resolve }
-}
-const saved = input => ({ status: 'ok', code: 'SUCCESS', authState: {
-  revision: input.expectedRevision + 1, session: input.session,
-} })
 
 test('Web login remains in memory', async () => {
   const store = setup()
-  const result = await store.completeLogin(store.beginLogin(), response)
-  assert.equal(result.status, 'ok')
-  assert.equal(store.accessToken, response.accessToken)
+  assert.equal((await store.completeLogin(store.beginLogin(), webResponse)).status, 'ok')
+  assert.equal(store.accessToken, webResponse.accessToken)
 })
 
-test('desktop waits for Main before applying credentials and preserves computed expiry', async t => {
+test('desktop applies an already-saved snapshot without write IPC or recomputing expiry', async t => {
   let now = 1_000_000
   t.mock.method(Date, 'now', () => now)
-  const pending = deferred()
-  let input
-  const store = setup(value => { input = value; return pending.promise })
-  const task = store.completeLogin(store.beginLogin(), response)
-  assert.equal(store.accessToken, '')
-  assert.equal(input.expectedRevision, 4)
-  assert.equal(input.session.expiresAt, 1_300_000)
-  now += 1000
-  pending.resolve(saved(input))
-  assert.equal((await task).status, 'ok')
-  assert.equal(store.expiresAt, 1_300_000)
+  const store = setup(() => { throw Error('Unexpected clear') })
+  const response = savedResponse()
+  const expiresAt = response.authState.session.expiresAt
+  now += 5000
+  assert.equal((await store.completeLogin(store.beginLogin(), response)).status, 'ok')
+  assert.equal(store.expiresAt, expiresAt)
   assert.equal(store.mainRevision, 5)
+  assert.equal(store.sessionId, '7')
+  assert.equal(Object.hasOwn(store.$state, 'refreshToken'), false)
 })
 
-for (const code of ['FORBIDDEN', 'SESSION_CHANGED']) {
-  test(`Main ${code} does not establish a local login`, async () => {
-    const store = setup(async () => ({ status: 'failed', code }))
+test('desktop refuses a legacy AT-only response', async () => {
+  const store = setup(() => { throw Error('Unexpected clear') })
+  assert.equal((await store.completeLogin(store.beginLogin(), webResponse)).code, 'INVALID_RESPONSE')
+  assert.equal(store.accessToken, '')
+})
+
+for (const mutate of [
+  r => { r.authState.revision = 4 },
+  r => { r.authState.session.sessionId = '' },
+  r => { r.authState.session.sessionExpiresAt = 0 },
+  r => { r.authState.session = null },
+]) {
+  test('invalid public snapshot does not establish a local login', async () => {
+    const store = setup(() => { throw Error('Unexpected clear') })
+    const response = savedResponse()
+    mutate(response)
     assert.equal((await store.completeLogin(store.beginLogin(), response)).status, 'failed')
     assert.equal(store.accessToken, '')
-    assert.equal(store.mainRevision, 4)
   })
 }
 
-test('IPC rejection is an explicit failure', async () => {
-  const store = setup(async () => { throw Error('Controlled rejection') })
-  assert.deepEqual(await store.completeLogin(store.beginLogin(), response), { status: 'failed', code: 'SAVE_FAILED' })
-  assert.equal(store.accessToken, '')
-})
-
-test('a stale HTTP completion never writes Main', async () => {
-  let writes = 0
-  const store = setup(async input => { writes++; return saved(input) })
-  const old = store.beginLogin()
-  store.beginLogin()
-  assert.equal((await store.completeLogin(old, response)).status, 'stale')
-  assert.equal(writes, 0)
-})
-
-test('local clear while Main write is pending removes only the acknowledged revision', async () => {
-  const pending = deferred()
-  let input, cleared
-  const store = setup(value => { input = value; return pending.promise }, async value => {
-    cleared = value
+test('stale saved result compensates only its acknowledged revision', async () => {
+  let cleared
+  const store = setup(async input => {
+    cleared = input
     return { status: 'ok', authState: { revision: 6, session: null } }
   })
-  const task = store.completeLogin(store.beginLogin(), response)
+  const attempt = store.beginLogin()
   store.clearSession()
-  pending.resolve(saved(input))
-  assert.equal((await task).status, 'stale')
+  assert.equal((await store.completeLogin(attempt, savedResponse())).status, 'stale')
   assert.deepEqual(cleared, { expectedRevision: 5 })
-  assert.equal(store.accessToken, '')
   assert.equal(store.mainRevision, 6)
+  assert.equal(store.accessToken, '')
 })
 
-test('stale-write cleanup does not retry against a newer Main session', async () => {
-  const pending = deferred()
-  let input, clears = 0
-  const store = setup(value => { input = value; return pending.promise }, async value => {
+test('stale compensation never chases a newer Main revision', async () => {
+  let clears = 0
+  const store = setup(async input => {
     clears++
-    assert.equal(value.expectedRevision, 5)
+    assert.equal(input.expectedRevision, 5)
     return { status: 'failed', code: 'SESSION_CHANGED' }
   })
-  const task = store.completeLogin(store.beginLogin(), response)
+  const old = store.beginLogin()
   store.beginLogin()
-  pending.resolve(saved(input))
-  assert.equal((await task).status, 'stale')
+  assert.equal((await store.completeLogin(old, savedResponse())).status, 'stale')
   assert.equal(clears, 1)
   assert.equal(store.accessToken, '')
 })
 
-test('invalid lifetime is rejected before IPC', async () => {
-  let writes = 0
-  const store = setup(async input => { writes++; return saved(input) })
-  const result = await store.completeLogin(store.beginLogin(), { ...response, expiresInSeconds: Infinity })
-  assert.equal(result.status, 'failed')
-  assert.equal(writes, 0)
+test('expired saved result is cleared at its exact revision', async () => {
+  const store = setup(async () => ({ status: 'ok', authState: { revision: 6, session: null } }))
+  const response = savedResponse()
+  response.authState.session.expiresAt = Date.now() - 1
+  assert.equal((await store.completeLogin(store.beginLogin(), response)).code, 'SAVE_FAILED')
+  assert.equal(store.accessToken, '')
+})
+
+test('Web invalid lifetime is rejected', async () => {
+  const store = setup()
+  assert.equal((await store.completeLogin(store.beginLogin(), { ...webResponse, expiresInSeconds: Infinity })).status, 'failed')
 })

@@ -1,7 +1,8 @@
 package com.nexus.auth.controller;
 
 import com.nexus.auth.dto.LoginRequest;
-import com.nexus.auth.dto.LoginResponse;
+import com.nexus.auth.dto.AuthTokensResponse;
+import java.time.Instant;
 import com.nexus.auth.exception.AccountForbiddenException;
 import com.nexus.auth.exception.InvalidCredentialsException;
 import com.nexus.auth.service.LoginService;
@@ -40,8 +41,8 @@ public class LoginControllerTests {
         String email = "test-user"+ UUID.randomUUID() + "@example.com";
         String password = "test-user-password";
         LoginRequest loginRequest = new LoginRequest(email,password);
-        LoginResponse mockRsp = new LoginResponse(
-                "mock-accessToken", "Bearer", 1800L);
+        AuthTokensResponse mockRsp = new AuthTokensResponse(
+                "mock-accessToken", "Bearer", 1800L, "test-refresh-token", "7", Instant.parse("2026-11-17T00:00:00Z"));
 
         when(loginService.login(any(LoginRequest.class))).thenReturn(mockRsp);
 

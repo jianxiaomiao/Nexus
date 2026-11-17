@@ -17,6 +17,9 @@ export interface AuthSession {
   tokenType: 'Bearer'
   /** Absolute expiry time in milliseconds; restoring must preserve it. */
   expiresAt: number
+  sessionId: string
+  /** Absolute session deadline in milliseconds; unchanged by rotation. */
+  sessionExpiresAt: number
 }
 
 export interface AuthState {
@@ -24,9 +27,10 @@ export interface AuthState {
   session: AuthSession | null
 }
 
-export interface WriteAuthSessionInput {
+export interface LoginAuthSessionInput {
   expectedRevision: number
-  session: AuthSession
+  email: string
+  password: string
 }
 
 export interface ClearAuthSessionInput {
@@ -34,12 +38,29 @@ export interface ClearAuthSessionInput {
 }
 
 export type ReadAuthSessionResult =
-  | { status: 'ok'; authState: AuthState; code?: 'SESSION_IS_NULL' }
+  | { status: 'ok'; authState: AuthState; code?: 'SESSION_IS_NULL'; serverRevocation?: 'pending' | 'unconfirmed' }
   | { status: 'failed'; code: 'FORBIDDEN' }
 
-export type WriteAuthSessionResult =
+export type LoginAuthSessionResult =
   | { status: 'ok'; authState: AuthState; code: 'SUCCESS' }
-  | { status: 'failed'; code: 'FORBIDDEN' | 'INVALID_REQUEST' | 'SESSION_CHANGED' }
+  | { status: 'failed'; httpStatus: number; code:
+      'FORBIDDEN' | 'INVALID_REQUEST' | 'SESSION_CHANGED' | 'INVALID_RESPONSE' |
+      'UPSTREAM_UNAVAILABLE' | 'TIMEOUT' | 'AUTH_INVALID_CREDENTIALS' |
+      'AUTH_ACCOUNT_FORBIDDEN' | 'AUTH_SESSION_UNAVAILABLE' }
+
+export interface EnsureAuthSessionInput {
+  expectedRevision: number
+  forceRefresh?: boolean
+}
+
+export type EnsureAuthSessionResult =
+  | { status: 'ok'; authState: AuthState }
+  | { status: 'reauthenticate'; code: string; authState: AuthState }
+  | { status: 'failed'; code: string }
+
+export type LogoutAuthSessionResult =
+  | { status: 'ok'; authState: AuthState; serverRevocation: 'confirmed' | 'unconfirmed' | 'not-needed' }
+  | { status: 'failed'; code: string }
 
 export type ClearAuthSessionResult =
   | { status: 'ok'; authState: AuthState; code: 'SUCCESS' }
@@ -66,7 +87,11 @@ export interface NexusDesktop {
 
   readAuthSession(): Promise<ReadAuthSessionResult>
 
-  writeAuthSession(input: WriteAuthSessionInput): Promise<WriteAuthSessionResult>
+  loginAuthSession(input: LoginAuthSessionInput): Promise<LoginAuthSessionResult>
+
+  ensureAuthSession(input: EnsureAuthSessionInput): Promise<EnsureAuthSessionResult>
+
+  logoutAuthSession(input: ClearAuthSessionInput): Promise<LogoutAuthSessionResult>
 
   clearAuthSession(input: ClearAuthSessionInput): Promise<ClearAuthSessionResult>
 }

@@ -4,6 +4,11 @@ import com.nexus.auth.exception.InvalidAccessTokenException;
 import com.nexus.auth.exception.AccountForbiddenException;
 import com.nexus.user.entity.User;
 import com.nexus.user.mapper.UserMapper;
+import com.nexus.auth.entity.AuthSession;
+import com.nexus.auth.mapper.AuthSessionMapper;
+import com.nexus.auth.token.AccessTokenVerifier;
+import java.time.*;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -18,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.lenient;
 
 @ExtendWith(MockitoExtension.class)
 class BearerUserIdResolverTests {
@@ -29,12 +35,21 @@ class BearerUserIdResolverTests {
 
     @Mock
     private Jwt jwt;
+    @Mock private AuthSessionMapper sessions;
+    private final Clock clock = Clock.fixed(Instant.parse("2026-11-16T00:00:00Z"), ZoneOffset.UTC);
 
     private BearerUserIdResolver resolver;
 
     @BeforeEach
     void setUp() {
-        resolver = new BearerUserIdResolver(jwtDecoder, userMapper);
+        resolver = new BearerUserIdResolver(new AccessTokenVerifier(jwtDecoder, jwtDecoder, clock), userMapper, sessions, clock);
+        lenient().when(jwt.getIssuedAt()).thenReturn(clock.instant().minusSeconds(60));
+        lenient().when(jwt.getExpiresAt()).thenReturn(clock.instant().plusSeconds(60));
+        lenient().when(jwt.getClaims()).thenReturn(Map.of("sid", "7"));
+        AuthSession session = new AuthSession();
+        session.setId(7L); session.setUserId(42L);
+        session.setExpiresAt(LocalDateTime.ofInstant(clock.instant().plusSeconds(60), ZoneOffset.UTC));
+        lenient().when(sessions.selectById(7L)).thenReturn(session);
     }
 
     @Test

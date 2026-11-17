@@ -99,7 +99,7 @@ const id = n => `30000000-0000-4000-8000-${String(n).padStart(12, '0')}`
     if (process.argv.includes('--native')) {
       await instance.evaluate(() => { globalThis.__notificationTest.mode = 'native' })
       const beforeNative = await stats()
-      console.log('NATIVE: sending one real Windows notification; simulated successful job, no backend request. Window stays open for 45 seconds.')
+      console.log(`NATIVE: sending one system notification (${process.platform}); simulated successful job, no backend request. Window stays open for 45 seconds.`)
       await settle(id(10), 'SUCCEEDED'); await terminal(id(10), 'SUCCEEDED')
       await expect.poll(async () => {
         const s = await stats()

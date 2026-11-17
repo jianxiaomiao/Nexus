@@ -13,7 +13,7 @@ app.setPath = (name, value) => setPath(name, name === 'userData' ? path.join(dir
 const control = globalThis.__sessionAcceptance = { requests: [], ipc: [] }
 const handle = ipcMain.handle.bind(ipcMain)
 ipcMain.handle = (channel, listener) => {
-  if (!['auth-session:read', 'auth-session:write', 'auth-session:clear'].includes(channel)) {
+  if (!['auth-session:read', 'auth-session:login', 'auth-session:clear', 'auth-session:logout', 'auth-session:ensure'].includes(channel)) {
     return handle(channel, listener)
   }
   return handle(channel, async (event, ...args) => {
@@ -33,7 +33,7 @@ globalThis.fetch = async (url, options) => {
   const parsed = new URL(url)
   const method = options?.method ?? 'GET'
   const allowed = parsed.origin === 'http://localhost:8080' && (
-    (parsed.pathname === '/api/auth/login' && method === 'POST') ||
+    (['/api/auth/login', '/api/auth/refresh', '/api/auth/logout'].includes(parsed.pathname) && method === 'POST') ||
     (parsed.pathname === '/api/application' && method === 'GET')
   )
   const record = {

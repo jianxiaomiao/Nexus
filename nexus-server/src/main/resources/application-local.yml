@@ -1,0 +1,10 @@
+# Development Cookie is deliberately restricted to the local profile and loopback origins.
+# Use one origin consistently for a browser session; test port 4173 is opt-in per test process.
+nexus:
+  auth:
+    web:
+      secure-cookie: false
+      cookie-name: nexus_rt_dev
+      allowed-origins:
+        - http://localhost:5173
+        - http://127.0.0.1:5173
