@@ -116,7 +116,11 @@ export async function start(canvas, resetButton, signal) {
   renderer = new T.WebGLRenderer({canvas, alpha:true, antialias:true, powerPreference:'low-power'});
   renderer.setClearColor(0x000000,0);
   renderer.setPixelRatio(Math.min(devicePixelRatio,1.6));
-  renderer.shadowMap.enabled = true;
+  // NVMTL can lose the context when sampling a directional shadow map.
+  const gl = renderer.getContext();
+  const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+  const rendererName = debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : '';
+  renderer.shadowMap.enabled = !/\bNVMTL\b/i.test(rendererName);
   renderer.shadowMap.type = T.VSMShadowMap;
   renderer.shadowMap.autoUpdate = false;
   renderer.shadowMap.needsUpdate = true;
