@@ -7,3 +7,25 @@
 /nexus-server/config/deadlock-observer.local.properties
 /tools/deployment/linux/out/
 /nginx_key/
+
+# macOS 本机文件
+.DS_Store
+
+# 实验截图与视频；正式客户端图片资源不受影响
+/prototypes/**/*.png
+/prototypes/**/*.jpg
+/prototypes/**/*.jpeg
+/prototypes/**/*.webp
+/prototypes/**/*.gif
+/prototypes/**/*.webm
+/prototypes/**/*.mp4
+/prototypes/**/*.mov
+/prototypes/**/*.m4v
+/prototypes/**/*.avi
+
+# 实验浏览器/Electron 用户目录及自动化输出
+/prototypes/**/electron-profile*/
+/prototypes/**/browser-profile*/
+/prototypes/**/user-data*/
+/prototypes/**/test-results/
+/prototypes/**/playwright-report/

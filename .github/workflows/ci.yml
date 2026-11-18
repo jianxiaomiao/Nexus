@@ -24,6 +24,76 @@ jobs:
       - name: 类型检查与生产构建
         working-directory: ./nexus-console
         run: npm run build
+  electron:
+    name: Electron 会话与 Renderer 构建
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v7
+
+      - name: 安装 Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: 安装控制台依赖
+        working-directory: ./nexus-console
+        run: npm ci
+
+      # 本任务只运行 Node 测试和构建，不启动 Electron 或生成安装包。
+      - name: 校验桌面依赖锁文件并安装工具依赖
+        working-directory: ./nexus-desktop
+        run: npm ci --ignore-scripts
+
+      - name: 校验 Main 与 Preload 语法
+        working-directory: ./nexus-desktop
+        run: |
+          node --check main.cjs
+          node --check preload.cjs
+          node --check window-state.cjs
+
+      - name: 运行 Electron Main 会话边界测试
+        working-directory: ./nexus-desktop
+        run: npm run test:auth-session
+
+      - name: 运行 Renderer 会话状态测试
+        working-directory: ./nexus-console
+        run: >-
+          node --test
+          scripts/test-auth-session-initialization.mjs
+          scripts/test-auth-session-login.mjs
+          scripts/test-auth-session-invalidation.mjs
+          scripts/test-auth-session-renewal.mjs
+
+      - name: 桌面 Renderer 类型检查与生产构建
+        working-directory: ./nexus-desktop
+        run: npm run build:renderer
+
+  mobile:
+    name: 移动端会话与管理契约
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v7
+
+      - name: 安装 Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      # 这些测试使用内存夹具，无需后端、MySQL、HBuilderX 或真机。
+      # Android Keystore、原生交互和发行包仍由独立真机流程验收。
+      - name: 运行移动端会话、传输与时间契约测试
+        working-directory: ./nexus-mobile
+        run: >-
+          node --test
+          scripts/test-auth-session.cjs
+          scripts/test-management-contracts.cjs
+
   backend:
     runs-on: ubuntu-latest
     env:
