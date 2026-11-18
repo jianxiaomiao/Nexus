@@ -1,0 +1,63 @@
+/* Brand values follow docs/design/NEXUS_DESIGN_GUIDE.md and console main.css. */
+page {
+	--nexus-paper: #faf9f4;
+	--nexus-sage: #eef2e8;
+	--nexus-surface: #fffefb;
+	--nexus-ink: #203b37;
+	--nexus-muted: #667a72;
+	--nexus-teal: #247b70;
+	--nexus-teal-pressed: #1b625a;
+	--nexus-gold: #e7bd58;
+	--nexus-line: #dfe7dd;
+	--nexus-input-line: #a4b5aa;
+	--nexus-on-primary: #fffefb;
+	--nexus-success-ink: #26764d;
+	--nexus-success-surface: #e6f4e9;
+	--nexus-warning-ink: #85551a;
+	--nexus-warning-surface: #fff0d9;
+	--nexus-danger-ink: #a73c34;
+	--nexus-danger-surface: #fbeae6;
+	--nexus-danger-pressed: #873029;
+	--nexus-neutral-ink: #607068;
+	--nexus-neutral-surface: #edf0eb;
+	--nexus-disabled-ink: #68736a;
+	--nexus-disabled-surface: #e5e9e1;
+	--nexus-focus-ring: rgba(36, 123, 112, 0.18);
+	--nexus-space-1: 8rpx;
+	--nexus-space-2: 16rpx;
+	--nexus-space-3: 24rpx;
+	--nexus-space-4: 32rpx;
+	--nexus-space-5: 40rpx;
+	--nexus-space-6: 48rpx;
+	--nexus-radius-control: 12px;
+	--nexus-radius-card: 16px;
+	--nexus-radius-small: 6px;
+	--nexus-touch-size: 44px;
+	--nexus-control-height: 48px;
+	--nexus-font-small: 12px;
+	--nexus-font-label: 14px;
+	--nexus-font-body: 16px;
+	--nexus-font-title: 26px;
+	--nexus-card-shadow: 0 5px 18px rgba(32, 59, 55, 0.055);
+	--nexus-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	color: var(--nexus-ink);
+	background: var(--nexus-paper);
+	font-family:
+		-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei',
+		sans-serif;
+	font-size: var(--nexus-font-body);
+	line-height: 1.6;
+}
+
+.nexus-page {
+	box-sizing: border-box;
+	min-height: 100vh;
+	padding: var(--nexus-space-4) var(--nexus-space-5);
+	padding-bottom: calc(var(--nexus-space-5) + env(safe-area-inset-bottom));
+	background: var(--nexus-paper);
+	color: var(--nexus-ink);
+}
+.nexus-mono {
+	font-family: var(--nexus-font-mono);
+	overflow-wrap: anywhere;
+}

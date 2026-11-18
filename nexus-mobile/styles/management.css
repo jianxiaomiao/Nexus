@@ -1,0 +1,84 @@
+.management-page {
+	max-width: 760px;
+	margin: 0 auto;
+}
+.management-title {
+	display: block;
+	color: var(--nexus-ink);
+	font-size: var(--nexus-font-title);
+	font-weight: 700;
+	overflow-wrap: anywhere;
+}
+.management-subtitle {
+	display: block;
+	color: var(--nexus-muted);
+	font-size: 14px;
+	margin-top: 8rpx;
+	overflow-wrap: anywhere;
+}
+.management-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16rpx;
+}
+.management-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12rpx;
+	margin-top: 24rpx;
+}
+.management-section {
+	margin-top: 24rpx;
+}
+.management-tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8rpx;
+	padding: 16rpx 0;
+	margin-top: 24rpx;
+	border-bottom: 1px solid var(--nexus-line);
+}
+.management-label {
+	display: block;
+	color: var(--nexus-muted);
+	font-size: 12px;
+	margin-top: 24rpx;
+}
+.management-value {
+	display: block;
+	font-size: 15px;
+	overflow-wrap: anywhere;
+}
+.management-name {
+	display: block;
+	font-size: 18px;
+	font-weight: 600;
+	overflow-wrap: anywhere;
+	min-width: 0;
+	flex: 1;
+}
+.management-help {
+	display: block;
+	color: var(--nexus-muted);
+	font-size: 14px;
+	line-height: 1.8;
+	margin-bottom: 24rpx;
+	overflow-wrap: anywhere;
+}
+.management-error {
+	display: block;
+	color: var(--nexus-danger-ink);
+	font-size: 14px;
+	margin: 16rpx 0;
+}
+.management-pagination {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12rpx;
+	margin-top: 24rpx;
+	font-size: 14px;
+}
