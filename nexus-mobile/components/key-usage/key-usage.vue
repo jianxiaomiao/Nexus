@@ -19,12 +19,12 @@
 				><picker
 					mode="date"
 					:value="startDate"
-					@change="startDate = $event.detail.value"
+					@change="customChanged('startDate', $event.detail.value)"
 					><view class="date-picker">{{ startDate }}</view></picker
 				><picker
 					mode="time"
 					:value="startTime"
-					@change="startTime = $event.detail.value"
+					@change="customChanged('startTime', $event.detail.value)"
 					><view class="date-picker">{{ startTime }}</view></picker
 				></view
 			>
@@ -33,12 +33,12 @@
 				><picker
 					mode="date"
 					:value="endDate"
-					@change="endDate = $event.detail.value"
+					@change="customChanged('endDate', $event.detail.value)"
 					><view class="date-picker">{{ endDate }}</view></picker
 				><picker
 					mode="time"
 					:value="endTime"
-					@change="endTime = $event.detail.value"
+					@change="customChanged('endTime', $event.detail.value)"
 					><view class="date-picker">{{ endTime }}</view></picker
 				></view
 			>
@@ -273,22 +273,15 @@ export default {
 			eventPage: 1,
 			eventsLoading: false,
 			eventsError: '',
-			startDate: new Date(Date.now() + 8 * 3600000)
-				.toISOString()
-				.slice(0, 10),
-			endDate: new Date(Date.now() + 8 * 3600000 + 86400000)
-				.toISOString()
-				.slice(0, 10),
+			startDate: new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10),
+			endDate: new Date(Date.now() + 8 * 3600000 + 86400000).toISOString().slice(0, 10),
 			startTime: '00:00',
 			endTime: '00:00',
 		}
 	},
 	computed: {
 		maxDaily() {
-			return Math.max(
-				0,
-				...(this.summary?.dailyCounts || []).map((day) => day.count),
-			)
+			return Math.max(0, ...(this.summary?.dailyCounts || []).map((day) => day.count))
 		},
 	},
 	mounted() {
@@ -312,9 +305,17 @@ export default {
 		},
 	},
 	methods: {
+		customChanged(field, value) {
+			this[field] = value
+			this.summaryVersion++
+			this.loading = false
+			this.summary = null
+			this.error = ''
+		},
 		time: beijingTime,
 		selectRange(value) {
 			this.timeRange = value
+			this.loading = false
 			this.summaryVersion++
 			this.summary = null
 			this.error = ''
@@ -359,8 +360,10 @@ export default {
 					this.summary = data
 				}
 			} catch (e) {
-				if (this.active && version === this.summaryVersion)
-					this.error = await showError(e)
+				if (this.active && version === this.summaryVersion) {
+					const message = await showError(e)
+					if (this.active && version === this.summaryVersion) this.error = message
+				}
 			} finally {
 				if (version === this.summaryVersion) this.loading = false
 			}
@@ -377,12 +380,20 @@ export default {
 					size: 10,
 				})
 				if (this.active && version === this.eventVersion) {
+					const last = Math.max(1, Math.ceil(data.total / 10))
+					if (this.eventPage > last) {
+						this.eventPage = last
+						this.loadEvents()
+						return
+					}
 					this.events = data.records
 					this.eventTotal = data.total
 				}
 			} catch (e) {
-				if (this.active && version === this.eventVersion)
-					this.eventsError = await showError(e)
+				if (this.active && version === this.eventVersion) {
+					const message = await showError(e)
+					if (this.active && version === this.eventVersion) this.eventsError = message
+				}
 			} finally {
 				if (version === this.eventVersion) this.eventsLoading = false
 			}

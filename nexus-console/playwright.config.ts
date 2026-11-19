@@ -9,6 +9,7 @@ export default defineConfig({
   reporter: 'list',
   use: {
     baseURL,
+    channel: process.env.NEXUS_TEST_BROWSER_CHANNEL,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },

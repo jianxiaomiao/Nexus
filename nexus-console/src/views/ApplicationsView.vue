@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import { createRequestGate } from '@/utils/requestGate'
+import { usePageScope } from '@/utils/pageScope'
+import { mutationUnknown, needsReconcile, unknownMutationMessage } from '@/api/mutation'
+import { isCancel } from 'axios'
+import { onBeforeUnmount } from 'vue'
 import { onMounted, reactive, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
@@ -27,6 +32,7 @@ const loadError = ref('')
 const submitting = ref(false)
 const dialogOpen = ref(false)
 const editingId = ref<number | null>(null)
+const editingUpdatedAt = ref<string>()
 const formRef = ref<FormInstance>()
 const form = reactive({ name: '' })
 
@@ -37,115 +43,186 @@ const rules: FormRules<typeof form> = {
   ],
 }
 
-async function load() {
+const queryGate = createRequestGate()
+const uncertain = ref(false)
+const scope = usePageScope(
+  () => undefined,
+  () => {
+    if (submitting.value) ElMessageBox.close()
+    submitting.value = false
+    uncertain.value = false
+    queryGate.invalidate()
+    applications.value = []
+    total.value = 0
+    loading.value = false
+    dialogOpen.value = false
+  },
+)
+onBeforeUnmount(() => queryGate.dispose())
+
+async function load(repair = true) {
+  const latest = queryGate.begin()
+  const currentScope = scope.capture()
+  const valid = () => latest() && currentScope()
+
   loading.value = true
   loadError.value = ''
   try {
     const page = await listApplications({ current: current.value, size: size.value })
-    if (current.value > 1 && page.records.length === 0 && page.total > 0) {
-      current.value = Math.ceil(page.total / size.value)
-      await load()
+    if (!valid()) return
+    uncertain.value = false
+    if (repair && current.value > 1 && page.records.length === 0) {
+      current.value = Math.max(1, Math.ceil(page.total / size.value))
+      await load(false)
       return
     }
+    if (!page.records.length && page.total > 0) throw new Error('INVALID_LIST_RESPONSE')
     applications.value = page.records
     total.value = page.total
   } catch (error) {
+    if (!valid() || isCancel(error)) return
     loadError.value = applicationErrorMessage(error, '加载应用失败，请稍后重试')
   } finally {
-    loading.value = false
+    if (valid()) loading.value = false
   }
 }
 
-function changePage(value: number) { current.value = value; void load() }
-function changeSize(value: number) { size.value = value; current.value = 1; void load() }
+function changePage(value: number) {
+  current.value = value
+  void load()
+}
+function changeSize(value: number) {
+  size.value = value
+  current.value = 1
+  void load()
+}
 
 function openCreate() {
+  if (submitting.value || uncertain.value) return
   editingId.value = null
+  editingUpdatedAt.value = undefined
   form.name = ''
   formRef.value?.clearValidate()
   dialogOpen.value = true
 }
 
 function openEdit(application: Application) {
+  if (submitting.value || uncertain.value) return
   editingId.value = application.id
+  editingUpdatedAt.value = application.updatedAt
   form.name = application.name
   formRef.value?.clearValidate()
   dialogOpen.value = true
 }
 
 async function submitForm() {
-  if (submitting.value || !formRef.value) return
-  try {
-    await formRef.value.validate()
-  } catch {
-    return
-  }
-
+  if (submitting.value || uncertain.value || loading.value || !formRef.value) return
   submitting.value = true
+  const valid = scope.capture()
+  const id = editingId.value
+  const expectedUpdatedAt = editingUpdatedAt.value
+  const name = form.name.trim()
   try {
-    const name = form.name.trim()
-    if (editingId.value === null) {
-      await createApplication({ name })
-      ElMessage.success('应用已创建')
-    } else {
-      await updateApplication({ id: editingId.value, name })
-      ElMessage.success('应用名称已更新')
+    try {
+      await formRef.value.validate()
+    } catch {
+      return
     }
+    if (!valid()) return
+    if (id === null) await createApplication({ name })
+    else
+      await updateApplication({
+        id,
+        name,
+        expectedUpdatedAt,
+      })
+    if (!valid()) return
     dialogOpen.value = false
+    current.value = 1
+    ElMessage.success(id === null ? '应用已创建' : '应用名称已更新')
     await load()
   } catch (error) {
-    ElMessage.error(applicationErrorMessage(error, '保存失败，请稍后重试'))
+    if (!valid() || isCancel(error)) return
+    uncertain.value = needsReconcile(error)
+    ElMessage.error(
+      mutationUnknown(error)
+        ? unknownMutationMessage
+        : applicationErrorMessage(error, '保存失败，请稍后重试'),
+    )
   } finally {
-    submitting.value = false
+    if (valid()) submitting.value = false
   }
 }
 
 async function toggleStatus(application: Application) {
+  if (submitting.value || loading.value || uncertain.value) return
+  submitting.value = true
+  const valid = scope.capture()
   const disabling = application.status === 0
   try {
-    await ElMessageBox.confirm(
-      disabling
-        ? `禁用「${application.name}」后，所属 API Key 将无法调用开放 API。确定继续吗？`
-        : `确定重新启用「${application.name}」吗？`,
-      disabling ? '禁用应用' : '启用应用',
-      { type: disabling ? 'warning' : 'info', confirmButtonText: disabling ? '确认禁用' : '确认启用', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
-
-  try {
-    await updateApplication({ id: application.id, status: disabling ? 1 : 0 })
-    ElMessage.success(disabling ? '应用已禁用' : '应用已启用')
+    try {
+      await ElMessageBox.confirm(
+        disabling
+          ? `禁用「${application.name}」后所有 Key 将停止调用。`
+          : `启用「${application.name}」？`,
+        '修改应用状态',
+        { confirmButtonText: '确认', cancelButtonText: '取消' },
+      )
+    } catch {
+      return
+    }
+    if (!valid()) return
+    await updateApplication({
+      id: application.id,
+      status: disabling ? 1 : 0,
+      expectedUpdatedAt: application.updatedAt,
+    })
+    if (!valid()) return
+    ElMessage.success('应用状态已更新')
     await load()
   } catch (error) {
-    ElMessage.error(applicationErrorMessage(error, '修改状态失败，请稍后重试'))
+    if (!valid() || isCancel(error)) return
+    uncertain.value = needsReconcile(error)
+    ElMessage.error(
+      mutationUnknown(error)
+        ? unknownMutationMessage
+        : applicationErrorMessage(error, '修改状态失败，请稍后重试'),
+    )
+  } finally {
+    if (valid()) submitting.value = false
   }
 }
 
 async function remove(application: Application) {
+  if (submitting.value || loading.value || uncertain.value) return
+  submitting.value = true
+  const valid = scope.capture()
   try {
-    await ElMessageBox.prompt(
-      `删除后，应用及所属 API Key 将无法继续使用。请输入「${application.name}」以确认。`,
-      '删除应用',
-      {
-        type: 'warning',
+    try {
+      await ElMessageBox.prompt(`请输入「${application.name}」以确认。`, '删除应用', {
         inputPlaceholder: '输入应用名称',
         inputValidator: (value) => value === application.name || '名称不一致，请重新输入',
         confirmButtonText: '确认删除',
         cancelButtonText: '取消',
-      },
-    )
-  } catch {
-    return
-  }
-
-  try {
+      })
+    } catch {
+      return
+    }
+    if (!valid()) return
     await deleteApplication(application.id)
+    if (!valid()) return
     ElMessage.success('应用已删除')
     await load()
   } catch (error) {
-    ElMessage.error(applicationErrorMessage(error, '删除失败，请稍后重试'))
+    if (!valid() || isCancel(error)) return
+    uncertain.value = needsReconcile(error)
+    ElMessage.error(
+      mutationUnknown(error)
+        ? unknownMutationMessage
+        : applicationErrorMessage(error, '删除失败，请稍后重试'),
+    )
+  } finally {
+    if (valid()) submitting.value = false
   }
 }
 
@@ -153,7 +230,9 @@ function formatDate(value: string): string {
   return formatBeijingTime(value, true)
 }
 
-onMounted(() => { void load() })
+onMounted(() => {
+  void load()
+})
 </script>
 
 <template>
@@ -167,9 +246,10 @@ onMounted(() => { void load() })
       <el-button type="primary" size="large" :icon="Plus" @click="openCreate">创建 Application</el-button>
     </div>
 
+    <div v-if="uncertain" class="notice error-notice" role="alert"><p>请先刷新核对最新资料，再决定下一步操作。</p><el-button @click="load()">刷新核对</el-button></div>
     <div v-if="loadError" class="notice error-notice" role="alert">
       <div><strong>暂时无法加载应用</strong><p>{{ loadError }}</p></div>
-      <el-button @click="load">重试</el-button>
+      <el-button @click="load()">重试</el-button>
     </div>
 
     <div v-if="loading" class="application-grid" aria-busy="true">
@@ -221,15 +301,15 @@ onMounted(() => { void load() })
     </div>
     <ListPagination v-if="!loadError && total > 0" :current="current" :size="size" :total="total" @page-change="changePage" @size-change="changeSize" />
 
-    <el-dialog v-model="dialogOpen" :title="editingId === null ? '创建 Application' : '编辑 Application'" width="min(440px, 92vw)" destroy-on-close>
+    <el-dialog v-model="dialogOpen" :title="editingId === null ? '创建 Application' : '编辑 Application'" :close-on-click-modal="!submitting" :close-on-press-escape="!submitting" :show-close="!submitting" width="min(440px, 92vw)" destroy-on-close>
       <p class="dialog-hint">一个清晰的名称，方便你以后找到它。</p>
-      <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent="submitForm">
+      <el-form :disabled="submitting" ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent="submitForm">
         <el-form-item label="应用名称" prop="name">
           <el-input v-model="form.name" maxlength="64" show-word-limit placeholder="例如：我的第一个应用" autocomplete="off" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogOpen = false">取消</el-button>
+        <el-button :disabled="submitting" @click="dialogOpen = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submitForm">{{ editingId === null ? '创建应用' : '保存修改' }}</el-button>
       </template>
     </el-dialog>

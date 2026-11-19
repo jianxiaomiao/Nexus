@@ -465,3 +465,17 @@ test('malformed successful logout response remains unconfirmed', async () => {
 	assert.equal(f.auth.state().authenticated, false)
 	assert.equal(f.record.revocationUnconfirmed, true)
 })
+
+test('a late management success is rejected after another request ends the session', async () => {
+  const f = await fixture()
+  f.queue.push(f.tokens())
+  await f.auth.login('test@example.test', 'fixture-only')
+  const slow = deferred()
+  f.queue.push(() => slow.promise, () => { throw new f.SessionError('INVALID_ACCESS_TOKEN', 401) }, () => { throw new f.SessionError('NETWORK_UNAVAILABLE') })
+  const old = f.auth.management('/api/application')
+  const rejectedOld = assert.rejects(old, { code: 'SESSION_CHANGED' })
+  await assert.rejects(f.auth.management('/api/usage'), { code: 'NETWORK_UNAVAILABLE' })
+  assert.equal(f.auth.state().authenticated, false)
+  slow.resolve({ records: [{ id: 1 }], total: 1 })
+  await rejectedOld
+})

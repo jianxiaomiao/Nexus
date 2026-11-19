@@ -1,3 +1,5 @@
+import { watch } from 'vue'
+import { useUserStore } from '@/stores/userStore'
 import { useScreenshotTrackingStore } from '@/stores/screenshotTrackingStore'
 
 export function initScreenshotTracking(): () => void {
@@ -5,6 +7,11 @@ export function initScreenshotTracking(): () => void {
   if (!desktop) return () => {}
 
   const store = useScreenshotTrackingStore()
+  const user = useUserStore()
+  const stopIdentity = watch(() => user.operationVersion, () => {
+    pushVersion++
+    store.resetForIdentityChange()
+  }, { flush: 'sync' })
 
   let disposed = false
   let pushVersion = 0
@@ -35,6 +42,7 @@ export function initScreenshotTracking(): () => void {
   return () => {
     if (disposed) return
     disposed = true
+    stopIdentity()
     unsubscribe()
   }
 }

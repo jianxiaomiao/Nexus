@@ -211,32 +211,34 @@ export default {
 		time: beijingTime,
 		statusLabel,
 		statusTone,
-		async load() {
-			if (this.loading || this.loggingOut) return
+		async load(repair = true) {
+			if (this.loading || this.loggingOut || this.creating) return
 			const version = ++this.loadVersion
 			this.loading = true
 			this.error = ''
 			try {
 				const data = await applications(this.current)
 				if (!this.visible || version !== this.loadVersion) return
-				if (this.current > 1 && !data.records.length) {
-					this.current = Math.max(
-						1,
-						Math.ceil(data.total / this.size),
-					)
+				if (repair !== false && this.current > 1 && !data.records.length) {
+					this.current = Math.max(1, Math.ceil(data.total / this.size))
 					this.loading = false
-					return this.load()
+					return this.load(false)
 				}
+				if (!data.records.length && data.total > 0) throw { code: 'INVALID_RESPONSE' }
 				this.items = data.records
 				this.total = data.total
 				this.uncertain = false
 				const auth = await getAuth()
-				this.warning = auth.state().revocationUnconfirmed
-					? '上次退出的服务端撤销未确认。'
-					: ''
+				if (!this.visible || version !== this.loadVersion) return
+				this.warning = auth.state().revocationUnconfirmed ? '上次退出的服务端撤销未确认。' : ''
 			} catch (error) {
-				if (this.visible && version === this.loadVersion)
-					this.error = await showError(error)
+				if (this.visible && version === this.loadVersion) {
+					const message = await showError(error)
+					if (this.visible && version === this.loadVersion) {
+						this.error = message
+						this.items = []
+					}
+				}
 			} finally {
 				if (version === this.loadVersion) this.loading = false
 			}
@@ -263,7 +265,7 @@ export default {
 			return !this.nameProblem
 		},
 		async submitCreate() {
-			if (this.creating || this.uncertain || !this.validateName()) return
+			if (this.creating || this.loading || this.uncertain || !this.validateName()) return
 			this.creating = true
 			this.createError = ''
 			try {
@@ -275,6 +277,7 @@ export default {
 				this.createOpen = false
 				this.current = 1
 				uni.showToast({ title: 'Application 已创建', icon: 'success' })
+				this.creating = false
 				await this.load()
 			} catch (error) {
 				this.uncertain = error.code === 'MUTATION_RESULT_UNKNOWN'

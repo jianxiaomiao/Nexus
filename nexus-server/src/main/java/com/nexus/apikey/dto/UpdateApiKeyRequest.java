@@ -14,5 +14,6 @@ public record UpdateApiKeyRequest(
         @Min(0)
         @Max(1)
         Integer status
-) {
+, java.time.Instant expectedUpdatedAt) {
+    public UpdateApiKeyRequest(String name, Long applicationId, Long apiKeyId, Integer status) { this(name, applicationId, apiKeyId, status, null); }
 }

@@ -31,6 +31,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.doAnswer;
 
 @SpringBootTest(properties = "nexus.webhook.scheduling.enabled=false")
+@org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
 class ApplicationWebhookServiceIntegrationTests {
     @Autowired ApplicationWebhookService service;
     @Autowired ApplicationWebhookMapper webhooks;
@@ -68,6 +69,17 @@ class ApplicationWebhookServiceIntegrationTests {
             applications.deleteById(app.getId());
         }
         if (owner != null && owner.getId() != null) users.deleteById(owner.getId());
+    }
+
+    @Test void staleMetadataCannotOverwriteAnUpdateOrSecretRotation() {
+        var created = service.createMine(owner.getId(), app.getId(), new CreateWebhookRequest("https://hooks.example.test/nexus"));
+        var updated = service.updateMine(owner.getId(), app.getId(), new UpdateWebhookRequest(null, 1, created.updatedAt()));
+        assertTrue(updated.updatedAt().isAfter(created.updatedAt()));
+        assertThrows(com.nexus.common.web.ResourceChangedException.class,
+                () -> service.updateMine(owner.getId(), app.getId(), new UpdateWebhookRequest(null, 0, created.updatedAt())));
+        service.rotateSecretMine(owner.getId(), app.getId(), new RotateWebhookSecretRequest(1L));
+        assertThrows(com.nexus.common.web.ResourceChangedException.class,
+                () -> service.updateMine(owner.getId(), app.getId(), new UpdateWebhookRequest(null, 0, updated.updatedAt())));
     }
 
     @Test

@@ -92,9 +92,9 @@ test('Key 详情支持改名、禁用与重新启用', async ({ page }) => {
   await page.getByRole('button', { name: '确认启用' }).click()
   await expect(page.getByRole('button', { name: '禁用 Key' })).toBeVisible()
   expect(api.calls.filter((call) => call.method === 'PUT' && call.path === '/api/apiKey').map((call) => call.body)).toEqual([
-    { applicationId: 1, apiKeyId: 11, name: '改名后的 Key' },
-    { applicationId: 1, apiKeyId: 11, status: 1 },
-    { applicationId: 1, apiKeyId: 11, status: 0 },
+    { applicationId: 1, apiKeyId: 11, name: '改名后的 Key', expectedUpdatedAt: expect.any(String) },
+    { applicationId: 1, apiKeyId: 11, status: 1, expectedUpdatedAt: expect.any(String) },
+    { applicationId: 1, apiKeyId: 11, status: 0, expectedUpdatedAt: expect.any(String) },
   ])
 })
 

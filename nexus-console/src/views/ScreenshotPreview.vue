@@ -4,7 +4,13 @@ import { Download, ZoomIn } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 
 const saving = ref(false)
-const props = defineProps<{ image: Blob; blockedResources: number | null; resourceLimitReached: boolean; cacheControl: string | null }>()
+let alive = true
+const props = defineProps<{
+  image: Blob
+  blockedResources: number | null
+  resourceLimitReached: boolean
+  cacheControl: string | null
+}>()
 const imageUrl = ref('')
 const tab = ref('preview')
 const expanded = ref(false)
@@ -12,22 +18,29 @@ const imageError = ref(false)
 const dimensions = ref('1280 × 720')
 const sizeLabel = computed(() => `${(props.image.size / 1024).toFixed(1)} KB`)
 
-const supportsDesktopSave =
-  typeof window.nexusDesktop?.saveScreenshot === 'function'
+const supportsDesktopSave = typeof window.nexusDesktop?.saveScreenshot === 'function'
 
 function releaseImage() {
   if (imageUrl.value) URL.revokeObjectURL(imageUrl.value)
   imageUrl.value = ''
 }
-watch(() => props.image, (image) => {
-  expanded.value = false
-  imageError.value = false
-  tab.value = 'preview'
-  dimensions.value = '1280 × 720'
+watch(
+  () => props.image,
+  (image) => {
+    saving.value = false
+    expanded.value = false
+    imageError.value = false
+    tab.value = 'preview'
+    dimensions.value = '1280 × 720'
+    releaseImage()
+    imageUrl.value = URL.createObjectURL(image)
+  },
+  { immediate: true, flush: 'sync' },
+)
+onBeforeUnmount(() => {
+  alive = false
   releaseImage()
-  imageUrl.value = URL.createObjectURL(image)
-}, { immediate: true, flush: 'sync' })
-onBeforeUnmount(releaseImage)
+})
 
 function readDimensions(event: Event) {
   const image = event.target as HTMLImageElement
@@ -42,25 +55,28 @@ async function downloadImage() {
   if (typeof desktop?.saveScreenshot === 'function') {
     saving.value = true
     const image = props.image
+    const valid = () => alive && props.image === image
 
     try {
       const bytes = await image.arrayBuffer()
+      if (!valid()) return
       const result = await desktop.saveScreenshot(bytes)
+      if (!valid()) return
 
       // 根据 result.status 处理成功、取消、失败
-      if(result.status === "saved"){
-        ElMessage.success("图片保存成功")
-      }else if(result.status === "failed"){
-        if(result.code === "BUSY"){
-          ElMessage.info("图片正在保存中")
-        }else{
-          ElMessage.warning("图片保存失败")
+      if (result.status === 'saved') {
+        ElMessage.success('图片保存成功')
+      } else if (result.status === 'failed') {
+        if (result.code === 'BUSY') {
+          ElMessage.info('图片正在保存中')
+        } else {
+          ElMessage.warning('图片保存失败')
         }
       }
     } catch {
-      ElMessage.error('保存截图失败，请稍后重试')
+      if (valid()) ElMessage.error('保存截图失败，请稍后重试')
     } finally {
-      saving.value = false
+      if (valid()) saving.value = false
     }
 
     return

@@ -112,6 +112,7 @@ test('真实App卸载移除订阅，迟到读取和已排队回调不更新Store
 })
 
 test('普通浏览器没有桌面桥时仍正常挂载', async ({ page }) => {
+  await page.route('**/api/auth/**', route => route.fulfill({ status: 401, json: { code: 'INVALID_REFRESH_TOKEN', data: null } }))
   const errors: string[] = []
   page.on('pageerror', error => errors.push(error.message))
   await page.goto('/login')

@@ -1,10 +1,20 @@
 <script setup lang="ts">
+import { usePageScope } from '@/utils/pageScope'
+import { mutationUnknown, needsReconcile, unknownMutationMessage } from '@/api/mutation'
+import { isCancel } from 'axios'
+import { onBeforeUnmount } from 'vue'
 import { formatBeijingTime } from '@/utils/beijingTime'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, CircleCheck, CircleClose, Delete, EditPen, Refresh } from '@element-plus/icons-vue'
+import {
+  ArrowLeft,
+  CircleCheck,
+  CircleClose,
+  Delete,
+  EditPen,
+  Refresh,
+} from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { isAxiosError } from 'axios'
 import type { Application } from '@/api/applications'
 import { listApplications } from '@/api/applications'
 import { deleteApiKey, listApiKeys, rotateApiKey, updateApiKey, type ApiKey } from '@/api/apiKeys'
@@ -25,16 +35,38 @@ const revealOpen = ref(false)
 const savedConfirmation = ref(false)
 const copied = ref(false)
 const secretVisible = ref(false)
-const activeTab = computed(() => route.query.tab === 'short-links' || route.query.tab === 'usage' ? route.query.tab : 'info')
+const activeTab = computed(() =>
+  route.query.tab === 'short-links' || route.query.tab === 'usage' ? route.query.tab : 'info',
+)
 let loadVersion = 0
 let copyResetTimer: ReturnType<typeof setTimeout> | undefined
 let removeNavigationGuard: (() => void) | undefined
 
 function warnBeforeUnload(event: BeforeUnloadEvent) {
-  if (!rotatedKey.value || savedConfirmation.value) return
+  if (!scope.authenticated() || !rotatedKey.value || savedConfirmation.value) return
   event.preventDefault()
   event.returnValue = ''
 }
+
+const uncertain = ref(false)
+const scope = usePageScope(
+  () => `${route.params.applicationId}:${route.params.keyId}`,
+  () => {
+    if (actionBusy.value) ElMessageBox.close()
+    actionBusy.value = false
+    uncertain.value = false
+    ++loadVersion
+    application.value = null
+    apiKey.value = null
+    rotatedKey.value = ''
+    revealOpen.value = false
+    savedConfirmation.value = false
+    copied.value = false
+    secretVisible.value = false
+    if (copyResetTimer) clearTimeout(copyResetTimer)
+  },
+)
+onBeforeUnmount(() => ++loadVersion)
 
 async function load() {
   const version = ++loadVersion
@@ -42,7 +74,12 @@ async function load() {
   const keyId = Number(route.params.keyId)
   application.value = null
   apiKey.value = null
-  if (!Number.isSafeInteger(applicationId) || applicationId <= 0 || !Number.isSafeInteger(keyId) || keyId <= 0) {
+  if (
+    !Number.isSafeInteger(applicationId) ||
+    applicationId <= 0 ||
+    !Number.isSafeInteger(keyId) ||
+    keyId <= 0
+  ) {
     errorMessage.value = 'API Key 地址无效'
     loading.value = false
     return
@@ -53,6 +90,7 @@ async function load() {
   try {
     const applications = await listApplications({ applicationId })
     if (version !== loadVersion) return
+    uncertain.value = false
     application.value = applications.records[0] ?? null
     if (!application.value) {
       errorMessage.value = '所属应用不存在，或你没有访问权限'
@@ -79,78 +117,161 @@ function formatDate(value: string): string {
 
 async function rename() {
   const current = apiKey.value
-  if (!current || actionBusy.value) return
-
-  let name: string
-  try {
-    const answer = await ElMessageBox.prompt('为这枚 API Key 设置一个清晰的名称。', '编辑 Key 名称', {
-      inputValue: current.name,
-      inputPlaceholder: 'Key 名称',
-      inputValidator: (value) => {
-        const length = value.trim().length
-        return (length > 0 && length <= 64) || '请输入 1–64 个字符的 Key 名称'
-      },
-      confirmButtonText: '保存修改',
-      cancelButtonText: '取消',
-    })
-    name = answer.value.trim()
-  } catch {
-    return
-  }
-
-  if (name === current.name) return
+  if (!current || actionBusy.value || loading.value || uncertain.value) return
   actionBusy.value = true
+  const valid = scope.capture()
+  let name = current.name
   try {
-    apiKey.value = await updateApiKey({ applicationId: current.applicationId, apiKeyId: current.id, name })
-    ElMessage.success('Key 名称已更新')
+    try {
+      const answer = await ElMessageBox.prompt('设置一个清晰的名称。', '编辑 Key 名称', {
+        inputValue: current.name,
+        inputPlaceholder: 'Key 名称',
+        inputValidator: (value) =>
+          (value.trim().length > 0 && value.trim().length <= 64) || '请输入 1–64 个字符的名称',
+        confirmButtonText: '保存修改',
+        cancelButtonText: '取消',
+      })
+      name = answer.value.trim()
+    } catch {
+      return
+    }
+    if (!valid()) return
+    if (name === current.name) return
+    const updated = await updateApiKey({
+      applicationId: current.applicationId,
+      apiKeyId: current.id,
+      expectedUpdatedAt: current.updatedAt,
+      name,
+    })
+    if (!valid()) return
+    ++loadVersion
+    apiKey.value = updated
+    ElMessage.success('名称已更新')
   } catch (error) {
-    ElMessage.error(apiKeyErrorMessage(error, '保存失败，请稍后重试'))
+    if (!valid() || isCancel(error)) return
+    uncertain.value = needsReconcile(error)
+    ElMessage.error(
+      mutationUnknown(error)
+        ? unknownMutationMessage
+        : apiKeyErrorMessage(error, '操作失败，请刷新核对后重试'),
+    )
   } finally {
-    actionBusy.value = false
+    if (valid()) actionBusy.value = false
   }
 }
 
 async function toggleStatus() {
   const current = apiKey.value
-  if (!current || actionBusy.value) return
-  const disabling = current.status === 0
-  try {
-    await ElMessageBox.confirm(
-      disabling ? `禁用「${current.name}」后，它将无法调用开放 API。确定继续吗？` : `确定重新启用「${current.name}」吗？`,
-      disabling ? '禁用 API Key' : '启用 API Key',
-      { type: disabling ? 'warning' : 'info', confirmButtonText: disabling ? '确认禁用' : '确认启用', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
-
+  if (!current || actionBusy.value || loading.value || uncertain.value) return
   actionBusy.value = true
+  const valid = scope.capture()
+
   try {
-    apiKey.value = await updateApiKey({ applicationId: current.applicationId, apiKeyId: current.id, status: disabling ? 1 : 0 })
-    ElMessage.success(disabling ? 'API Key 已禁用' : 'API Key 已启用')
+    try {
+      await ElMessageBox.confirm(
+        current.status === 0 ? '禁用后将无法调用开放 API。确定继续吗？' : '确定重新启用吗？',
+        current.status === 0 ? '禁用 API Key' : '启用 API Key',
+        {
+          confirmButtonText: current.status === 0 ? '确认禁用' : '确认启用',
+          cancelButtonText: '取消',
+        },
+      )
+    } catch {
+      return
+    }
+    if (!valid()) return
+
+    const updated = await updateApiKey({
+      applicationId: current.applicationId,
+      apiKeyId: current.id,
+      expectedUpdatedAt: current.updatedAt,
+      status: current.status === 0 ? 1 : 0,
+    })
+    if (!valid()) return
+    ++loadVersion
+    apiKey.value = updated
+    ElMessage.success('状态已更新')
   } catch (error) {
-    ElMessage.error(apiKeyErrorMessage(error, '修改状态失败，请稍后重试'))
+    if (!valid() || isCancel(error)) return
+    uncertain.value = needsReconcile(error)
+    ElMessage.error(
+      mutationUnknown(error)
+        ? unknownMutationMessage
+        : apiKeyErrorMessage(error, '操作失败，请刷新核对后重试'),
+    )
   } finally {
-    actionBusy.value = false
+    if (valid()) actionBusy.value = false
+  }
+}
+
+async function remove() {
+  const current = apiKey.value
+  if (!current || actionBusy.value || loading.value || uncertain.value) return
+  actionBusy.value = true
+  const valid = scope.capture()
+
+  try {
+    try {
+      await ElMessageBox.prompt(`请输入「${current.name}」以确认。`, '删除 API Key', {
+        inputPlaceholder: '输入 Key 名称',
+        inputValidator: (value) => value === current.name || '名称不一致，请重新输入',
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消',
+      })
+    } catch {
+      return
+    }
+    if (!valid()) return
+
+    await deleteApiKey(current.applicationId, current.id)
+    if (!valid()) return
+    ++loadVersion
+    apiKey.value = null
+    ElMessage.success('已删除')
+    try {
+      const failure = await router.replace({
+        name: 'application-detail',
+        params: { id: current.applicationId },
+        query: { tab: 'keys' },
+      })
+      if (failure && valid()) errorMessage.value = '已删除，但页面跳转失败，请返回列表。'
+    } catch {
+      if (valid()) errorMessage.value = '已删除，但页面跳转失败，请返回列表。'
+    }
+  } catch (error) {
+    if (!valid() || isCancel(error)) return
+    uncertain.value = needsReconcile(error)
+    ElMessage.error(
+      mutationUnknown(error)
+        ? unknownMutationMessage
+        : apiKeyErrorMessage(error, '操作失败，请刷新核对后重试'),
+    )
+  } finally {
+    if (valid()) actionBusy.value = false
   }
 }
 
 async function rotate() {
   const current = apiKey.value
-  if (!current || actionBusy.value || revealOpen.value) return
-  try {
-    await ElMessageBox.confirm(
-      `轮换后旧凭据立即失效，使用它的客户端需要更新。新凭据仅显示一次，请及时保存。${current.status === 1 ? '这枚 Key 目前已禁用，轮换不会自动启用。' : ''}`,
-      '轮换 API Key 凭据',
-      { type: 'warning', confirmButtonText: '确认轮换', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
-
+  if (!current || actionBusy.value || loading.value || uncertain.value) return
   actionBusy.value = true
+  const valid = scope.capture()
+
   try {
+    try {
+      await ElMessageBox.confirm(
+        `轮换后旧凭据立即失效，新凭据仅显示一次，请及时保存。${current.status === 1 ? '这枚 Key 目前已禁用，轮换不会自动启用。' : ''}`,
+        '轮换 API Key 凭据',
+        { confirmButtonText: '确认轮换', cancelButtonText: '取消' },
+      )
+    } catch {
+      return
+    }
+    if (!valid()) return
+
     const result = await rotateApiKey(current.id, current.publicId)
+    if (!valid()) return
+    ++loadVersion
     apiKey.value = {
       ...current,
       publicId: result.publicId,
@@ -164,29 +285,34 @@ async function rotate() {
     rotatedKey.value = result.apiKey
     revealOpen.value = true
   } catch (error) {
-    if (isAxiosError(error) && (!error.response || error.response.status >= 500)) {
-      ElMessage.error('轮换结果可能已生效。请先刷新详情核对 Public ID；不要直接重试。若已变化，需再次轮换才能取得新凭据')
-    } else {
-      ElMessage.error(apiKeyErrorMessage(error, '轮换失败，请稍后重试'))
-    }
+    if (!valid() || isCancel(error)) return
+    uncertain.value = needsReconcile(error)
+    ElMessage.error(
+      mutationUnknown(error)
+        ? '轮换结果可能已生效。请先刷新详情核对 Public ID；不要直接重试。若已变化，需再次轮换才能取得新凭据'
+        : apiKeyErrorMessage(error, '操作失败，请刷新核对后重试'),
+    )
   } finally {
-    actionBusy.value = false
+    if (valid()) actionBusy.value = false
   }
 }
 
 async function copyRotatedKey() {
   if (!rotatedKey.value) return
+  const valid = scope.capture()
   try {
     await navigator.clipboard.writeText(rotatedKey.value)
+    if (!valid()) return
     copied.value = true
     ElMessage.success('已复制，请妥善保存')
     if (copyResetTimer) clearTimeout(copyResetTimer)
-    copyResetTimer = setTimeout(() => { copied.value = false }, 2000)
+    copyResetTimer = setTimeout(() => {
+      copied.value = false
+    }, 2000)
   } catch {
-    ElMessage.error('复制失败，请点击显示后手动选择并复制')
+    if (valid()) ElMessage.error('复制失败，请手动复制')
   }
 }
-
 function closeReveal() {
   if (!savedConfirmation.value) return
   rotatedKey.value = ''
@@ -195,42 +321,11 @@ function closeReveal() {
   revealOpen.value = false
 }
 
-async function remove() {
-  const current = apiKey.value
-  if (!current || actionBusy.value) return
-  try {
-    await ElMessageBox.prompt(
-      `删除后，这枚 Key 将无法继续使用。请输入「${current.name}」以确认。`,
-      '删除 API Key',
-      {
-        type: 'warning',
-        inputPlaceholder: '输入 Key 名称',
-        inputValidator: (value) => value === current.name || '名称不一致，请重新输入',
-        confirmButtonText: '确认删除',
-        cancelButtonText: '取消',
-      },
-    )
-  } catch {
-    return
-  }
-
-  actionBusy.value = true
-  try {
-    await deleteApiKey(current.applicationId, current.id)
-    ElMessage.success('API Key 已删除')
-    await router.replace({ name: 'application-detail', params: { id: current.applicationId }, query: { tab: 'keys' } })
-  } catch (error) {
-    ElMessage.error(apiKeyErrorMessage(error, '删除失败，请稍后重试'))
-  } finally {
-    actionBusy.value = false
-  }
-}
-
 onMounted(() => {
   void load()
   window.addEventListener('beforeunload', warnBeforeUnload)
   removeNavigationGuard = router.beforeEach(() => {
-    if (!rotatedKey.value || savedConfirmation.value) return
+    if (!scope.authenticated() || !rotatedKey.value || savedConfirmation.value) return
     ElMessage.warning('请先保存完整 API Key，并勾选确认后再离开')
     return false
   })
@@ -241,11 +336,14 @@ onUnmounted(() => {
   window.removeEventListener('beforeunload', warnBeforeUnload)
   removeNavigationGuard?.()
 })
-watch([() => route.params.applicationId, () => route.params.keyId], () => { void load() })
+watch([() => route.params.applicationId, () => route.params.keyId], () => {
+  void load()
+})
 </script>
 
 <template>
   <section class="key-detail-page" aria-labelledby="key-title">
+    <div v-if="uncertain" class="detail-card error-card" role="alert"><p>请先刷新核对最新资料，再决定下一步操作。</p><el-button @click="load">刷新核对</el-button></div>
     <RouterLink class="back-link" :to="{ name: 'application-detail', params: { id: route.params.applicationId }, query: { tab: 'keys' } }"><el-icon :size="16" aria-hidden="true"><ArrowLeft /></el-icon>返回 API Keys</RouterLink>
 
     <div v-if="loading" class="detail-card" aria-busy="true"><el-skeleton :rows="7" animated /></div>
@@ -264,10 +362,10 @@ watch([() => route.params.applicationId, () => route.params.keyId], () => { void
           <p>管理这枚密钥的信息、短链接与调用统计。</p>
         </div>
         <div class="heading-actions" role="group" aria-label="API Key 操作">
-          <el-tooltip content="编辑名称" placement="top"><el-button class="icon-action" :disabled="actionBusy" aria-label="编辑 Key 名称" @click="rename"><el-icon :size="18" aria-hidden="true"><EditPen /></el-icon></el-button></el-tooltip>
-          <el-tooltip content="轮换凭据" placement="top"><el-button class="icon-action rotate-action" :disabled="actionBusy" aria-label="轮换凭据" @click="rotate"><el-icon :size="18" aria-hidden="true"><Refresh /></el-icon></el-button></el-tooltip>
-          <el-tooltip :content="apiKey.status === 0 ? '禁用 Key' : '启用 Key'" placement="top"><el-button class="icon-action warning-action" :disabled="actionBusy" :aria-label="apiKey.status === 0 ? '禁用 Key' : '启用 Key'" @click="toggleStatus"><el-icon :size="18" aria-hidden="true"><CircleClose v-if="apiKey.status === 0" /><CircleCheck v-else /></el-icon></el-button></el-tooltip>
-          <el-tooltip content="删除 Key" placement="top"><el-button class="icon-action danger-action" :disabled="actionBusy" aria-label="删除 Key" @click="remove"><el-icon :size="18" aria-hidden="true"><Delete /></el-icon></el-button></el-tooltip>
+          <el-tooltip content="编辑名称" placement="top"><el-button class="icon-action" :disabled="actionBusy || loading || uncertain" aria-label="编辑 Key 名称" @click="rename"><el-icon :size="18" aria-hidden="true"><EditPen /></el-icon></el-button></el-tooltip>
+          <el-tooltip content="轮换凭据" placement="top"><el-button class="icon-action rotate-action" :disabled="actionBusy || loading || uncertain" aria-label="轮换凭据" @click="rotate"><el-icon :size="18" aria-hidden="true"><Refresh /></el-icon></el-button></el-tooltip>
+          <el-tooltip :content="apiKey.status === 0 ? '禁用 Key' : '启用 Key'" placement="top"><el-button class="icon-action warning-action" :disabled="actionBusy || loading || uncertain" :aria-label="apiKey.status === 0 ? '禁用 Key' : '启用 Key'" @click="toggleStatus"><el-icon :size="18" aria-hidden="true"><CircleClose v-if="apiKey.status === 0" /><CircleCheck v-else /></el-icon></el-button></el-tooltip>
+          <el-tooltip content="删除 Key" placement="top"><el-button class="icon-action danger-action" :disabled="actionBusy || loading || uncertain" aria-label="删除 Key" @click="remove"><el-icon :size="18" aria-hidden="true"><Delete /></el-icon></el-button></el-tooltip>
         </div>
       </div>
 

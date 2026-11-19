@@ -66,6 +66,9 @@ jobs:
           scripts/test-auth-session-login.mjs
           scripts/test-auth-session-invalidation.mjs
           scripts/test-auth-session-renewal.mjs
+          scripts/test-request-gate.mjs
+          scripts/test-network-deadline.mjs
+          scripts/test-screenshot-submission.mjs
 
       - name: 桌面 Renderer 类型检查与生产构建
         working-directory: ./nexus-desktop
@@ -93,6 +96,7 @@ jobs:
           node --test
           scripts/test-auth-session.cjs
           scripts/test-management-contracts.cjs
+          scripts/test-management-lifecycle.cjs
 
   backend:
     runs-on: ubuntu-latest

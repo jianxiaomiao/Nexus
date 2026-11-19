@@ -1,3 +1,5 @@
+import { MutationResultUnknown } from './mutation'
+import { checkedListPage } from './listPage'
 import { http, type ApiResponse } from './http'
 import type { ListPage, ListPageQuery } from './listPage'
 
@@ -21,6 +23,7 @@ export interface RotatedApiKey extends Omit<ApiKey, 'createdAt'> {
 }
 
 export interface UpdateApiKeyRequest {
+  expectedUpdatedAt?: string
   applicationId: number
   apiKeyId: number
   name?: string
@@ -29,17 +32,20 @@ export interface UpdateApiKeyRequest {
 
 export async function listApiKeys(applicationId: number, query: ListPageQuery & { apiKeyId?: number } = {}): Promise<ListPage<ApiKey>> {
   const response = await http.get<ApiResponse<ListPage<ApiKey>>>(`/apiKey/${applicationId}`, { params: query })
-  return response.data.data
+  return checkedListPage(response.data.data)
 }
 
 export async function createApiKey(applicationId: number, name: string): Promise<CreatedApiKey> {
   const response = await http.post<ApiResponse<CreatedApiKey>>('/apiKey/create', { applicationId, name })
+  if (response.data?.code !== 'SUCCESS' || typeof response.data.data?.apiKey !== 'string' || !response.data.data.apiKey) throw new MutationResultUnknown()
   return response.data.data
 }
 
 export async function updateApiKey(request: UpdateApiKeyRequest): Promise<ApiKey> {
   const response = await http.put<ApiResponse<ApiKey>>('/apiKey', request)
-  return response.data.data
+  const data = response.data.data
+  if (!data || data.id !== request.apiKeyId || data.applicationId !== request.applicationId || typeof data.updatedAt !== 'string') throw new MutationResultUnknown()
+  return data
 }
 
 export async function deleteApiKey(applicationId: number, apiKeyId: number): Promise<void> {
@@ -48,5 +54,6 @@ export async function deleteApiKey(applicationId: number, apiKeyId: number): Pro
 
 export async function rotateApiKey(apiKeyId: number, expectedPublicId: string): Promise<RotatedApiKey> {
   const response = await http.post<ApiResponse<RotatedApiKey>>(`/apiKey/${apiKeyId}/rotate`, { expectedPublicId })
+  if (response.data?.code !== 'SUCCESS' || typeof response.data.data?.apiKey !== 'string' || !response.data.data.apiKey) throw new MutationResultUnknown()
   return response.data.data
 }

@@ -20,6 +20,8 @@ public class ScreenshotJob {
     private String jobId;
     private Long apiKeyId;
     private String targetUrl;
+    private String submissionKey;
+    private LocalDateTime submissionExpiresAt;
     private Integer status;
     private Integer attemptCount;
     private String runToken;

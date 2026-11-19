@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { usePageScope } from '@/utils/pageScope'
+import { mutationUnknown, needsReconcile, unknownMutationMessage } from '@/api/mutation'
+import { isCancel } from 'axios'
 import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { isAxiosError } from 'axios'
@@ -32,10 +35,30 @@ let copyResetTimer: ReturnType<typeof setTimeout> | undefined
 let loadVersion = 0
 let removeNavigationGuard: (() => void) | undefined
 
+const uncertain = ref(false)
+const scope = usePageScope(
+  () => props.application.id,
+  () => {
+    if (actionBusy.value) ElMessageBox.close()
+    actionBusy.value = false
+    uncertain.value = false
+    ++loadVersion
+    revealedSecret.value = ''
+    revealOpen.value = false
+    savedConfirmation.value = false
+    webhook.value = null
+    form.url = ''
+    editingUrl.value = false
+    copied.value = false
+    if (copyResetTimer) clearTimeout(copyResetTimer)
+  },
+)
+
 function normalizedWebhookUrl(value: string): string | null {
   try {
     const url = new URL(value.trim())
-    if (url.protocol !== 'https:' || !url.hostname || url.username || url.password || url.hash) return null
+    if (url.protocol !== 'https:' || !url.hostname || url.username || url.password || url.hash)
+      return null
     return url.toString()
   } catch {
     return null
@@ -43,24 +66,28 @@ function normalizedWebhookUrl(value: string): string | null {
 }
 
 function warnBeforeUnload(event: BeforeUnloadEvent) {
-  if (!revealedSecret.value || savedConfirmation.value) return
+  if (!scope.authenticated() || !revealedSecret.value || savedConfirmation.value) return
   event.preventDefault()
 }
 
 async function load() {
+  if (actionBusy.value) return
+  const valid = scope.capture()
   const version = ++loadVersion
   loading.value = true
   errorMessage.value = ''
   try {
     const result = await queryApplicationWebhook(props.application.id)
-    if (version !== loadVersion) return
+    if (!valid() || version !== loadVersion) return
+    uncertain.value = false
     webhook.value = result
     form.url = result?.url ?? ''
     editingUrl.value = false
   } catch (error) {
-    if (version === loadVersion) errorMessage.value = webhookErrorMessage(error, '加载 Webhook 配置失败，请稍后重试')
+    if (valid() && version === loadVersion)
+      errorMessage.value = webhookErrorMessage(error, '加载 Webhook 配置失败，请稍后重试')
   } finally {
-    if (version === loadVersion) loading.value = false
+    if (valid() && version === loadVersion) loading.value = false
   }
 }
 
@@ -72,129 +99,135 @@ function openSecret(secret: string, title: string) {
   revealOpen.value = true
 }
 
+async function mutate(work: (valid: () => boolean) => Promise<void>) {
+  if (actionBusy.value || loading.value || uncertain.value) return
+  actionBusy.value = true
+  const valid = scope.capture()
+  try {
+    await work(valid)
+  } catch (error) {
+    if (!valid() || isCancel(error)) return
+    uncertain.value =
+      needsReconcile(error) ||
+      (isAxiosError(error) && error.response?.data?.code === 'RESOURCE_CHANGED')
+    ElMessage.error(
+      mutationUnknown(error)
+        ? unknownMutationMessage
+        : webhookErrorMessage(error, '操作失败，请刷新核对后重试'),
+    )
+  } finally {
+    if (valid()) actionBusy.value = false
+  }
+}
+
 async function createWebhook() {
-  if (actionBusy.value) return
   const url = normalizedWebhookUrl(form.url)
   if (!url) {
     ElMessage.error('请输入不含账号和 Fragment 的完整 HTTPS 地址')
     return
   }
-
-  actionBusy.value = true
-  try {
+  await mutate(async (valid) => {
     const result = await createApplicationWebhook(props.application.id, url)
+    if (!valid()) return
+    ++loadVersion
     const { secret, ...configuration } = result
     webhook.value = configuration
     form.url = configuration.url
     openSecret(secret, '保存 Webhook Secret')
-  } catch (error) {
-    if (isAxiosError(error) && (!error.response || error.response.status >= 500)) {
-      ElMessage.error('创建结果暂时无法确认。请先刷新配置；如果配置已存在但未保存 Secret，请执行一次轮换')
-    } else {
-      ElMessage.error(webhookErrorMessage(error, '创建 Webhook 失败，请稍后重试'))
-    }
-  } finally {
-    actionBusy.value = false
-  }
+  })
 }
-
 async function saveUrl() {
   const current = webhook.value
-  if (!current || actionBusy.value) return
   const url = normalizedWebhookUrl(form.url)
+  if (!current) return
   if (!url) {
     ElMessage.error('请输入不含账号和 Fragment 的完整 HTTPS 地址')
     return
   }
-  if (url === current.url) {
-    editingUrl.value = false
-    return
-  }
-
-  actionBusy.value = true
-  try {
-    webhook.value = await updateApplicationWebhook(props.application.id, { url })
-    form.url = webhook.value.url
+  await mutate(async (valid) => {
+    const result = await updateApplicationWebhook(props.application.id, {
+      url,
+      expectedUpdatedAt: current.updatedAt,
+    })
+    if (!valid()) return
+    ++loadVersion
+    webhook.value = result
+    form.url = result.url
     editingUrl.value = false
     ElMessage.success('回调 URL 已更新；尚未开始的投递会使用新地址')
-  } catch (error) {
-    ElMessage.error(webhookErrorMessage(error, '修改回调 URL 失败，请稍后重试'))
-  } finally {
-    actionBusy.value = false
-  }
+  })
 }
-
 function cancelUrlEdit() {
   form.url = webhook.value?.url ?? ''
   editingUrl.value = false
 }
-
 async function toggleStatus() {
   const current = webhook.value
-  if (!current || actionBusy.value) return
-  const disabling = current.status === 0
-  try {
-    await ElMessageBox.confirm(
-      disabling
-        ? '暂停后不会取消待投递事件。恢复前 Nexus 不会发送这些通知。'
-        : '恢复后，待投递事件会继续处理，但不保证立即发送。',
-      disabling ? '暂停 Webhook 投递' : '恢复 Webhook 投递',
-      { type: disabling ? 'warning' : 'info', confirmButtonText: disabling ? '确认暂停' : '确认恢复', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
-
-  actionBusy.value = true
-  try {
-    webhook.value = await updateApplicationWebhook(props.application.id, { status: disabling ? 1 : 0 })
-    ElMessage.success(disabling ? 'Webhook 投递已暂停' : 'Webhook 投递已恢复')
-  } catch (error) {
-    ElMessage.error(webhookErrorMessage(error, '修改 Webhook 状态失败，请稍后重试'))
-  } finally {
-    actionBusy.value = false
-  }
+  if (!current) return
+  await mutate(async (valid) => {
+    try {
+      await ElMessageBox.confirm(
+        '暂停不取消待投递事件，恢复后继续处理。',
+        current.status === 0 ? '暂停 Webhook 投递' : '恢复 Webhook 投递',
+        {
+          confirmButtonText: current.status === 0 ? '确认暂停' : '确认恢复',
+          cancelButtonText: '取消',
+        },
+      )
+    } catch {
+      return
+    }
+    if (!valid()) return
+    const result = await updateApplicationWebhook(props.application.id, {
+      status: current.status === 0 ? 1 : 0,
+      expectedUpdatedAt: current.updatedAt,
+    })
+    if (!valid()) return
+    ++loadVersion
+    webhook.value = result
+    ElMessage.success(current.status === 0 ? 'Webhook 投递已暂停' : 'Webhook 投递已恢复')
+  })
 }
-
 async function rotateSecret() {
-  if (!webhook.value || actionBusy.value || revealOpen.value) return
-  try {
-    await ElMessageBox.confirm(
-      '新 Secret 只展示一次。轮换后的下一次投递会使用新 Secret，请先准备好安全保存并更新接收端。',
-      '轮换 Webhook Secret',
-      { type: 'warning', confirmButtonText: '确认轮换', cancelButtonText: '取消' },
+  const current = webhook.value
+  if (!current || revealOpen.value) return
+  await mutate(async (valid) => {
+    try {
+      await ElMessageBox.confirm(
+        '新 Secret 仅显示一次，请准备保存并更新接收端。',
+        '轮换 Webhook Secret',
+        { confirmButtonText: '确认轮换', cancelButtonText: '取消' },
+      )
+    } catch {
+      return
+    }
+    if (!valid()) return
+    const result = await rotateApplicationWebhookSecret(
+      props.application.id,
+      current.currentSecretVersion,
     )
-  } catch {
-    return
-  }
-
-  actionBusy.value = true
-  try {
-    const result = await rotateApplicationWebhookSecret(props.application.id, webhook.value.currentSecretVersion)
+    if (!valid()) return
+    ++loadVersion
     webhook.value = result.webhook
     form.url = result.webhook.url
     openSecret(result.secret, '保存新的 Webhook Secret')
-  } catch (error) {
-    if (isAxiosError(error) && (!error.response || error.response.status >= 500)) {
-      ElMessage.error('轮换结果可能已经生效。请刷新配置核对 Secret 版本，不要直接重试')
-    } else {
-      ElMessage.error(webhookErrorMessage(error, '轮换 Secret 失败，请稍后重试'))
-    }
-  } finally {
-    actionBusy.value = false
-  }
+  })
 }
 
 async function copySecret() {
   if (!revealedSecret.value) return
+  const valid = scope.capture()
   try {
     await navigator.clipboard.writeText(revealedSecret.value)
+    if (!valid()) return
     copied.value = true
     ElMessage.success('已复制，请妥善保存')
     if (copyResetTimer) clearTimeout(copyResetTimer)
-    copyResetTimer = setTimeout(() => { copied.value = false }, 2000)
+    copyResetTimer = setTimeout(() => {
+      copied.value = false
+    }, 2000)
   } catch {
-    ElMessage.error('复制失败，请手动选择并复制 Secret')
+    if (valid()) ElMessage.error('复制失败，请手动选择并复制 Secret')
   }
 }
 
@@ -209,7 +242,7 @@ onMounted(() => {
   void load()
   window.addEventListener('beforeunload', warnBeforeUnload)
   removeNavigationGuard = router.beforeEach(() => {
-    if (!revealedSecret.value || savedConfirmation.value) return
+    if (!scope.authenticated() || !revealedSecret.value || savedConfirmation.value) return
     ElMessage.warning('请先保存完整 Secret，并勾选确认后再离开')
     return false
   })
@@ -222,11 +255,17 @@ onBeforeUnmount(() => {
   removeNavigationGuard?.()
 })
 
-watch(() => props.application.id, () => { void load() })
+watch(
+  () => props.application.id,
+  () => {
+    void load()
+  },
+)
 </script>
 
 <template>
   <section class="webhook-panel" aria-labelledby="webhook-title">
+    <div v-if="uncertain" class="webhook-card webhook-error" role="alert"><p>请先刷新核对最新资料，再决定下一步操作。</p><el-button @click="load">刷新核对</el-button></div>
     <div v-if="loading" class="webhook-card" aria-busy="true"><el-skeleton :rows="6" animated /></div>
     <div v-else-if="errorMessage" class="webhook-card webhook-error" role="alert">
       <h2 id="webhook-title">暂时无法加载 Webhook</h2>
@@ -242,7 +281,7 @@ watch(() => props.application.id, () => { void load() })
           <el-input v-model="form.url" class="url-input" placeholder="https://api.example.com/nexus/webhooks" :disabled="actionBusy" />
           <p class="field-help">仅支持 HTTPS；域名及全部解析地址必须允许公网访问。</p>
         </el-form-item>
-        <el-button type="primary" native-type="submit" :loading="actionBusy">创建 Webhook</el-button>
+        <el-button type="primary" native-type="submit" :loading="actionBusy" :disabled="uncertain">创建 Webhook</el-button>
       </el-form>
       <div class="behavior-note" role="note">
         <p>创建后将生成签名 Secret</p>
@@ -258,7 +297,7 @@ watch(() => props.application.id, () => { void load() })
           <span class="webhook-status" :class="webhook.status === 0 ? 'is-enabled' : 'is-paused'">
             <span aria-hidden="true" />{{ webhook.status === 0 ? '已启用' : '已暂停' }}
           </span>
-          <el-button :loading="actionBusy" @click="toggleStatus">{{ webhook.status === 0 ? '暂停投递' : '恢复投递' }}</el-button>
+          <el-button :loading="actionBusy" :disabled="uncertain" @click="toggleStatus">{{ webhook.status === 0 ? '暂停投递' : '恢复投递' }}</el-button>
         </div>
       </div>
 
@@ -272,7 +311,7 @@ watch(() => props.application.id, () => { void load() })
         </div>
         <div v-if="editingUrl" class="section-actions">
           <el-button :disabled="actionBusy" @click="cancelUrlEdit">取消</el-button>
-          <el-button type="primary" :loading="actionBusy" @click="saveUrl">保存 URL</el-button>
+          <el-button type="primary" :loading="actionBusy" :disabled="uncertain" @click="saveUrl">保存 URL</el-button>
         </div>
         <el-button v-else @click="editingUrl = true">修改 URL</el-button>
       </section>
@@ -283,7 +322,7 @@ watch(() => props.application.id, () => { void load() })
           <strong>Secret 版本 {{ webhook.currentSecretVersion }}</strong>
           <p>完整 Secret 创建后无法再次查看。</p>
         </div>
-        <el-button class="rotate-button" :loading="actionBusy" @click="rotateSecret">轮换 Secret</el-button>
+        <el-button class="rotate-button" :loading="actionBusy" :disabled="uncertain" @click="rotateSecret">轮换 Secret</el-button>
       </section>
 
       <section class="webhook-section event-section" aria-labelledby="webhook-event-title">

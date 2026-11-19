@@ -73,6 +73,23 @@ import static com.nexus.common.web.RequestFailureLogContext.Category.SYSTEM_FAIL
 @RestControllerAdvice
 public class GlobalExceptionHandler{
 
+    @ResponseStatus(HttpStatus.CONFLICT)
+    @ExceptionHandler(ResourceChangedException.class)
+    public ApiResponse<Void> handleResourceChanged(ResourceChangedException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.CONFLICT, "RESOURCE_CHANGED", exception.getMessage(), null);
+    }
+
+    @ExceptionHandler(com.nexus.job.exception.ScreenshotSubmissionException.class)
+    public ResponseEntity<ApiResponse<Void>> handleSubmission(com.nexus.job.exception.ScreenshotSubmissionException exception, HttpServletRequest request) {
+        HttpStatus status = switch (exception.kind()) {
+            case INVALID -> HttpStatus.BAD_REQUEST;
+            case CONFLICT -> HttpStatus.CONFLICT;
+            case EXPIRED -> HttpStatus.GONE;
+        };
+        return ResponseEntity.status(status).body(handled(request, exception, status,
+                "SCREENSHOT_SUBMISSION_" + exception.kind().name(), exception.getMessage(), null));
+    }
+
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ResponseStatus(HttpStatus.TOO_MANY_REQUESTS)

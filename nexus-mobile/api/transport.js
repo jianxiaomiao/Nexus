@@ -1,6 +1,7 @@
 import { SessionError } from '../auth/session.js'
 
 const knownCodes = new Set([
+	'RESOURCE_CHANGED',
 	'AUTH_INVALID_CREDENTIALS',
 	'AUTH_EMAIL_ALREADY_REGISTERED',
 	'AUTH_ACCOUNT_FORBIDDEN',

@@ -81,6 +81,7 @@ public class ApplicationService {
         return new ListPage<>(applications.getTotal(), applications.getCurrent(), applications.getSize(), responses);
     }
 
+    @Transactional
     public ApplicationResponse updateMyApplication(Long userId, UpdateApplicationRequest updateApplicationRequest){
         int affetRow = 0;
         if (updateApplicationRequest.id() == null || updateApplicationRequest.id() <= 0) {
@@ -101,6 +102,17 @@ public class ApplicationService {
             throw new InvalidApplicationUpdateException("应用状态只能是 0 或 1");
         }
 
+        Application before = applicationMapper.selectOne(Wrappers.<Application>lambdaQuery()
+                .eq(Application::getId, updateApplicationRequest.id())
+                .eq(Application::getOwnerUserId, userId).eq(Application::getIsDeleted, 0).last("FOR UPDATE"));
+        if (before == null) throw new ApplicationNotFoundException();
+        if (updateApplicationRequest.expectedUpdatedAt() != null &&
+                !updateApplicationRequest.expectedUpdatedAt().equals(before.getUpdatedAt().toInstant(ZoneOffset.UTC))) {
+            throw new com.nexus.common.web.ResourceChangedException();
+        }
+        LocalDateTime updated = utcNow();
+        if (!updated.isAfter(before.getUpdatedAt())) updated = before.getUpdatedAt().plusNanos(1_000_000);
+
         LambdaUpdateWrapper<Application> lambdaUpdateWrapper = Wrappers.lambdaUpdate();
         lambdaUpdateWrapper
                 .eq(Application::getId,updateApplicationRequest.id())
@@ -108,7 +120,7 @@ public class ApplicationService {
                 .eq(Application::getIsDeleted,0)
                 .set(name != null, Application::getName, name)
                 .set(status != null, Application::getStatus, status)
-                .set(Application::getUpdatedAt, utcNow());
+                .set(Application::getUpdatedAt, updated);
         try {
             affetRow =applicationMapper.update(null, lambdaUpdateWrapper);
         }catch (DuplicateKeyException exception){

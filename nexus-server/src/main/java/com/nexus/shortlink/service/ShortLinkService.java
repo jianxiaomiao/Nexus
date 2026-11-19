@@ -55,14 +55,21 @@ public class ShortLinkService {
         if (status != null && status != 0 && status != 1) {
             throw new InvalidShortLinkRequestException("状态只能是 0 或 1");
         }
+        if (request.expectedUpdatedAt() != null && !request.expectedUpdatedAt().equals(asInstant(link.getUpdatedAt()))) {
+            throw new com.nexus.common.web.ResourceChangedException();
+        }
+        LocalDateTime updated = utc(clock.instant().truncatedTo(java.time.temporal.ChronoUnit.MILLIS));
+        if (link.getUpdatedAt() != null && !updated.isAfter(link.getUpdatedAt())) updated = link.getUpdatedAt().plusNanos(1_000_000);
         int changed = shortLinkMapper.update(null, Wrappers.<ShortLink>lambdaUpdate()
                 .eq(ShortLink::getId, request.id())
+                .eq(request.expectedUpdatedAt() != null, ShortLink::getUpdatedAt, link.getUpdatedAt())
                 .eq(ShortLink::getApiKeyId, link.getApiKeyId())
                 .eq(ShortLink::getIsDeleted, 0)
                 .set(name != null, ShortLink::getName, name)
                 .set(status != null, ShortLink::getStatus, status)
-                .set(ShortLink::getUpdatedAt, utc(clock.instant())));
+                .set(ShortLink::getUpdatedAt, updated));
         if (changed == 0) {
+            if (request.expectedUpdatedAt() != null) throw new com.nexus.common.web.ResourceChangedException();
             throw new ShortLinkNotFoundException();
         }
         return toResponse(shortLinkMapper.selectById(request.id()));

@@ -202,6 +202,7 @@ export default {
 			loading: false,
 			tab: 'info',
 			action: '',
+			actionUpdatedAt: undefined,
 			formName: '',
 			deleteName: '',
 			fieldError: '',
@@ -217,10 +218,7 @@ export default {
 			return (
 				{
 					rename: '编辑 API Key',
-					status:
-						this.record?.status === 0
-							? '禁用 API Key'
-							: '启用 API Key',
+					status: this.record?.status === 0 ? '禁用 API Key' : '启用 API Key',
 					delete: '删除 API Key',
 					rotate: '轮换 API Key',
 				}[this.action] || '确认操作'
@@ -286,16 +284,17 @@ export default {
 				if (this.visible && version === this.viewVersion) {
 					this.record = null
 					this.app = null
-					this.error = await api.showError(e)
+					const message = await api.showError(e)
+					if (this.visible && version === this.viewVersion) this.error = message
 				}
 			} finally {
 				if (version === this.viewVersion) this.loading = false
 			}
 		},
 		openAction(kind) {
-			if (this.busy || this.loading || this.secret || this.uncertain)
-				return
+			if (this.busy || this.loading || this.secret || this.uncertain) return
 			this.action = kind
+			this.actionUpdatedAt = this.record.updatedAt
 			this.formName = this.record.name
 			this.deleteName = ''
 			this.fieldError = ''
@@ -307,13 +306,11 @@ export default {
 			return !this.fieldError
 		},
 		async submitAction() {
-			if (this.busy || this.loading || this.uncertain || !this.record)
-				return
+			if (this.busy || this.loading || this.uncertain || !this.record) return
 			const kind = this.action,
 				version = this.viewVersion
 			if (kind === 'rename' && !this.validateName()) return
-			if (kind === 'delete' && this.deleteName !== this.record.name)
-				return
+			if (kind === 'delete' && this.deleteName !== this.record.name) return
 			if (!['rename', 'status', 'delete', 'rotate'].includes(kind)) return
 			this.busy = true
 			this.actionError = ''
@@ -322,14 +319,25 @@ export default {
 					await api.deleteKey(this.applicationId, this.id)
 					this.action = ''
 					this.busy = false
-					if (this.visible) uni.navigateBack()
+					if (this.visible && version === this.viewVersion) {
+						this.record = null
+						this.app = null
+						uni.navigateBack({
+							fail: () => {
+								if (this.visible)
+									uni.reLaunch({
+										url: '/pages/application-detail/application-detail?id=' + this.applicationId,
+										fail: () => {
+											this.error = '已删除，但未能返回列表，请重新打开管理页。'
+										},
+									})
+							},
+						})
+					}
 					return
 				}
 				if (kind === 'rotate') {
-					const result = await api.rotateKey(
-						this.id,
-						this.rotationPublicId,
-					)
+					const result = await api.rotateKey(this.id, this.rotationPublicId)
 					if (!this.visible || version !== this.viewVersion) {
 						this.uncertain = true
 						this.notice = '轮换结果请刷新核对，新完整 Key 未保留。'
@@ -343,8 +351,11 @@ export default {
 						this.applicationId,
 						this.id,
 						kind === 'rename'
-							? { name: this.formName.trim() }
-							: { status: this.record.status === 0 ? 1 : 0 },
+							? { name: this.formName.trim(), expectedUpdatedAt: this.actionUpdatedAt }
+							: {
+									status: this.record.status === 0 ? 1 : 0,
+									expectedUpdatedAt: this.actionUpdatedAt,
+								},
 					)
 					if (!this.visible || version !== this.viewVersion) return
 					this.record = { ...this.record, ...result }
@@ -354,8 +365,11 @@ export default {
 			} catch (e) {
 				this.uncertain =
 					e.code === 'MUTATION_RESULT_UNKNOWN' ||
-					e.code === 'API_KEY_ROTATION_CONFLICT'
-				this.actionError = await api.showError(e)
+					e.code === 'API_KEY_ROTATION_CONFLICT' ||
+					e.code === 'RESOURCE_CHANGED'
+				const message = await api.showError(e)
+				if (!this.visible || version !== this.viewVersion) return
+				this.actionError = message
 				if (this.uncertain) this.notice = this.actionError
 			} finally {
 				this.busy = false

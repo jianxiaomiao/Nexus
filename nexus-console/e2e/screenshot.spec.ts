@@ -14,6 +14,13 @@ async function openScreenshot(page: Page, mode: 'sync' | 'async' = 'sync') {
   await expect(page).toHaveURL(/endpoint=web-screenshot$/)
   if (mode === 'sync') await page.getByRole('button', { name: /同步截图/ }).click()
 }
+async function reconcileIfNeeded(page: Page) {
+  const recover = page.getByRole('button', { name: '核对后开始新操作', exact: true })
+  if (await recover.isVisible()) {
+    await recover.click()
+    await page.getByRole('button', { name: '已核对，允许新操作', exact: true }).click()
+  }
+}
 async function fillRequest(page: Page) {
   await page.getByLabel('API Key', { exact: true }).fill(fakeKey)
   await page.getByLabel('网页 URL', { exact: true }).fill(articleUrl)
@@ -89,6 +96,28 @@ async function routeAsyncSubmission(page: Page) {
     })
   })
 }
+
+test('恢复请求过期后保留原标识，只有明确核对才能开始新操作', async ({ page }) => {
+  await openScreenshot(page, 'async')
+  const keys: string[] = []
+  await page.route('**/v1/web/screenshot-jobs', async route => {
+    keys.push(route.request().headers()['idempotency-key']!)
+    await route.fulfill({ status: 410, json: { code: 'SCREENSHOT_SUBMISSION_EXPIRED', data: null } })
+  })
+  await fillRequest(page)
+  const send = page.getByRole('button', { name: '创建异步任务', exact: true })
+  await send.click()
+  await expect(page.locator('.playground-status')).toContainText('410')
+  await expect(page.getByRole('button', { name: '核对后开始新操作', exact: true })).toBeVisible()
+  await send.click()
+  await expect.poll(() => keys.length).toBe(2)
+  expect(keys[1]).toBe(keys[0])
+  await page.getByRole('button', { name: '核对后开始新操作', exact: true }).click()
+  await page.getByRole('button', { name: '已核对，允许新操作', exact: true }).click()
+  await send.click()
+  await expect.poll(() => keys.length).toBe(3)
+  expect(keys[2]).not.toBe(keys[0])
+})
 
 test('PNG 成功使用 ApiKey 且不带 Cookie，预览放大下载与两种示例正确', async ({ page }) => {
   await openScreenshot(page)
@@ -262,6 +291,7 @@ test('401/403 和业务错误保留真实 JSON，清理旧 PNG 且不影响管�
     [400, 'INVALID_SCREENSHOT_REQUEST'], [422, 'SCREENSHOT_LIMIT_EXCEEDED'], [502, 'SCREENSHOT_PAGE_FETCH_FAILED'],
     [503, 'SCREENSHOT_BUSY'], [503, 'SCREENSHOT_ENGINE_UNAVAILABLE'], [504, 'SCREENSHOT_TIMEOUT']] as const) {
     status = nextStatus; code = nextCode
+    await reconcileIfNeeded(page)
     await page.getByRole('button', { name: '生成同步截图', exact: true }).click()
     await expect(page.locator('.playground-status')).toContainText(String(status))
     await expect(page.locator('.playground-response .playground-code')).toContainText(code)
@@ -302,12 +332,14 @@ test('伪装 PNG、HTML/SVG 和超大响应不作为可执行预览，损坏图�
     { contentType: 'image/png', body: Buffer.from('not a PNG') }, { contentType: 'image/png', body: oversized },
     { contentType: 'application/json', body: Buffer.from(JSON.stringify({ code: 'SUCCESS', data: fakeKey })) }]) {
     response = next
+    await reconcileIfNeeded(page)
     await page.getByRole('button', { name: '生成同步截图', exact: true }).click()
     await expect(page.locator('.playground-result-message')).toContainText('服务器没有返回有效的 PNG')
     await expect(page.locator('.playground-screenshot-result')).toHaveCount(0)
     await expect(page.locator('.playground-response')).not.toContainText(fakeKey)
   }
   response = { contentType: 'image/png', body: validPng.subarray(0, 8) }
+  await reconcileIfNeeded(page)
   await page.getByRole('button', { name: '生成同步截图', exact: true }).click()
   await expect(page.locator('.playground-image-error')).toContainText('图片无法解码')
   await expect(page.getByRole('button', { name: '下载 PNG', exact: true })).toBeDisabled()
@@ -335,6 +367,9 @@ test('网络失败有提示，切换 API 取消未完成请求且不接受过时
   await page.route('**/v1/web/screenshot', (route) => route.abort('connectionrefused'))
   await page.getByRole('button', { name: '生成同步截图', exact: true }).click()
   await expect(page.locator('.playground-result-message')).toContainText('无法连接服务器')
+  await expect(page.locator('.playground-result-message')).toContainText('操作结果尚未确认')
+  await page.getByRole('button', { name: '核对后开始新操作', exact: true }).click()
+  await page.getByRole('button', { name: '已核对，允许新操作', exact: true }).click()
   await page.unroute('**/v1/web/screenshot')
   const png = await createPng(page)
   let release: (() => void) | undefined

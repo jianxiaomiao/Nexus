@@ -1,6 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { queryUsage, queryUsageEvents, usageErrorMessage, type UsageEventPage, type UsageSummary, type UsageTimeRange } from '@/api/usage'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import {
+  queryUsage,
+  queryUsageEvents,
+  usageErrorMessage,
+  type UsageEventPage,
+  type UsageSummary,
+  type UsageTimeRange,
+} from '@/api/usage'
 
 const props = defineProps<{ applicationId: number; apiKeyId: number }>()
 
@@ -30,8 +37,12 @@ const eventError = ref('')
 let eventLoadVersion = 0
 const eventPages = computed(() => Math.ceil((eventPage.value?.total ?? 0) / eventSize.value))
 
-const selectedRangeLabel = computed(() => rangeOptions.find((option) => option.value === timeRange.value)?.label ?? '所选时段')
-const maxDailyCount = computed(() => Math.max(0, ...(summary.value?.dailyCounts.map((day) => day.count) ?? [])))
+const selectedRangeLabel = computed(
+  () => rangeOptions.find((option) => option.value === timeRange.value)?.label ?? '所选时段',
+)
+const maxDailyCount = computed(() =>
+  Math.max(0, ...(summary.value?.dailyCounts.map((day) => day.count) ?? [])),
+)
 const chartMaximum = computed(() => {
   if (maxDailyCount.value === 0) return 1
   const magnitude = 10 ** Math.floor(Math.log10(maxDailyCount.value))
@@ -53,7 +64,11 @@ function formatPeriod(data: UsageSummary): string {
   const end = new Date(data.periodEndExclusive)
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return ''
   if (timeRange.value === 'CUSTOM') {
-    const format = new Intl.DateTimeFormat('zh-CN', { timeZone: zone, dateStyle: 'short', timeStyle: 'short' })
+    const format = new Intl.DateTimeFormat('zh-CN', {
+      timeZone: zone,
+      dateStyle: 'short',
+      timeStyle: 'short',
+    })
     return `${format.format(start)} 至 ${format.format(end)}（结束时刻不计入）`
   }
   const format = new Intl.DateTimeFormat('zh-CN', { timeZone: zone, dateStyle: 'short' })
@@ -133,9 +148,21 @@ async function loadEvents() {
   eventLoading.value = true
   eventError.value = ''
   try {
-    const data = await queryUsageEvents({ applicationId: props.applicationId, apiKeyId: props.apiKeyId,
-      current: eventCurrent.value, size: eventSize.value })
-    if (version === eventLoadVersion) eventPage.value = data
+    const data = await queryUsageEvents({
+      applicationId: props.applicationId,
+      apiKeyId: props.apiKeyId,
+      current: eventCurrent.value,
+      size: eventSize.value,
+    })
+    if (version === eventLoadVersion) {
+      const last = Math.max(1, Math.ceil(data.total / eventSize.value))
+      if (eventCurrent.value > last) {
+        eventCurrent.value = last
+        void loadEvents()
+        return
+      }
+      eventPage.value = data
+    }
   } catch (error) {
     if (version === eventLoadVersion) {
       eventPage.value = null
@@ -161,13 +188,33 @@ function changeEventPage(value: number) {
 
 function formatEventTime(value: string): string {
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai', dateStyle: 'short', timeStyle: 'medium', hourCycle: 'h23',
-  }).format(date)
+  return Number.isNaN(date.getTime())
+    ? value
+    : new Intl.DateTimeFormat('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        dateStyle: 'short',
+        timeStyle: 'medium',
+        hourCycle: 'h23',
+      }).format(date)
 }
 
-onMounted(() => { void loadUsage(); void loadEvents() })
-onUnmounted(() => { ++loadVersion; ++eventLoadVersion })
+watch([customStartTime, customEndTime], () => {
+  if (timeRange.value !== 'CUSTOM') return
+  ++loadVersion
+  loading.value = false
+  summary.value = null
+  errorMessage.value = ''
+  requestFailed.value = false
+})
+
+onMounted(() => {
+  void loadUsage()
+  void loadEvents()
+})
+onUnmounted(() => {
+  ++loadVersion
+  ++eventLoadVersion
+})
 </script>
 
 <template>
