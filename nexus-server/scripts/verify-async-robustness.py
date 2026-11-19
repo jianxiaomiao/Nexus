@@ -59,7 +59,7 @@ try:
         'ScreenshotJobServiceTests,ScreenshotSubmissionTests,ScreenshotSubmissionIntegrationTests,ApiKeyServiceTests,'
         'ApplicationServiceImplTests,ApplicationControllerTests,ApiKeyControllerTests,ApplicationWebhookControllerTests,'
         'ScreenshotJobOpenApiControllerTests,ApplicationUpdateFlowIntegrationTests,ApiKeyManagementFlowIntegrationTests,'
-        'ApplicationWebhookServiceIntegrationTests,ShortLinkFlowIntegrationTests')
+        'ApplicationWebhookServiceIntegrationTests,ShortLinkFlowIntegrationTests,UtcPersistenceIntegrationTests')
     agent = Path.home() / '.m2/repository/org/mockito/mockito-core/5.23.0/mockito-core-5.23.0.jar'
     print('Disposable MySQL ready; running isolated robustness checks.', flush=True)
     with open(output / 'verification.log', 'wb') as report:

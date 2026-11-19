@@ -180,5 +180,5 @@ jobs:
           JAVA_TOOL_OPTIONS: -Duser.timezone=America/Los_Angeles
         run: >-
           sh ./mvnw -B
-          -Dtest=ApplicationServiceImplTests,ApplicationQuotaServiceTests,ApiKeyServiceTests,ApiKeyControllerTests,RegistrationClockTests,UsageClockTests
+          -Dtest=ApplicationServiceImplTests,ApplicationQuotaServiceTests,ApiKeyServiceTests,ApiKeyControllerTests,RegistrationClockTests,UsageClockTests,UtcPersistenceIntegrationTests
           test

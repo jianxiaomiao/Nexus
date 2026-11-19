@@ -148,7 +148,7 @@ Application、Key、Webhook、短链更新支持 `expectedUpdatedAt`，当前 We
 # 仓库根目录：纯状态、传输、时钟、会话和幂等记录，共 161 项
 node --test nexus-mobile/scripts/test-auth-session.cjs nexus-mobile/scripts/test-management-contracts.cjs nexus-mobile/scripts/test-management-lifecycle.cjs nexus-desktop/scripts/test-auth-session.cjs nexus-console/scripts/test-request-gate.mjs nexus-console/scripts/test-network-deadline.mjs nexus-console/scripts/test-screenshot-submission.mjs nexus-console/scripts/test-auth-session-initialization.mjs nexus-console/scripts/test-auth-session-login.mjs nexus-console/scripts/test-auth-session-invalidation.mjs nexus-console/scripts/test-auth-session-renewal.mjs
 
-# 服务端：自动创建临时 MySQL，运行 110 项相关测试，最后销毁实例
+# 服务端：自动创建临时 MySQL，运行 113 项相关测试（含 UTC 持久化），最后销毁实例
 python3 nexus-server/scripts/verify-async-robustness.py
 
 # 移动端：复用 HBuilderX 已安装编译器，分别编译 h5 与 app
@@ -217,3 +217,16 @@ NEXUS_TEST_BROWSER_CHANNEL=chrome node node_modules/@playwright/test/cli.js test
 未发现当前验证范围内仍阻塞上传的功能问题，但不作“所有平台零缺陷”的保证：真实设备、发行安装包和生产HTTPS仍未验收；旧后端可能忽略幂等头；旧客户端不带编辑条件仍保留兼容语义。普通管理写入不具备普遍服务端幂等；本地准备失败保守进入核对可能多一次用户操作，不能因此自动重发。
 
 新证据在忽略目录 `data/async-robustness-review-20261119/verification.json` 与相邻日志。GitHub现有工作流只构建／测试，没有部署步骤；本轮不迁移既有数据库、不操作生产、不更新安装版。临时 MySQL 自动删除，临时移动预览在收尾关闭。
+
+
+## CI 完整回归补验：UTC 与编辑版本（2026-11-19）
+
+上传后的 Nexus CI #29（be87e5c）前端、Electron、移动端通过，后端751项中在 `UtcPersistenceIntegrationTests` 失败1项：冻结时钟下旧断言要求轮换后仍为 `.123Z`，实际版本时间为 `.124Z`。该类未包含在此前110项相关复验中；这是上一轮覆盖遗漏，保留失败记录，不用重跑碰运气或放宽时间精度掩盖。
+
+修复保持业务实现：创建与删除／级联仍使用原 UTC 时钟；活动资源的编辑版本严格递增。冻结 `.123Z` 时，轮换必须精确为 `.124Z`，随后编辑必须精确为 `.125Z`；测试同时核对响应与 MySQL 落值，创建时间不变。该规则不引入8小时换算，也不把版本推进当成数据库或系统时钟偏移。
+
+`UtcPersistenceIntegrationTests` 的3项加入临时库脚本默认范围（14类113项），并加入CI洛杉矶默认时区的额外回归。此次本地 UTC 的113项与 Los_Angeles 的3项均通过，使用两个自动销毁的临时MySQL，不访问既有数据库。
+
+CI原有的1项跳过来自 `WebSessionBrowserIntegrationTests` 的显式环境开关 `NEXUS_RUN_WEB_BROWSER=true`；没有新增跳过、禁用或放宽断言。默认流水线的通过不能冒称这项真实浏览器／后端集成已经运行。
+
+本次合并门禁：修复提交对应的 Web、Electron、移动端、后端四项 CI 均成功，后端的跨时区步骤也必须成功；检查 PR 头与预期 SHA 后再合并 main。只更新源码仓库，不部署、不迁移既有数据库或替换安装包。
