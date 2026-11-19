@@ -92,9 +92,15 @@ public class ApplicationWebhookService {
             requireOwnedForShare(userId, applicationId);
             ApplicationWebhook webhook = webhooks.selectByApplicationIdForUpdate(applicationId);
             if (webhook == null) throw new WebhookNotFoundException();
+            if (request.expectedUpdatedAt() != null &&
+                    !request.expectedUpdatedAt().equals(webhook.getUpdatedAt().toInstant(ZoneOffset.UTC))) {
+                throw new com.nexus.common.web.ResourceChangedException();
+            }
+            LocalDateTime updated = utcNow();
+            if (!updated.isAfter(webhook.getUpdatedAt())) updated = webhook.getUpdatedAt().plusNanos(1_000_000);
             if (url != null) webhook.setUrl(url);
             if (request.status() != null) webhook.setStatus(request.status());
-            webhook.setUpdatedAt(utcNow());
+            webhook.setUpdatedAt(updated);
             if (webhooks.updateById(webhook) != 1) throw new WebhookNotFoundException();
             return response(webhook, currentSecret(webhook.getId()).getSecretVersion());
         });
@@ -151,7 +157,7 @@ public class ApplicationWebhookService {
         }
         long nextVersion = Math.addExact(expectedVersion, 1L);
         secrets.insert(newSecret(webhook.getId(), nextVersion, encrypted, now));
-        webhook.setUpdatedAt(now);
+        webhook.setUpdatedAt(now.isAfter(webhook.getUpdatedAt()) ? now : webhook.getUpdatedAt().plusNanos(1_000_000));
         if (webhooks.updateById(webhook) != 1) throw new WebhookNotFoundException();
         return new RotatedWebhookSecretResponse(response(webhook, nextVersion), displayed);
     }

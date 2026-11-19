@@ -6,6 +6,7 @@ export function webhookErrorMessage(error: unknown, fallback: string): string {
   if (!error.response) return '无法连接服务器，请确认后端已启动'
 
   switch (error.response.data?.code) {
+    case 'RESOURCE_CHANGED': return '资料已被修改，请刷新核对后重新操作'
     case 'INVALID_ACCESS_TOKEN':
       return '登录已过期，请重新登录'
     case 'AUTH_ACCOUNT_FORBIDDEN':

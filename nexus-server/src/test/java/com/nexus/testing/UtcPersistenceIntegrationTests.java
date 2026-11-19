@@ -73,7 +73,7 @@ class UtcPersistenceIntegrationTests {
     }
 
     @Test
-    void registrationKeyLifecycleAndCascadeStoreTheSameUtcInstant() {
+    void registrationKeyLifecycleUsesUtcAndMonotonicEditTimestamps() {
         long[] ids = createOwnerAndApplication();
         var created = keys.createMyApiKey(ids[0], new CreateApiKeyRequest("utc-key", ids[1]));
         assertEquals(NOW, created.createdAt());
@@ -81,10 +81,14 @@ class UtcPersistenceIntegrationTests {
         assertEquals(UTC_NOW, user.getCreatedAt());
         assertEquals(UTC_NOW, user.getUpdatedAt());
         var rotated = keys.rotateMyApiKey(ids[0], created.id(), created.publicId());
-        assertEquals(NOW, rotated.updatedAt());
+        // The fixed business clock stays at NOW; edit versions must still advance at millisecond precision.
+        assertEquals(NOW.plusMillis(1), rotated.updatedAt());
+        assertEquals(UTC_NOW.plusNanos(1_000_000), keyMapper.selectById(created.id()).getUpdatedAt());
         var updated = keys.updateMyApiKey(ids[0], new UpdateApiKeyRequest("renamed", ids[1], created.id(), 1));
         assertEquals(NOW, updated.createdAt());
-        assertEquals(NOW, updated.updatedAt());
+        assertEquals(NOW.plusMillis(2), updated.updatedAt());
+        assertEquals(UTC_NOW, keyMapper.selectById(created.id()).getCreatedAt());
+        assertEquals(UTC_NOW.plusNanos(2_000_000), keyMapper.selectById(created.id()).getUpdatedAt());
         String code = UUID.randomUUID().toString().substring(0, 8);
         jdbc.update("INSERT INTO short_links (api_key_id,name,original_url,short_code,expires_at) VALUES (?,?,?,?,?)",
                 created.id(), "utc-link", "https://weibo.com/1", code, UTC_NOW.plusDays(1));

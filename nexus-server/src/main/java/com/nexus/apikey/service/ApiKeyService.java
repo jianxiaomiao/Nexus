@@ -159,6 +159,7 @@ public class ApiKeyService {
 
         GeneratedApiKey generated = credentialGenerator.generate();
         LocalDateTime updatedAt = utcNow();
+        if (current.getUpdatedAt() != null && !updatedAt.isAfter(current.getUpdatedAt())) updatedAt = current.getUpdatedAt().plusNanos(1_000_000);
         int changed = apiKeyMapper.update(null, Wrappers.<ApiKey>lambdaUpdate()
                 .eq(ApiKey::getId, apiKeyId)
                 .eq(ApiKey::getApplicationId, application.getId())
@@ -212,6 +213,16 @@ public class ApiKeyService {
         if (application == null) {
             throw new ApplicationNotFoundException();
         }
+        ApiKey before = apiKeyMapper.selectOne(Wrappers.<ApiKey>lambdaQuery()
+                .eq(ApiKey::getId, updateApiKeyRequest.apiKeyId())
+                .eq(ApiKey::getApplicationId, application.getId()).eq(ApiKey::getIsDeleted, 0).last("FOR UPDATE"));
+        if (before == null) throw new ApiKeyNotFoundException();
+        if (updateApiKeyRequest.expectedUpdatedAt() != null &&
+                !updateApiKeyRequest.expectedUpdatedAt().equals(asInstant(before.getUpdatedAt()))) {
+            throw new com.nexus.common.web.ResourceChangedException();
+        }
+        LocalDateTime updated = utcNow();
+        if (!updated.isAfter(before.getUpdatedAt())) updated = before.getUpdatedAt().plusNanos(1_000_000);
         LambdaUpdateWrapper<ApiKey> lambdaUpdateWrapper = Wrappers.lambdaUpdate();
         lambdaUpdateWrapper
                 .eq(ApiKey::getId, updateApiKeyRequest.apiKeyId())
@@ -219,7 +230,7 @@ public class ApiKeyService {
                 .eq(ApiKey::getIsDeleted, 0)
                 .set(name != null, ApiKey::getName, name)
                 .set(status!= null, ApiKey::getStatus, status)
-                .set(ApiKey::getUpdatedAt, utcNow());
+                .set(ApiKey::getUpdatedAt, updated);
         try {
             affectedRows = apiKeyMapper.update(null, lambdaUpdateWrapper);
         }catch (DuplicateKeyException exception){

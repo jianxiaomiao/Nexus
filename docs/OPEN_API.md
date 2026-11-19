@@ -150,6 +150,14 @@ Hash 请求体错误均返回 HTTP 400，使用同样的 `code`、`message`、`d
 
 `POST /v1/web/screenshot-jobs` 创建持久化任务并返回 HTTP 201；`GET /v1/web/screenshot-jobs/{jobId}` 查询 `QUEUED/RUNNING/SUCCEEDED/FAILED/EXPIRED` 状态；`GET /v1/web/screenshot-jobs/{jobId}/result` 在成功且未过期时返回原始 PNG。任务按 API Key 隔离，查询和下载不重复扣配额；结果保留 1 小时、元数据保留 24 小时，全局最多 10 个未完成任务。完整字段、状态恢复和错误码见 [静态网页截图](SCREENSHOT_API.md#持久化异步接口)。
 
+## 异步截图提交恢复（V15，源码契约）
+
+`POST /v1/web/screenshot-jobs` 可携带 `Idempotency-Key: <13位Unix毫秒时间戳>.<规范小写UUID>`。同一 API Key、同标识、同 URL 返回原 Job ID，不重复创建或扣配额；不同 API Key 的标识互不影响。相同标识不同 URL 返回 `409 SCREENSHOT_SUBMISSION_CONFLICT`，格式错误为 `400 SCREENSHOT_SUBMISSION_INVALID`，超过七天为 `410 SCREENSHOT_SUBMISSION_EXPIRED`；最多容许一分钟未来时钟偏差。
+
+重试需要沿用原标识；没有标识仍是每次新建。七天恢复窗口内保留任务元数据，PNG 仍只保留一小时；恢复并不延长图片期限。未知结果过期后须先核对，再明确决定是否发起可能再次扣额的新任务。标识与扣额、任务写入在同一事务中，不把前端按钮锁当作服务端幂等。
+
+该契约需要匹配 V15 后端和新客户端配套发布；旧后端可能忽略请求头，不能对旧服务承诺防重复。当前源码通过隔离验证，未据此更新线上服务或已安装客户端。设计、字段和验证见 [异步健壮性设计](ASYNC_ROBUSTNESS_DESIGN.md)。
+
 ## 认证与错误
 
 请求到达 `/v1/*` 时，Filter 从 `Authorization` 提取完整密钥。认证器先用公开 ID 找记录，再验证 Secret 摘要，然后沿 Application 找到所有者 User，检查三层状态。成功后，仅把 `apiKeyId` 和 `applicationId` 放入本次请求，供 Controller 使用。
@@ -192,6 +200,8 @@ Hash 请求体错误均返回 HTTP 400，使用同样的 `code`、`message`、`d
 `expiresAt` 必须是带时区的未来绝对时刻；当前时间到达该时刻即失效。`originalUrl` 创建后不能修改，最多 2048 个字符。第一版只接受 HTTPS、无 URL 用户名、无非标准端口，且主机名精确匹配 `www.douyin.com`、`v.douyin.com`、`www.xiaohongshu.com`、`weibo.com` 或 `m.weibo.cn`；不自动允许子域名。该检查不保证目标内容安全。
 
 创建、列表和更新的 `data` 返回短链 `id`、`apiKeyId`、`name`、`originalUrl`、`shortCode`、`status`、`expiresAt`、`createdAt`、`updatedAt`。短码由服务端生成，删除后不复用。更新请求体为 `{"id":123,"name":"新名称","status":1}`；`name` 和 `status` 至少提供一个，状态 `0` 为启用、`1` 为禁用。
+
+更新可附 `expectedUpdatedAt`（上次读取到的完整 UTC 时间戳），服务端在验证归属后比较；资料已变更返回 `409 RESOURCE_CHANGED`，应重新读取并由用户重新确认修改。该字段可选以兼容旧客户端；省略时仍使用旧更新语义，不能视为有冲突保护。
 
 管理端使用 `Authorization: Bearer <JWT>`：`GET /api/short-links?apiKeyId=123`、`PUT /api/short-links` 和 `DELETE /api/short-links/{id}`。管理端只可操作自己 Application 下的 Key 所属短链；不能通过提交其他用户的 ID 获得访问权。
 

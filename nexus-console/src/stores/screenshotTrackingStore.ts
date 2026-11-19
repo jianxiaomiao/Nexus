@@ -1,15 +1,19 @@
 import { defineStore } from 'pinia'
 import type {Trace} from "@/api/Trace.ts";
 import {type CreatedScreenshotJob, submitScreenshotJob} from '@/api/openApi'
+import { screenshotSubmissionNeedsReconcile } from '@/api/screenshotSubmission'
 
 const MAX_HANDOFF_RETRIES = 3
 
 export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore', {
   state: (): {
+    identityVersion: number
     snapshot: Trace,
     submitting: boolean
     pendingHandoffJob: CreatedScreenshotJob | null
     submissionError: string | null
+    uncertainTarget: string | null
+    uncertainPublicId: string | null
     creationUncertain: boolean
 
     resultImage: Blob | null       // 初始 null
@@ -28,6 +32,7 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
     retryingHandoff: boolean // 初始 false
     handoffRetryCount: number // 初始 0
   } => ({
+    identityVersion: 0,
     snapshot: {
       jobId: null,
       latestJob: null,
@@ -38,6 +43,8 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
     pendingHandoffJob: null,
     submissionError: null,
     creationUncertain: false,
+    uncertainTarget: null,
+    uncertainPublicId: null,
 
     resultImage: null,       // 初始 null
     resultJobId: null,     // 初始 null
@@ -58,6 +65,22 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
 
 
   actions: {
+    async recoverUncertainCreation(apiKey: string, url: string) {
+      if (!this.creationUncertain || this.submitting || url !== this.uncertainTarget ||
+          this.uncertainPublicId !== (/^nxk_v1_([0-9a-f-]{36})_/.exec(apiKey)?.[1] ?? null)) {
+        this.submissionError = '请重新提供原始地址和原 API Key，以恢复同一次提交'
+        return
+      }
+      this.creationUncertain = false
+      await this.submitDesktopScreenshot(apiKey, url)
+    },
+    resetForIdentityChange() {
+      const next = this.identityVersion + 1
+      const request = this.resultRequestVersion + 1
+      this.$reset()
+      this.identityVersion = next
+      this.resultRequestVersion = request
+    },
     applySnapshot(next: Trace) {
         if (next.jobId !== this.snapshot.jobId) {
           this.resultRequestVersion++
@@ -86,6 +109,7 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
     },
 
     async submitDesktopScreenshot(apiKey: string, url: string) {
+      const identity = this.identityVersion
       if (this.submitting || this.pendingHandoffJob !== null || this.creationUncertain || this.clearing || this.resuming || this.retryingHandoff) return
 
       const desktop = window.nexusDesktop
@@ -100,6 +124,7 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
       let creating = false
       try {
         const current = await desktop.readScreenshotTracking()
+        if (identity !== this.identityVersion) return
         if (current.status !== 'ok') {
           this.submissionError = '读取截图跟踪状态失败'
           return
@@ -110,9 +135,12 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
         }
 
         creating = true
+        this.uncertainTarget = url
+        this.uncertainPublicId = /^nxk_v1_([0-9a-f-]{36})_/.exec(apiKey)?.[1] ?? null
         const res = await submitScreenshotJob(apiKey, url)
+        if (identity !== this.identityVersion) return
         if (res.status < 200 || res.status >= 300 || res.data === null) {
-          if (res.status >= 500 || (res.status >= 200 && res.status < 300)) {
+          if (screenshotSubmissionNeedsReconcile(res.status, false)) {
             this.creationUncertain = true
             this.submissionError = '创建结果无法确认，请勿直接重复提交'
           } else {
@@ -125,6 +153,7 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
         this.handoffRetryCount = 0
 
         const result = await desktop.startScreenshotTracking({ jobId: res.data.jobId, apiKey })
+        if (identity !== this.identityVersion) return
 
         if (result.status === 'ok') {
           this.pendingHandoffJob = null
@@ -132,6 +161,7 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
           this.submissionError = '任务已创建，接手未成功，请勿重复提交'
         }
       } catch {
+        if (identity !== this.identityVersion) return
         if (this.pendingHandoffJob !== null) {
           this.submissionError = '任务已创建，接手结果暂未确认，请勿重新提交'
         } else if (creating) {
@@ -141,11 +171,12 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
           this.submissionError = '读取截图跟踪状态失败'
         }
       }finally {
-        this.submitting = false
+        if (identity === this.identityVersion) this.submitting = false
       }
     },
 
     async loadScreenshotResult(){
+      const identity = this.identityVersion
       if (this.clearing) return
 
       const desktop = window.nexusDesktop
@@ -169,6 +200,7 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
 
       try {
         const result = await desktop.getScreenshotResult(jobId)
+        if (identity !== this.identityVersion) return
 
         if (version !== this.resultRequestVersion || this.snapshot.jobId !== jobId) return
 
@@ -186,6 +218,7 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
           this.resultCacheControl = result.cacheControl
         }
       }catch {
+        if (identity !== this.identityVersion) return
         if (
           version === this.resultRequestVersion &&
           this.snapshot.jobId === jobId
@@ -199,6 +232,7 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
     },
 
     async clearCurrentTask(){
+      const identity = this.identityVersion
       if (this.clearing || this.submitting || this.resuming || this.retryingHandoff) return
 
       if(this.pendingHandoffJob !== null || this.creationUncertain === true){
@@ -220,6 +254,7 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
 
       try{
         const result = await desktop.stopScreenshotTracking()
+        if (identity !== this.identityVersion) return
 
         if(result.status === 'failed'){
           this.clearError = '清理请求被拒绝，请重试'
@@ -232,11 +267,12 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
           this.clearError = '清理结果暂未确认，请查看当前状态后重试'
         }
       }finally {
-        this.clearing = false
+        if (identity === this.identityVersion) this.clearing = false
       }
     },
 
     async resumeCurrentTask(apiKey: string){
+      const identity = this.identityVersion
       if (this.resuming || this.submitting || this.clearing || this.retryingHandoff) return
       if (this.pendingHandoffJob !== null || this.creationUncertain) return
 
@@ -267,6 +303,7 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
           apiKey: key,
         })
 
+        if (identity !== this.identityVersion) return
         const stillPaused =
           this.snapshot.jobId === jobId &&
           this.snapshot.traceStatus === 'PAUSED'
@@ -276,15 +313,17 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
           return
         }
       }catch {
+        if (identity !== this.identityVersion) return
         if(this.snapshot.jobId === jobId && this.snapshot.traceStatus === 'PAUSED'){
           this.resumeError = '恢复结果暂未确认，请查看当前状态后重试'
         }
       }finally {
-        this.resuming = false
+        if (identity === this.identityVersion) this.resuming = false
       }
     },
 
     async retryPendingHandoff(apiKey: string){
+      const identity = this.identityVersion
       if (
         this.submitting ||
         this.clearing ||
@@ -339,7 +378,7 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
           apiKey: key,
         })
 
-        if (this.pendingHandoffJob?.jobId !== pending.jobId) return
+        if (identity !== this.identityVersion || this.pendingHandoffJob?.jobId !== pending.jobId) return
 
         const nowTracked =
           this.snapshot.jobId === pending.jobId &&
@@ -365,11 +404,12 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
           this.submissionError = messages[result.code]
         }
       }catch {
+        if (identity !== this.identityVersion) return
         const nowTracked =
           this.snapshot.jobId === pending.jobId &&
           this.snapshot.traceStatus !== 'IDLE'
 
-        if (this.pendingHandoffJob?.jobId !== pending.jobId) return
+        if (identity !== this.identityVersion || this.pendingHandoffJob?.jobId !== pending.jobId) return
 
         if(nowTracked){
           this.pendingHandoffJob = null
@@ -379,7 +419,7 @@ export const useScreenshotTrackingStore = defineStore('ScreenshotTrackingStore',
           this.submissionError = "接手结果暂未确认，请勿重新创建"
         }
       }finally {
-        this.retryingHandoff = false
+        if (identity === this.identityVersion) this.retryingHandoff = false
       }
     }
   },

@@ -1,3 +1,4 @@
+import { MutationResultUnknown } from './mutation'
 import { http, type ApiResponse } from './http'
 
 export interface ApplicationWebhook {
@@ -20,6 +21,7 @@ export interface RotatedWebhookSecret {
 }
 
 export interface UpdateWebhookRequest {
+  expectedUpdatedAt?: string
   url?: string
   status?: 0 | 1
 }
@@ -31,12 +33,15 @@ export async function queryApplicationWebhook(applicationId: number): Promise<Ap
 
 export async function createApplicationWebhook(applicationId: number, url: string): Promise<CreatedApplicationWebhook> {
   const response = await http.post<ApiResponse<CreatedApplicationWebhook>>(`/application/${applicationId}/webhook`, { url })
+  if (response.data?.code !== 'SUCCESS' || typeof response.data.data?.secret !== 'string' || !response.data.data.secret) throw new MutationResultUnknown()
   return response.data.data
 }
 
 export async function updateApplicationWebhook(applicationId: number, request: UpdateWebhookRequest): Promise<ApplicationWebhook> {
   const response = await http.put<ApiResponse<ApplicationWebhook>>(`/application/${applicationId}/webhook`, request)
-  return response.data.data
+  const data = response.data.data
+  if (!data || data.applicationId !== applicationId || typeof data.updatedAt !== 'string') throw new MutationResultUnknown()
+  return data
 }
 
 export async function rotateApplicationWebhookSecret(applicationId: number, currentSecretVersion: number): Promise<RotatedWebhookSecret> {
@@ -44,5 +49,6 @@ export async function rotateApplicationWebhookSecret(applicationId: number, curr
     `/application/${applicationId}/webhook/rotate-secret`,
     { currentSecretVersion },
   )
+  if (response.data?.code !== 'SUCCESS' || typeof response.data.data?.secret !== 'string' || !response.data.data.secret) throw new MutationResultUnknown()
   return response.data.data
 }

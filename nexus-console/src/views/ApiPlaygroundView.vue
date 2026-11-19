@@ -1,16 +1,40 @@
 <script setup lang="ts">
+import { abandonScreenshotSubmission, screenshotSubmissionNeedsReconcile } from '@/api/screenshotSubmission'
+import { usePageScope } from '@/utils/pageScope'
 import { formatBeijingTime } from '@/utils/beijingTime'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, ArrowRight, Camera, DataAnalysis, Document, DocumentCopy, Link } from '@element-plus/icons-vue'
+import {
+  ArrowDown,
+  ArrowRight,
+  Camera,
+  DataAnalysis,
+  Document,
+  DocumentCopy,
+  Link,
+} from '@element-plus/icons-vue'
 import decoration from '@/assets/playground-decoration.png'
 import {
-  callOpenApi, callWebExtract, callWebScreenshot, getScreenshotJob, getScreenshotJobResult,
-  isWebExtractResponse, submitScreenshotJob, type CreatedScreenshotJob, type HashAlgorithm,
-  type OpenApiEndpoint, type ScreenshotJob, type WebExtractResponse,
+  callOpenApi,
+  callWebExtract,
+  callWebScreenshot,
+  getScreenshotJob,
+  getScreenshotJobResult,
+  isWebExtractResponse,
+  submitScreenshotJob,
+  type CreatedScreenshotJob,
+  type HashAlgorithm,
+  type OpenApiEndpoint,
+  type ScreenshotJob,
+  type WebExtractResponse,
 } from '@/api/openApi'
-import { callShortLinkOpenApi, publicShortLinkUrl, type ShortLink, type ShortLinkOperation } from '@/api/shortLinks'
+import {
+  callShortLinkOpenApi,
+  publicShortLinkUrl,
+  type ShortLink,
+  type ShortLinkOperation,
+} from '@/api/shortLinks'
 import WebExtractPreview from './WebExtractPreview.vue'
 import ScreenshotJobStatus from './ScreenshotJobStatus.vue'
 import ScreenshotPreview from './ScreenshotPreview.vue'
@@ -20,8 +44,21 @@ import { useScreenshotTrackingStore } from '@/stores/screenshotTrackingStore'
 
 type PlaygroundEndpoint = OpenApiEndpoint | 'shortlink' | 'web-extract' | 'web-screenshot'
 type ScreenshotMode = 'sync' | 'async'
-type Result = { status: number | null; durationMs: number | null; body: string; message: string; invalidImage?: boolean; isError?: boolean }
-const allowedHosts = new Set(['www.douyin.com', 'v.douyin.com', 'www.xiaohongshu.com', 'weibo.com', 'm.weibo.cn'])
+type Result = {
+  status: number | null
+  durationMs: number | null
+  body: string
+  message: string
+  invalidImage?: boolean
+  isError?: boolean
+}
+const allowedHosts = new Set([
+  'www.douyin.com',
+  'v.douyin.com',
+  'www.xiaohongshu.com',
+  'weibo.com',
+  'm.weibo.cn',
+])
 const articleHosts = new Set(['blog.csdn.net', 'zhuanlan.zhihu.com'])
 const durations = [
   { label: '10 秒', value: '10s', ms: 10_000 },
@@ -36,7 +73,12 @@ const durations = [
 const trackingStore = useScreenshotTrackingStore()
 
 function queryEndpoint(value: unknown): PlaygroundEndpoint {
-  return value === 'uuid' || value === 'shortlink' || value === 'web-extract' || value === 'web-screenshot' ? value : 'hash'
+  return value === 'uuid' ||
+    value === 'shortlink' ||
+    value === 'web-extract' ||
+    value === 'web-screenshot'
+    ? value
+    : 'hash'
 }
 
 const route = useRoute()
@@ -58,13 +100,31 @@ const targetId = ref('')
 const updatedName = ref('')
 const updatedStatus = ref('')
 const loading = ref(false)
+const mutationUncertain = ref(false)
+let uncertainTarget = ''
+let uncertainEndpoint = ''
+let uncertainIdentity = ''
+type WriteIntent = { endpoint: string; target: string; identity: string }
+let pendingWrite: WriteIntent | null = null
+const machineIdentity = (key: string) => /^nxk_v1_([0-9a-f-]{36})_/.exec(key)?.[1] ?? key
+function markUncertain(intent: WriteIntent) {
+  mutationUncertain.value = true
+  uncertainTarget = intent.target
+  uncertainEndpoint = intent.endpoint
+  uncertainIdentity = intent.identity
+}
 const examplesOpen = ref(!window.matchMedia('(max-width: 700px)').matches)
 const exampleTab = ref<'curl' | 'powershell'>('curl')
 const result = ref<Result | null>(null)
 const createdLink = ref<ShortLink | null>(null)
 const listedLinks = ref<ShortLink[] | null>(null)
 const extractedArticle = ref<WebExtractResponse | null>(null)
-const screenshot = ref<{ image: Blob; blockedResources: number | null; resourceLimitReached: boolean; cacheControl: string | null } | null>(null)
+const screenshot = ref<{
+  image: Blob
+  blockedResources: number | null
+  resourceLimitReached: boolean
+  cacheControl: string | null
+} | null>(null)
 const screenshotMode = ref<ScreenshotMode>('async')
 const screenshotJob = ref<ScreenshotJob | null>(null)
 const screenshotPolling = ref(false)
@@ -72,46 +132,60 @@ const screenshotPollError = ref('')
 const screenshotPollRetryable = ref(false)
 const articleTab = ref('preview')
 const isDesktop = Boolean(window.nexusDesktop)
-const supportsDesktopTracking =
-  typeof window.nexusDesktop?.startScreenshotTracking === 'function'
+const supportsDesktopTracking = typeof window.nexusDesktop?.startScreenshotTracking === 'function'
 
-const desktopAsync = computed(() =>
-  supportsDesktopTracking &&
-  endpoint.value === 'web-screenshot' &&
-  screenshotMode.value === 'async'
+const desktopAsync = computed(
+  () =>
+    supportsDesktopTracking &&
+    endpoint.value === 'web-screenshot' &&
+    screenshotMode.value === 'async',
 )
 
 const desktopSnapshot = computed(() => trackingStore.snapshot)
-const canConfirmHandoff = computed(() =>
-  trackingStore.pendingHandoffJob !== null &&
-  desktopSnapshot.value.jobId === trackingStore.pendingHandoffJob.jobId &&
-  desktopSnapshot.value.traceStatus !== 'IDLE'
+const canConfirmHandoff = computed(
+  () =>
+    trackingStore.pendingHandoffJob !== null &&
+    desktopSnapshot.value.jobId === trackingStore.pendingHandoffJob.jobId &&
+    desktopSnapshot.value.traceStatus !== 'IDLE',
 )
 
-const requestLoading = computed(() =>
-  loading.value ||
-  (desktopAsync.value && trackingStore.submitting)
+const requestLoading = computed(
+  () => loading.value || (desktopAsync.value && trackingStore.submitting),
 )
 
-const desktopSubmissionBlocked = computed(() =>
-    desktopAsync.value && (
-      trackingStore.clearing ||
+const desktopSubmissionBlocked = computed(
+  () =>
+    desktopAsync.value &&
+    (trackingStore.clearing ||
       trackingStore.resuming ||
       trackingStore.retryingHandoff ||
       trackingStore.pendingHandoffJob !== null ||
       trackingStore.creationUncertain ||
-      desktopSnapshot.value.traceStatus !== 'IDLE'
-    )
+      desktopSnapshot.value.traceStatus !== 'IDLE'),
 )
 let controller: AbortController | null = null
 let requestId = 0
 let screenshotJobApiKey = ''
 
-const docsTarget = computed(() => endpoint.value === 'shortlink' ? 'shortlink' : endpoint.value)
+const pageScope = usePageScope(
+  () => undefined,
+  () => {
+    ElMessageBox.close()
+    resetRequest()
+    pendingWrite = null
+    mutationUncertain.value = false
+    uncertainIdentity = ''
+    apiKey.value = ''
+  },
+)
+
+const docsTarget = computed(() => (endpoint.value === 'shortlink' ? 'shortlink' : endpoint.value))
 const endpointPath = computed(() => {
   if (endpoint.value === 'web-extract') return 'POST /v1/web/extract'
-  if (endpoint.value === 'web-screenshot') return screenshotMode.value === 'async'
-    ? 'POST /v1/web/screenshot-jobs' : 'POST /v1/web/screenshot'
+  if (endpoint.value === 'web-screenshot')
+    return screenshotMode.value === 'async'
+      ? 'POST /v1/web/screenshot-jobs'
+      : 'POST /v1/web/screenshot'
   if (endpoint.value === 'shortlink') {
     const method = { create: 'POST', list: 'GET', update: 'PUT', delete: 'DELETE' }[operation.value]
     return `${method} /v1/short-links${operation.value === 'delete' ? '/{id}' : ''}`
@@ -145,19 +219,23 @@ const sample = computed(() => {
     const path = `${host}/v1/short-links`
     if (exampleTab.value === 'powershell') {
       const prefix = `$apiKey = Read-Host '输入完整 API Key'\n$headers = @{ Authorization = "ApiKey $apiKey" }`
-      if (operation.value === 'list') return `${prefix}\nInvoke-RestMethod -Uri '${path}' -Headers $headers`
-      if (operation.value === 'delete') return `${prefix}\nInvoke-RestMethod -Uri '${path}/123' -Method Delete -Headers $headers`
-      const body = operation.value === 'create'
-        ? "@{ name = '演示链接'; originalUrl = 'https://www.douyin.com/video/1'; expiresAt = '2030-01-01T16:00:00+08:00' }"
-        : "@{ id = 123; name = '新名称'; status = 0 }"
+      if (operation.value === 'list')
+        return `${prefix}\nInvoke-RestMethod -Uri '${path}' -Headers $headers`
+      if (operation.value === 'delete')
+        return `${prefix}\nInvoke-RestMethod -Uri '${path}/123' -Method Delete -Headers $headers`
+      const body =
+        operation.value === 'create'
+          ? "@{ name = '演示链接'; originalUrl = 'https://www.douyin.com/video/1'; expiresAt = '2030-01-01T16:00:00+08:00' }"
+          : "@{ id = 123; name = '新名称'; status = 0 }"
       return `${prefix}\n$body = ${body} | ConvertTo-Json -Compress\nInvoke-RestMethod -Uri '${path}' -Method ${operation.value === 'create' ? 'Post' : 'Put'} -Headers $headers -ContentType 'application/json' -Body $body`
     }
     const auth = "-H 'Authorization: ApiKey <完整密钥>'"
     if (operation.value === 'list') return `curl -i '${path}' \\\n  ${auth}`
     if (operation.value === 'delete') return `curl -i -X DELETE '${path}/123' \\\n  ${auth}`
-    const body = operation.value === 'create'
-      ? '{"name":"演示链接","originalUrl":"https://www.douyin.com/video/1","expiresAt":"2030-01-01T16:00:00+08:00"}'
-      : '{"id":123,"name":"新名称","status":0}'
+    const body =
+      operation.value === 'create'
+        ? '{"name":"演示链接","originalUrl":"https://www.douyin.com/video/1","expiresAt":"2030-01-01T16:00:00+08:00"}'
+        : '{"id":123,"name":"新名称","status":0}'
     return `curl -i -X ${operation.value === 'create' ? 'POST' : 'PUT'} '${path}' \\\n  ${auth} \\\n  -H 'Content-Type: application/json' \\\n  -d '${body}'`
   }
   const url = `${host}/v1/utils/${endpoint.value}`
@@ -172,6 +250,8 @@ const sample = computed(() => {
 })
 
 function resetRequest() {
+  if (pendingWrite) markUncertain(pendingWrite)
+  pendingWrite = null
   controller?.abort()
   controller = null
   requestId++
@@ -190,12 +270,15 @@ function resetRequest() {
   formError.value = ''
 }
 
-watch(() => route.query.endpoint, (next) => {
-  const selected = queryEndpoint(next)
-  if (selected === endpoint.value) return
-  resetRequest()
-  endpoint.value = selected
-})
+watch(
+  () => route.query.endpoint,
+  (next) => {
+    const selected = queryEndpoint(next)
+    if (selected === endpoint.value) return
+    resetRequest()
+    endpoint.value = selected
+  },
+)
 watch(operation, resetRequest)
 watch(screenshotMode, resetRequest)
 
@@ -210,17 +293,28 @@ function resultMessage(status: number, code?: string): string {
   if (code === 'HASH_INPUT_TOO_LARGE') return '输入内容超过 4096 个 UTF-8 字节。'
   if (code === 'SHORT_LINK_NOT_FOUND') return '短链接不存在，或不属于当前 API Key。'
   if (code === 'SHORT_CODE_UNAVAILABLE') return '短码暂时无法生成，请稍后重试。'
-  if (code === 'INVALID_WEB_EXTRACT_REQUEST') return '文章 URL 有误，仅支持知乎专栏和 CSDN 的 HTTPS 地址。'
+  if (code === 'INVALID_WEB_EXTRACT_REQUEST')
+    return '文章 URL 有误，仅支持知乎专栏和 CSDN 的 HTTPS 地址。'
   if (code === 'WEB_CONTENT_UNAVAILABLE') return '页面中没有可提取的文章正文。'
-  if (code === 'WEB_PAGE_FETCH_FAILED') return '目标页面无法获取，可能发生跳转、拒绝访问或网络异常。'
-  if (code === 'INVALID_SCREENSHOT_REQUEST') return '网页 URL 有误，仅支持知乎专栏和 CSDN 的 HTTPS 地址。'
-  if (code === 'SCREENSHOT_PAGE_FETCH_FAILED') return '目标页面无法获取，可能被原站拒绝、发生跳转或 DNS/网络异常。'
-  if (code === 'SCREENSHOT_LIMIT_EXCEEDED') return '资源或 PNG 大小超过截图限制，请换一个较小的页面。'
+  if (code === 'WEB_PAGE_FETCH_FAILED')
+    return '目标页面无法获取，可能发生跳转、拒绝访问或网络异常。'
+  if (code === 'INVALID_SCREENSHOT_REQUEST')
+    return '网页 URL 有误，仅支持知乎专栏和 CSDN 的 HTTPS 地址。'
+  if (code === 'SCREENSHOT_PAGE_FETCH_FAILED')
+    return '目标页面无法获取，可能被原站拒绝、发生跳转或 DNS/网络异常。'
+  if (code === 'SCREENSHOT_LIMIT_EXCEEDED')
+    return '资源或 PNG 大小超过截图限制，请换一个较小的页面。'
   if (code === 'SCREENSHOT_TIMEOUT') return '截图处理超时，请稍后重试或换一个较小的页面。'
   if (code === 'SCREENSHOT_BUSY') return '截图服务正在处理其他请求，请稍后重试。'
-  if (code === 'SCREENSHOT_ENGINE_UNAVAILABLE') return '截图浏览器暂不可用，请检查后端 Chromium 安装及运行环境。'
+  if (code === 'SCREENSHOT_ENGINE_UNAVAILABLE')
+    return '截图浏览器暂不可用，请检查后端 Chromium 安装及运行环境。'
   if (code === 'SCREENSHOT_JOB_QUEUE_FULL') return '全局未完成截图任务已达 10 个，请稍后再创建。'
-  if (code === 'SCREENSHOT_JOB_SUBMISSION_UNAVAILABLE') return '截图任务暂时无法提交，本次配额与任务写入已共同回滚。'
+  if (code === 'SCREENSHOT_JOB_SUBMISSION_UNAVAILABLE')
+    return '截图任务暂时无法提交，本次配额与任务写入已共同回滚。'
+  if (code === 'SCREENSHOT_SUBMISSION_EXPIRED')
+    return '原提交已超过七天恢复期，请先核对任务记录，再明确开始可能再次扣额的新操作。'
+  if (code === 'SCREENSHOT_SUBMISSION_CONFLICT')
+    return '提交标识与原请求不一致，请先核对，不要直接创建新任务。'
   if (code === 'SCREENSHOT_JOB_CREATE_FAILED') return '截图任务创建失败，请稍后重试。'
   if (code === 'SCREENSHOT_JOB_NOT_FOUND') return '任务不存在，或不属于当前 API Key。'
   if (code === 'SCREENSHOT_JOB_NOT_READY') return '截图仍在排队或执行，请稍后再查询结果。'
@@ -231,7 +325,13 @@ function resultMessage(status: number, code?: string): string {
   return `请求失败（HTTP ${status}），请稍后重试。`
 }
 
-function validateShortLink(): { payload?: { name: string; originalUrl: string; expiresAt: string } | { id: number; name?: string; status?: 0 | 1 } | number; error?: string } {
+function validateShortLink(): {
+  payload?:
+    | { name: string; originalUrl: string; expiresAt: string }
+    | { id: number; name?: string; status?: 0 | 1 }
+    | number
+  error?: string
+} {
   if (operation.value === 'list') return {}
   if (operation.value === 'create') {
     const trimmedName = name.value.trim()
@@ -240,14 +340,23 @@ function validateShortLink(): { payload?: { name: string; originalUrl: string; e
     if (target.length > 2048) return { error: '原始地址不能超过 2048 个字符。' }
     try {
       const url = new URL(target)
-      if (url.protocol !== 'https:' || !allowedHosts.has(url.hostname) || url.username || url.password || url.port) {
+      if (
+        url.protocol !== 'https:' ||
+        !allowedHosts.has(url.hostname) ||
+        url.username ||
+        url.password ||
+        url.port
+      ) {
         return { error: '仅支持 HTTPS 与列出的精确主机名，且不能包含登录信息或非标准端口。' }
       }
-    } catch { return { error: '请输入完整有效的 HTTPS 地址。' } }
+    } catch {
+      return { error: '请输入完整有效的 HTTPS 地址。' }
+    }
     let expiresAt: string
     if (duration.value === 'custom') {
       const timestamp = new Date(customExpiry.value).getTime()
-      if (!Number.isFinite(timestamp) || timestamp <= Date.now()) return { error: '请选择晚于当前时间的自定义到期时刻。' }
+      if (!Number.isFinite(timestamp) || timestamp <= Date.now())
+        return { error: '请选择晚于当前时间的自定义到期时刻。' }
       expiresAt = new Date(timestamp).toISOString()
     } else {
       const selected = durations.find((item) => item.value === duration.value)
@@ -263,7 +372,13 @@ function validateShortLink(): { payload?: { name: string; originalUrl: string; e
   const nextName = updatedName.value.trim()
   if (nextName.length > 64) return { error: '新名称不能超过 64 个字符。' }
   if (!nextName && !updatedStatus.value) return { error: '请填写新名称或选择新状态。' }
-  return { payload: { id, ...(nextName ? { name: nextName } : {}), ...(updatedStatus.value ? { status: Number(updatedStatus.value) as 0 | 1 } : {}) } }
+  return {
+    payload: {
+      id,
+      ...(nextName ? { name: nextName } : {}),
+      ...(updatedStatus.value ? { status: Number(updatedStatus.value) as 0 | 1 } : {}),
+    },
+  }
 }
 
 function fullScreenshotJob(job: CreatedScreenshotJob): ScreenshotJob {
@@ -286,7 +401,10 @@ function responseBody(body: unknown, key: string): string {
 
 function waitForNextScreenshotPoll(signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    if (signal.aborted) { reject(new DOMException('请求已取消', 'AbortError')); return }
+    if (signal.aborted) {
+      reject(new DOMException('请求已取消', 'AbortError'))
+      return
+    }
     const timer = window.setTimeout(() => {
       signal.removeEventListener('abort', abort)
       resolve()
@@ -299,7 +417,12 @@ function waitForNextScreenshotPoll(signal: AbortSignal): Promise<void> {
   })
 }
 
-async function monitorScreenshotJob(currentId: number, key: string, jobId: string, signal: AbortSignal) {
+async function monitorScreenshotJob(
+  currentId: number,
+  key: string,
+  jobId: string,
+  signal: AbortSignal,
+) {
   screenshotPolling.value = true
   screenshotPollError.value = ''
   screenshotPollRetryable.value = false
@@ -310,8 +433,11 @@ async function monitorScreenshotJob(currentId: number, key: string, jobId: strin
       if (statusResponse.status < 200 || statusResponse.status >= 300) {
         const message = resultMessage(statusResponse.status, statusResponse.body?.code)
         result.value = {
-          status: statusResponse.status, durationMs: null,
-          body: responseBody(statusResponse.body, key), message, isError: true,
+          status: statusResponse.status,
+          durationMs: null,
+          body: responseBody(statusResponse.body, key),
+          message,
+          isError: true,
         }
         screenshotPollError.value = message
         screenshotPollRetryable.value = statusResponse.status >= 500
@@ -319,7 +445,13 @@ async function monitorScreenshotJob(currentId: number, key: string, jobId: strin
       }
       if (!statusResponse.data) {
         const message = '服务器返回的任务状态格式不正确，自动查询已停止。'
-        result.value = { status: statusResponse.status, durationMs: null, body: '', message, isError: true }
+        result.value = {
+          status: statusResponse.status,
+          durationMs: null,
+          body: '',
+          message,
+          isError: true,
+        }
         screenshotPollError.value = message
         return
       }
@@ -331,16 +463,20 @@ async function monitorScreenshotJob(currentId: number, key: string, jobId: strin
       }
       if (statusResponse.data.status === 'FAILED') {
         result.value = {
-          status: statusResponse.status, durationMs: null,
-          body: responseBody(statusResponse.body, key), isError: true,
+          status: statusResponse.status,
+          durationMs: null,
+          body: responseBody(statusResponse.body, key),
+          isError: true,
           message: `截图任务执行失败（${statusResponse.data.failureCode || '未提供失败代码'}）。`,
         }
         return
       }
       if (statusResponse.data.status === 'EXPIRED') {
         result.value = {
-          status: statusResponse.status, durationMs: null,
-          body: responseBody(statusResponse.body, key), isError: true,
+          status: statusResponse.status,
+          durationMs: null,
+          body: responseBody(statusResponse.body, key),
+          isError: true,
           message: '截图任务的 PNG 结果已过 1 小时保留期。',
         }
         return
@@ -357,8 +493,10 @@ async function monitorScreenshotJob(currentId: number, key: string, jobId: strin
           cacheControl: imageResponse.cacheControl,
         }
       }
-      const message = imageResponse.png ? '异步截图已完成，以下是保留期内的 PNG 结果。'
-        : imageResponse.invalidImage ? '服务器没有返回有效的 PNG 图片。'
+      const message = imageResponse.png
+        ? '异步截图已完成，以下是保留期内的 PNG 结果。'
+        : imageResponse.invalidImage
+          ? '服务器没有返回有效的 PNG 图片。'
           : resultMessage(imageResponse.status, imageResponse.body?.code)
       result.value = {
         status: imageResponse.status,
@@ -375,7 +513,8 @@ async function monitorScreenshotJob(currentId: number, key: string, jobId: strin
       return
     }
   } catch (error) {
-    if (currentId !== requestId || (error instanceof DOMException && error.name === 'AbortError')) return
+    if (currentId !== requestId || (error instanceof DOMException && error.name === 'AbortError'))
+      return
     const message = '自动查询因网络问题停止，Job ID 已保留，可继续查询。'
     result.value = { status: null, durationMs: null, body: '', message, isError: true }
     screenshotPollError.value = message
@@ -394,35 +533,85 @@ function resumeScreenshotPolling() {
   controller?.abort()
   const currentId = ++requestId
   controller = new AbortController()
-  void monitorScreenshotJob(currentId, screenshotJobApiKey, screenshotJob.value.jobId, controller.signal)
+  void monitorScreenshotJob(
+    currentId,
+    screenshotJobApiKey,
+    screenshotJob.value.jobId,
+    controller.signal,
+  )
 }
 
 async function sendRequest() {
   if (loading.value) return
+  if (
+    mutationUncertain.value &&
+    !(
+      uncertainEndpoint === 'web-screenshot' &&
+      endpoint.value === 'web-screenshot' &&
+      screenshotMode.value === 'async' &&
+      articleUrl.value.trim() === uncertainTarget && machineIdentity(apiKey.value.trim()) === uncertainIdentity
+    )
+  ) {
+    formError.value = '上次写入结果未确认，请先核对原操作。'
+    return
+  }
   const key = apiKey.value.trim()
+  const requestTarget = articleUrl.value.trim()
   keyError.value = ''
   formError.value = ''
-  if (!key) { keyError.value = '请输入完整 API Key'; return }
+  if (!key) {
+    keyError.value = '请输入完整 API Key'
+    return
+  }
   if (endpoint.value === 'hash' && byteCount.value > 4096) return
   if (endpoint.value === 'web-extract' || endpoint.value === 'web-screenshot') {
     try {
       const target = articleUrl.value.trim()
       const url = new URL(target)
-      if (target.length > 2048 || url.protocol !== 'https:' || !articleHosts.has(url.hostname)
-        || url.username || url.password || url.port || target.includes('#')) {
-        formError.value = '仅支持知乎专栏和 CSDN 的完整 HTTPS 地址，不允许登录信息、自定义端口或片段。'
+      if (
+        target.length > 2048 ||
+        url.protocol !== 'https:' ||
+        !articleHosts.has(url.hostname) ||
+        url.username ||
+        url.password ||
+        url.port ||
+        target.includes('#')
+      ) {
+        formError.value =
+          '仅支持知乎专栏和 CSDN 的完整 HTTPS 地址，不允许登录信息、自定义端口或片段。'
         return
       }
-    } catch { formError.value = '请输入完整有效的 HTTPS 文章地址。'; return }
+    } catch {
+      formError.value = '请输入完整有效的 HTTPS 文章地址。'
+      return
+    }
   }
   const validated = endpoint.value === 'shortlink' ? validateShortLink() : {}
-  if (validated.error) { formError.value = validated.error; return }
+  if (validated.error) {
+    formError.value = validated.error
+    return
+  }
+  const alivePage = pageScope.capture()
+  const beforeConfirmation = requestId
+  const validPage = () => alivePage() && beforeConfirmation === requestId
   if (endpoint.value === 'shortlink' && operation.value === 'delete') {
+    loading.value = true
     try {
-      await ElMessageBox.confirm(`删除短链 ID ${validated.payload} 后，短码不会复用。确定继续吗？`, '删除短链', {
-        type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消',
-      })
-    } catch { return }
+      await ElMessageBox.confirm(
+        `删除短链 ID ${validated.payload} 后，短码不会复用。确定继续吗？`,
+        '删除短链',
+        {
+          type: 'warning',
+          confirmButtonText: '确认删除',
+          cancelButtonText: '取消',
+        },
+      )
+    } catch {
+      return
+    } finally {
+      if (validPage()) loading.value = false
+    }
+    if (!validPage()) return
   }
 
   if (desktopAsync.value) {
@@ -447,10 +636,14 @@ async function sendRequest() {
   articleTab.value = 'preview'
   const start = performance.now()
   let backgroundStarted = false
+  const writeIntent: WriteIntent | null = endpoint.value === 'web-screenshot' || endpoint.value === 'web-extract' ||
+    endpoint.value === 'shortlink' && operation.value !== 'list'
+    ? { endpoint: endpoint.value, target: requestTarget, identity: machineIdentity(key) } : null
+  pendingWrite = writeIntent
   try {
     if (endpoint.value === 'web-screenshot') {
       if (screenshotMode.value === 'async') {
-        const response = await submitScreenshotJob(key, articleUrl.value.trim(), controller.signal)
+        const response = await submitScreenshotJob(key, requestTarget, controller.signal)
         if (currentId !== requestId) return
         const success = response.status >= 200 && response.status < 300 && response.data !== null
         result.value = {
@@ -458,12 +651,20 @@ async function sendRequest() {
           durationMs: Math.round(performance.now() - start),
           body: responseBody(response.body, key),
           isError: !success,
-          message: success ? '截图任务已创建，正在自动查询状态。'
+          message: success
+            ? '截图任务已创建，正在自动查询状态。'
             : response.status >= 200 && response.status < 300
               ? '服务器返回的任务创建数据格式不正确。'
               : resultMessage(response.status, response.body?.code),
         }
-        if (!success || !response.data) return
+        if (!success || !response.data) {
+          if (screenshotSubmissionNeedsReconcile(response.status, false)) {
+            if (writeIntent) markUncertain(writeIntent)
+          }
+          return
+        }
+        mutationUncertain.value = false
+        pendingWrite = null
         screenshotJob.value = fullScreenshotJob(response.data)
         screenshotJobApiKey = key
         loading.value = false
@@ -471,60 +672,154 @@ async function sendRequest() {
         void monitorScreenshotJob(currentId, key, response.data.jobId, controller.signal)
         return
       }
-      const response = await callWebScreenshot(key, articleUrl.value.trim(), controller.signal)
+      const response = await callWebScreenshot(key, requestTarget, controller.signal)
       if (currentId !== requestId) return
-      if (response.png) screenshot.value = { image: response.png, blockedResources: response.blockedResources, resourceLimitReached: response.resourceLimitReached, cacheControl: response.cacheControl }
+      if (writeIntent && (response.status >= 500 || response.status === 408 || response.invalidImage)) markUncertain(writeIntent)
+      if (response.png)
+        screenshot.value = {
+          image: response.png,
+          blockedResources: response.blockedResources,
+          resourceLimitReached: response.resourceLimitReached,
+          cacheControl: response.cacheControl,
+        }
       result.value = {
-        status: response.status, durationMs: Math.round(performance.now() - start),
+        status: response.status,
+        durationMs: Math.round(performance.now() - start),
         body: responseBody(response.body, key),
         invalidImage: response.invalidImage,
-        message: response.png ? '截图已生成，以下是服务器返回的 PNG。'
-          : response.invalidImage ? '服务器没有返回有效的 PNG 图片，请检查后端响应。'
+        message: response.png
+          ? '截图已生成，以下是服务器返回的 PNG。'
+          : response.invalidImage
+            ? '服务器没有返回有效的 PNG 图片，请检查后端响应。'
             : resultMessage(response.status, response.body?.code),
       }
       return
     }
-    const response = endpoint.value === 'web-extract'
-      ? await callWebExtract(key, articleUrl.value.trim(), controller.signal)
-      : endpoint.value === 'shortlink'
-        ? await callShortLinkOpenApi(operation.value, key, validated.payload, controller.signal)
-        : await callOpenApi(endpoint.value, key, algorithm.value, value.value, controller.signal)
+    const response =
+      endpoint.value === 'web-extract'
+        ? await callWebExtract(key, requestTarget, controller.signal)
+        : endpoint.value === 'shortlink'
+          ? await callShortLinkOpenApi(operation.value, key, validated.payload, controller.signal)
+          : await callOpenApi(endpoint.value, key, algorithm.value, value.value, controller.signal)
     if (currentId !== requestId) return
+    const success = response.status >= 200 && response.status < 300
+    const validBody = response.body?.code === 'SUCCESS' &&
+      (endpoint.value !== 'web-extract' || isWebExtractResponse(response.body.data)) &&
+      (endpoint.value !== 'shortlink' || operation.value === 'delete' ||
+        operation.value === 'list' && Array.isArray(response.body.data) ||
+        operation.value !== 'list' && !!response.body.data && !Array.isArray(response.body.data) &&
+        Number.isSafeInteger((response.body.data as ShortLink).id) && typeof (response.body.data as ShortLink).shortCode === 'string')
+    if (writeIntent && (response.status >= 500 || response.status === 408 || success && !validBody)) markUncertain(writeIntent)
     const responseText = JSON.stringify(response.body, null, 2).replaceAll(key, '[已隐藏]')
-    if (endpoint.value === 'web-extract' && response.status >= 200 && response.status < 300) {
+    if (endpoint.value === 'web-extract' && success && validBody) {
       const data: unknown = JSON.parse(responseText)?.data
       if (isWebExtractResponse(data)) extractedArticle.value = data
     }
-    if (endpoint.value === 'shortlink' && operation.value === 'create' && response.status >= 200 && response.status < 300) {
+    if (
+      endpoint.value === 'shortlink' &&
+      operation.value === 'create' && success && validBody
+    ) {
       createdLink.value = response.body?.data as ShortLink
     }
-    if (endpoint.value === 'shortlink' && operation.value === 'list' && response.status >= 200 && response.status < 300 && Array.isArray(response.body?.data)) {
+    if (
+      endpoint.value === 'shortlink' &&
+      operation.value === 'list' &&
+      response.status >= 200 &&
+      response.status < 300 &&
+      Array.isArray(response.body?.data)
+    ) {
       listedLinks.value = response.body.data
     }
     result.value = {
       status: response.status,
       durationMs: Math.round(performance.now() - start),
       body: responseText,
-      message: response.status >= 200 && response.status < 300
-        ? '请求成功，以下是服务器返回的真实结果。'
-        : resultMessage(response.status, response.body?.code),
+      isError: success && !validBody,
+      message: success && !validBody ? '服务器返回的数据格式不正确，请先核对操作结果。' :
+        response.status >= 200 && response.status < 300
+          ? '请求成功，以下是服务器返回的真实结果。'
+          : resultMessage(response.status, response.body?.code),
     }
   } catch (error) {
-    if (currentId !== requestId || (error instanceof DOMException && error.name === 'AbortError')) return
-    result.value = { status: null, durationMs: null, body: '', message: '无法连接服务器，请确认后端已启动并检查网络。' }
+    if (currentId !== requestId || (error instanceof DOMException && error.name === 'AbortError'))
+      return
+    const writes =
+      endpoint.value === 'web-screenshot' ||
+      endpoint.value === 'web-extract' ||
+      (endpoint.value === 'shortlink' && operation.value !== 'list')
+    if (writes) {
+      if (writeIntent) markUncertain(writeIntent)
+    }
+    const timeout = error instanceof DOMException && error.name === 'TimeoutError'
+    result.value = {
+      status: null,
+      durationMs: null,
+      body: '',
+      isError: true,
+      message: writes
+        ? '无法连接服务器，操作结果尚未确认。异步截图可保留原地址和 API Key，点击发送恢复同一次提交；其他写入请先核对，勿重复提交。'
+        : timeout
+          ? '查询超时，请稍后重试。'
+          : '网络连接失败，请检查网络后重试。',
+    }
   } finally {
-    if (currentId === requestId && !backgroundStarted) { loading.value = false; controller = null }
+    if (currentId === requestId && !backgroundStarted) {
+      pendingWrite = null
+      loading.value = false
+      controller = null
+    }
+  }
+}
+
+async function startNewAfterReconciliation() {
+  if (loading.value || trackingStore.submitting) return
+  const alive = pageScope.capture()
+  const version = requestId
+  const valid = () => alive() && version === requestId
+  const key = apiKey.value.trim(),
+    target = articleUrl.value.trim()
+  try {
+    await ElMessageBox.confirm(
+      '上次操作可能已成功并消耗配额。请先核对记录；继续后下一次发送会创建新任务，可能再次扣额。',
+      '核对后开始新操作',
+      { type: 'warning', confirmButtonText: '已核对，允许新操作', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  if (!valid() || key !== apiKey.value.trim() || target !== articleUrl.value.trim()) return
+  try {
+    if (endpoint.value === 'web-screenshot' && screenshotMode.value === 'async')
+      await abandonScreenshotSubmission(key, target)
+    if (!valid()) return
+    mutationUncertain.value = false
+    trackingStore.creationUncertain = false
+    trackingStore.submissionError = null
+    formError.value = ''
+    resetRequest()
+  } catch {
+    ElMessage.error('无法更新本机提交记录，请检查存储后重试')
   }
 }
 
 async function copyExample() {
-  try { await navigator.clipboard.writeText(sample.value); ElMessage.success('示例已复制，请替换占位密钥') }
-  catch { ElMessage.error('复制失败，请手动选择示例文本') }
+  const valid = pageScope.capture()
+  try {
+    await navigator.clipboard.writeText(sample.value)
+    if (valid()) ElMessage.success('示例已复制，请替换占位密钥')
+  } catch {
+    if (valid()) ElMessage.error('复制失败，请手动选择示例文本')
+  }
 }
 
 async function copyShortUrl(shortCode: string) {
-  try { await navigator.clipboard.writeText(publicShortLinkUrl(shortCode)); ElMessage.success('短地址已复制') }
-  catch { ElMessage.error('复制失败，请手动选择短地址') }
+  const valid = pageScope.capture()
+  try {
+    await navigator.clipboard.writeText(publicShortLinkUrl(shortCode))
+    if (valid()) ElMessage.success('短地址已复制')
+  } catch {
+    if (valid()) ElMessage.error('复制失败，请手动选择短地址')
+  }
 }
 
 onBeforeUnmount(() => {
@@ -538,6 +833,9 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="playground-page" :class="{ 'is-screenshot': endpoint === 'web-screenshot' }">
+    <el-alert v-if="mutationUncertain" type="warning" :closable="false" title="上次写入结果未确认；异步截图保持原地址和 Key 后再次发送，将恢复同一次提交。" />
+    <el-button v-if="mutationUncertain || desktopAsync && trackingStore.creationUncertain" @click="startNewAfterReconciliation">核对后开始新操作</el-button>
+    <el-button v-if="desktopAsync && trackingStore.creationUncertain" :loading="trackingStore.submitting" @click="trackingStore.recoverUncertainCreation(apiKey.trim(), articleUrl.trim())">恢复上次截图提交</el-button>
     <header class="playground-intro"><div><p class="playground-eyebrow">NEXUS · OPEN API</p><h1>API 调试台</h1><p>快速调用开放 API，查看真实响应。</p></div><img class="playground-decoration" :src="decoration" alt="" aria-hidden="true" /></header>
     <div class="playground-endpoints" role="group" aria-label="选择开放 API">
       <el-button :class="{ 'is-active': endpoint === 'uuid' }" :aria-pressed="endpoint === 'uuid'" @click="selectEndpoint('uuid')"><el-icon aria-hidden="true"><DocumentCopy /></el-icon>生成 UUID</el-button>

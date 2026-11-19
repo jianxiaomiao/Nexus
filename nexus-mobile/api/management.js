@@ -162,6 +162,7 @@ export async function showError(error) {
 export function message(error) {
 	return (
 		{
+			RESOURCE_CHANGED: '资料已被修改，请刷新核对后重新操作。',
 			APPLICATION_NAME_ALREADY_EXISTS:
 				'这个 Application 名称已被使用，请换一个名称。',
 			APPLICATION_NOT_FOUND:

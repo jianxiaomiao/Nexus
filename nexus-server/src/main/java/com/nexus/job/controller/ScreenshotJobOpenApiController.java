@@ -40,7 +40,12 @@ public class ScreenshotJobOpenApiController {
     public ResponseEntity<ApiResponse<CreateScreenshotJobResponse>> submit(
             HttpServletRequest request,
             @Valid @RequestBody CreateScreenshotJobRequest body) {
-        var job = service.submit(identities.require(request), body.url());
+        var identity = identities.require(request);
+        var keys = java.util.Collections.list(request.getHeaders("Idempotency-Key"));
+        if (keys.size() > 1) throw new com.nexus.job.exception.ScreenshotSubmissionException(
+                com.nexus.job.exception.ScreenshotSubmissionException.Kind.INVALID);
+        var job = keys.isEmpty() ? service.submit(identity, body.url())
+                : service.submit(identity, body.url(), keys.getFirst());
         URI location = URI.create("/v1/web/screenshot-jobs/" + job.getJobId());
         return ResponseEntity.created(location).body(new ApiResponse<>(
                 "SUCCESS", "截图任务已创建", CreateScreenshotJobResponse.from(job)));

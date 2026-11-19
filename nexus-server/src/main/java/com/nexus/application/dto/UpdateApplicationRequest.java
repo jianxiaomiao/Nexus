@@ -15,5 +15,6 @@ public record UpdateApplicationRequest(
         @Min(0)
         @Max(1)
         Integer status
-) {
+, java.time.Instant expectedUpdatedAt) {
+    public UpdateApplicationRequest(Long id, String name, Integer status) { this(id, name, status, null); }
 }

@@ -3,12 +3,12 @@ import LoginPlanetScene from '@/components/LoginPlanetScene.vue'
 import loginIllustration from '@/assets/login_page.png'
 import brandSpark from '@/assets/icons/brand-spark.svg'
 import { RouterLink, useRouter } from 'vue-router'
-import { reactive, ref } from 'vue'
+import { reactive, ref, onBeforeUnmount } from 'vue'
 import { isAxiosError } from 'axios'
 import type { ApiResponse } from '@/api/http'
 import { login, type LoginRequest, type LoginResponse } from '@/api/auth'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import {useUserStore} from "@/stores/userStore.ts";
+import { useUserStore } from '@/stores/userStore.ts'
 
 const userStore = useUserStore()
 const router = useRouter()
@@ -19,6 +19,15 @@ const loginForm = reactive({
 
 const formRef = ref<FormInstance>()
 const submitting = ref(false)
+let disposed = false
+let pendingIntent: number | undefined
+let loginCompleted = false
+onBeforeUnmount(() => {
+  disposed = true
+  if (submitting.value && !loginCompleted && pendingIntent === userStore.operationVersion)
+    userStore.beginLogin()
+  loginForm.password = ''
+})
 
 const rules: FormRules<typeof loginForm> = {
   email: [
@@ -35,9 +44,15 @@ const rules: FormRules<typeof loginForm> = {
 const onSubmit = async () => {
   if (submitting.value || !formRef.value) return
 
+  submitting.value = true
   try {
     await formRef.value.validate()
   } catch {
+    submitting.value = false
+    return
+  }
+  if (disposed) {
+    submitting.value = false
     return
   }
 
@@ -48,28 +63,36 @@ const onSubmit = async () => {
 
   submitting.value = true
   const attempt = userStore.beginLogin()
+  pendingIntent = attempt.operationVersion
   try {
     if (attempt.blocked) {
       ElMessage.error('尚未确认会话清理，请先重试清理。')
       return
     }
-    const res: ApiResponse<LoginResponse> = await login(req, attempt.mainRevision,
-      () => attempt.operationVersion === userStore.operationVersion && !userStore.clearing)
+    const res: ApiResponse<LoginResponse> = await login(
+      req,
+      attempt.mainRevision,
+      () => attempt.operationVersion === userStore.operationVersion && !userStore.clearing,
+    )
     if (res.code !== 'SUCCESS') {
       if (attempt.operationVersion !== userStore.operationVersion) return
       ElMessage.error(res.message || '登录失败，请稍后重试')
       return
     }
     const completion = await userStore.completeLogin(attempt, res.data)
-    if (completion.status !== 'ok' && attempt.operationVersion !== userStore.operationVersion) return
+    if (completion.status !== 'ok' && attempt.operationVersion !== userStore.operationVersion)
+      return
     if (completion.status === 'stale') return
     if (completion.status === 'failed') {
-      ElMessage.error(completion.code === 'SESSION_CHANGED'
-        ? '登录会话已变化，请刷新后重新登录'
-        : '无法保存登录会话，请刷新后重新登录')
+      ElMessage.error(
+        completion.code === 'SESSION_CHANGED'
+          ? '登录会话已变化，请刷新后重新登录'
+          : '无法保存登录会话，请刷新后重新登录',
+      )
       return
     }
-    if (completion.operationVersion !== userStore.operationVersion) return
+    if (disposed || completion.operationVersion !== userStore.operationVersion) return
+    loginCompleted = true
     ElMessage.success('登录成功')
     await router.replace({ name: 'applications' })
   } catch (error) {
@@ -86,10 +109,15 @@ const onSubmit = async () => {
       error.response.data?.code === 'AUTH_ACCOUNT_FORBIDDEN'
     ) {
       ElMessage.error('账号已封禁')
-    } else if (isAxiosError<ApiResponse<unknown>>(error) && error.response?.data?.code === 'SESSION_CHANGED') {
+    } else if (
+      isAxiosError<ApiResponse<unknown>>(error) &&
+      error.response?.data?.code === 'SESSION_CHANGED'
+    ) {
       ElMessage.error('登录会话已变化，请刷新后重新登录')
     } else if (isAxiosError(error) && error.response?.status === 400) {
       ElMessage.error('请检查邮箱和密码')
+    } else if (isAxiosError(error) && error.response?.status === 429) {
+      ElMessage.error('操作过于频繁，请稍后再试')
     } else if (isAxiosError(error) && !error.response) {
       ElMessage.error('无法连接服务器，请确认后端已启动')
     } else {
@@ -99,7 +127,6 @@ const onSubmit = async () => {
     submitting.value = false
   }
 }
-
 </script>
 
 <template>
@@ -119,6 +146,7 @@ const onSubmit = async () => {
 
           <el-alert v-if="userStore.sessionNotice" :title="userStore.sessionNotice" type="warning" :closable="false" show-icon />
           <el-form
+            :disabled="submitting"
             ref="formRef"
             :model="loginForm"
             :rules="rules"

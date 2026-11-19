@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import { usePageScope } from '@/utils/pageScope'
+import { isCancel } from 'axios'
+import { mutationUnknown, needsReconcile, unknownMutationMessage } from '@/api/mutation'
 import { formatBeijingTime } from '@/utils/beijingTime'
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowRight, CopyDocument, Link, Plus, Refresh } from '@element-plus/icons-vue'
@@ -11,8 +14,12 @@ import { apiKeyErrorMessage } from '@/api/apiKeyErrors'
 import ListPagination from '@/components/ListPagination.vue'
 import ShortLinkOpenButton from '@/components/ShortLinkOpenButton.vue'
 import {
-  deleteManagedShortLink, listManagedShortLinks, publicShortLinkUrl,
-  shortLinkManagementError, updateManagedShortLink, type ShortLink,
+  deleteManagedShortLink,
+  listManagedShortLinks,
+  publicShortLinkUrl,
+  shortLinkManagementError,
+  updateManagedShortLink,
+  type ShortLink,
 } from '@/api/shortLinks'
 import '@/assets/shortLinks.css'
 
@@ -37,12 +44,56 @@ const listLoading = ref(false)
 const pageError = ref('')
 const listError = ref('')
 const actionBusy = ref(false)
+const uncertain = ref(false)
 const now = ref(Date.now())
 let clockTimer: ReturnType<typeof setInterval> | undefined
 let loadVersion = 0
 let selectionVersion = 0
+let internalNavigation = 0
+async function replaceSelection(target: Parameters<typeof router.replace>[0]) {
+  internalNavigation++
+  try {
+    return await router.replace(target)
+  } finally {
+    internalNavigation--
+  }
+}
+watch(
+  () => route.query,
+  () => {
+    if (route.name === 'short-links' && !internalNavigation) void initialize()
+  },
+  { flush: 'sync' },
+)
 
-const selectedApplication = computed(() => applications.value.find((item) => item.id === selectedApplicationId.value))
+const scope = usePageScope(
+  () => undefined,
+  () => {
+    if (actionBusy.value) ElMessageBox.close()
+    actionBusy.value = false
+    uncertain.value = false
+    ++loadVersion
+    ++selectionVersion
+    applications.value = []
+    keys.value = []
+    links.value = []
+    selectedApplicationId.value = 0
+    selectedKeyId.value = 0
+  },
+)
+
+// Selection may change while a write or confirmation is pending, including A -> B -> A.
+let actionVersion = 0
+watch([selectedApplicationId, selectedKeyId, linkCurrent, linkSize], () => {
+  ++actionVersion
+  if (actionBusy.value) ElMessageBox.close()
+  actionBusy.value = false
+  uncertain.value = false
+}, { flush: 'sync' })
+
+const selectedApplication = computed(() =>
+  applications.value.find((item) => item.id === selectedApplicationId.value),
+)
 const selectedKey = computed(() => keys.value.find((item) => item.id === selectedKeyId.value))
 const createTarget = computed(() => ({ name: 'playground', query: { endpoint: 'shortlink' } }))
 
@@ -61,12 +112,13 @@ function expired(link: ShortLink): boolean {
 
 function availability(link: ShortLink): { label: string; kind: string } {
   if (link.status === 1) return { label: '已禁用', kind: 'disabled' }
-  if (selectedApplication.value?.status === 1 || selectedKey.value?.status === 1) return { label: '上层已禁用', kind: 'disabled' }
+  if (selectedApplication.value?.status === 1 || selectedKey.value?.status === 1)
+    return { label: '上层已禁用', kind: 'disabled' }
   if (expired(link)) return { label: '已到期', kind: 'expired' }
   return { label: '可跳转', kind: 'active' }
 }
 
-async function loadLinks(keyId = selectedKeyId.value) {
+async function loadLinks(keyId = selectedKeyId.value, repair = true) {
   const version = ++selectionVersion
   links.value = []
   listError.value = ''
@@ -74,18 +126,24 @@ async function loadLinks(keyId = selectedKeyId.value) {
   if (!keyId) return
   listLoading.value = true
   try {
-    const data = await listManagedShortLinks(keyId, { current: linkCurrent.value, size: linkSize.value })
+    const data = await listManagedShortLinks(keyId, {
+      current: linkCurrent.value,
+      size: linkSize.value,
+    })
     if (version === selectionVersion) {
-      if (data.records.length === 0 && data.total > 0 && linkCurrent.value > 1) {
-        linkCurrent.value = Math.ceil(data.total / linkSize.value)
-        await loadLinks(keyId)
+      if (repair && data.records.length === 0 && linkCurrent.value > 1) {
+        linkCurrent.value = Math.max(1, Math.ceil(data.total / linkSize.value))
+        await loadLinks(keyId, false)
         return
       }
+      if (!data.records.length && data.total > 0) throw new Error('INVALID_LIST_RESPONSE')
+      uncertain.value = false
       links.value = data.records
       linkTotal.value = data.total
     }
   } catch (error) {
-    if (version === selectionVersion) listError.value = shortLinkManagementError(error, '加载短链接失败，请稍后重试')
+    if (version === selectionVersion)
+      listError.value = shortLinkManagementError(error, '加载短链接失败，请稍后重试')
   } finally {
     if (version === selectionVersion) listLoading.value = false
   }
@@ -110,16 +168,21 @@ async function loadKeys(applicationId: number, preferredKeyId = 0) {
       if (version !== selectionVersion) return
       chosen = filtered.records[0]
     }
-    keys.value = chosen && !data.records.some((item) => item.id === chosen.id) ? [chosen, ...data.records] : data.records
+    keys.value =
+      chosen && !data.records.some((item) => item.id === chosen.id)
+        ? [chosen, ...data.records]
+        : data.records
     keyTotal.value = data.total
-    selectedKeyId.value = chosen?.id ?? (preferredKeyId ? 0 : data.records[0]?.id ?? 0)
-    if (preferredKeyId && !selectedKeyId.value) listError.value = '这枚 API Key 不存在，或你没有访问权限'
+    selectedKeyId.value = chosen?.id ?? (preferredKeyId ? 0 : (data.records[0]?.id ?? 0))
+    if (preferredKeyId && !selectedKeyId.value)
+      listError.value = '这枚 API Key 不存在，或你没有访问权限'
     else {
       keyLoading.value = false
       await loadLinks(selectedKeyId.value)
     }
   } catch (error) {
-    if (version === selectionVersion) listError.value = apiKeyErrorMessage(error, '加载 API Key 失败，请稍后重试')
+    if (version === selectionVersion)
+      listError.value = apiKeyErrorMessage(error, '加载 API Key 失败，请稍后重试')
   } finally {
     if (version === selectionVersion) keyLoading.value = false
   }
@@ -127,6 +190,12 @@ async function loadKeys(applicationId: number, preferredKeyId = 0) {
 
 async function initialize() {
   const version = ++loadVersion
+  ++selectionVersion
+  keyLoading.value = false
+  listLoading.value = false
+  keys.value = []
+  links.value = []
+  selectedKeyId.value = 0
   loading.value = true
   pageError.value = ''
   const requestedKeyId = positiveId(route.query.apiKeyId)
@@ -174,44 +243,80 @@ async function initialize() {
       app = filtered.records[0]
     }
     const selectedApp = app
-    applications.value = selectedApp && !data.records.some((item) => item.id === selectedApp.id) ? [selectedApp, ...data.records] : data.records
+    applications.value =
+      selectedApp && !data.records.some((item) => item.id === selectedApp.id)
+        ? [selectedApp, ...data.records]
+        : data.records
     applicationTotal.value = data.total
-    if (!data.records.length && !requestedApplicationId) { selectedApplicationId.value = 0; keys.value = []; links.value = []; return }
+    if (!data.records.length && !requestedApplicationId) {
+      selectedApplicationId.value = 0
+      keys.value = []
+      links.value = []
+      return
+    }
     if (!requestedApplicationId) app = data.records[0]
-    if (!app) { pageError.value = '这个 Application 不存在，或你没有访问权限'; return }
+    if (!app) {
+      pageError.value = '这个 Application 不存在，或你没有访问权限'
+      return
+    }
     selectedApplicationId.value = app.id
     keyCurrent.value = 1
     await loadKeys(app.id, requestedKeyId)
   } catch (error) {
-    if (version === loadVersion) pageError.value = applicationErrorMessage(error, '加载应用失败，请稍后重试')
+    if (version === loadVersion)
+      pageError.value = applicationErrorMessage(error, '加载应用失败，请稍后重试')
   } finally {
     if (version === loadVersion) loading.value = false
   }
 }
 
 function changeApplication() {
-  void router.replace({ name: 'short-links', query: { applicationId: selectedApplicationId.value || undefined } })
+  void replaceSelection({
+    name: 'short-links',
+    query: { applicationId: selectedApplicationId.value || undefined },
+  })
   keyCurrent.value = 1
   void loadKeys(selectedApplicationId.value)
 }
 
 function changeKey() {
-  void router.replace({ name: 'short-links', query: { applicationId: selectedApplicationId.value, apiKeyId: selectedKeyId.value || undefined } })
+  void replaceSelection({
+    name: 'short-links',
+    query: {
+      applicationId: selectedApplicationId.value,
+      apiKeyId: selectedKeyId.value || undefined,
+    },
+  })
   linkCurrent.value = 1
   void loadLinks()
 }
 
 async function changeApplicationPage(value: number) {
+  const version = ++loadVersion
+  ++selectionVersion
+  const valid = scope.capture()
   applicationCurrent.value = value
+  keyLoading.value = false
+  listLoading.value = false
+  pageError.value = ''
+  keys.value = []
+  links.value = []
+  selectedKeyId.value = 0
   try {
     const data = await listApplications({ current: value, size: 10 })
+    if (!valid() || version !== loadVersion) return
     applications.value = data.records
     applicationTotal.value = data.total
     selectedApplicationId.value = data.records[0]?.id ?? 0
     keyCurrent.value = 1
-    await router.replace({ name: 'short-links', query: { applicationId: selectedApplicationId.value || undefined } })
+    await replaceSelection({
+      name: 'short-links',
+      query: { applicationId: selectedApplicationId.value || undefined },
+    })
+    if (!valid() || version !== loadVersion) return
     await loadKeys(selectedApplicationId.value)
   } catch (error) {
+    if (!valid() || version !== loadVersion || isCancel(error)) return
     pageError.value = applicationErrorMessage(error, '加载应用失败，请稍后重试')
   }
 }
@@ -219,15 +324,27 @@ async function changeApplicationPage(value: number) {
 async function changeKeyPage(value: number) {
   keyCurrent.value = value
   await loadKeys(selectedApplicationId.value)
-  await router.replace({ name: 'short-links', query: { applicationId: selectedApplicationId.value,
-    apiKeyId: selectedKeyId.value || undefined } })
+  await replaceSelection({
+    name: 'short-links',
+    query: {
+      applicationId: selectedApplicationId.value,
+      apiKeyId: selectedKeyId.value || undefined,
+    },
+  })
 }
 
-function changeLinkPage(value: number) { linkCurrent.value = value; void loadLinks() }
-function changeLinkSize(value: number) { linkSize.value = value; linkCurrent.value = 1; void loadLinks() }
+function changeLinkPage(value: number) {
+  linkCurrent.value = value
+  void loadLinks()
+}
+function changeLinkSize(value: number) {
+  linkSize.value = value
+  linkCurrent.value = 1
+  void loadLinks()
+}
 
 async function clearFilter() {
-  await router.replace({ name: 'short-links' })
+  await replaceSelection({ name: 'short-links' })
   applicationCurrent.value = 1
   keyCurrent.value = 1
   linkCurrent.value = 1
@@ -235,70 +352,182 @@ async function clearFilter() {
 }
 
 async function copyLink(link: ShortLink) {
-  try { await navigator.clipboard.writeText(publicShortLinkUrl(link.shortCode)); ElMessage.success('短地址已复制') }
-  catch { ElMessage.error('复制失败，请手动选择短地址') }
+  const valid = scope.capture()
+  try {
+    await navigator.clipboard.writeText(publicShortLinkUrl(link.shortCode))
+    if (valid()) ElMessage.success('短地址已复制')
+  } catch {
+    if (valid()) ElMessage.error('复制失败，请手动选择短地址')
+  }
 }
 
 async function rename(link: ShortLink) {
   if (actionBusy.value) return
-  let nextName: string
-  try {
-    const answer = await ElMessageBox.prompt('原始地址和到期时刻不能修改。', '编辑短链名称', {
-      inputValue: link.name, inputPlaceholder: '短链名称',
-      inputValidator: (value) => (value.trim().length > 0 && value.trim().length <= 64) || '请输入 1～64 个字符的名称',
-      confirmButtonText: '保存修改', cancelButtonText: '取消',
-    })
-    nextName = answer.value.trim()
-  } catch { return }
-  if (nextName === link.name) return
+  if (uncertain.value || listLoading.value || keyLoading.value) return
   actionBusy.value = true
+  const pageValid = scope.capture()
+  const action = ++actionVersion
+  const selection = `${selectedApplicationId.value}:${selectedKeyId.value}:${linkCurrent.value}`
+  const valid = () =>
+    pageValid() && action === actionVersion &&
+    selection === `${selectedApplicationId.value}:${selectedKeyId.value}:${linkCurrent.value}`
   try {
-    const updated = await updateManagedShortLink({ id: link.id, name: nextName })
-    links.value = links.value.map((item) => item.id === link.id ? updated : item)
-    ElMessage.success('短链名称已更新')
-  } catch (error) { ElMessage.error(shortLinkManagementError(error, '保存失败，请稍后重试')) }
-  finally { actionBusy.value = false }
+    let nextName: string
+    try {
+      const answer = await ElMessageBox.prompt('原始地址和到期时刻不能修改。', '编辑短链名称', {
+        inputValue: link.name,
+        inputPlaceholder: '短链名称',
+        inputValidator: (value) =>
+          (value.trim().length > 0 && value.trim().length <= 64) || '请输入 1～64 个字符的名称',
+        confirmButtonText: '保存修改',
+        cancelButtonText: '取消',
+      })
+      nextName = answer.value.trim()
+    } catch {
+      return
+    }
+    if (nextName === link.name) return
+    if (!valid()) return
+    try {
+      const updated = await updateManagedShortLink({
+        id: link.id,
+        expectedUpdatedAt: link.updatedAt,
+        name: nextName,
+      })
+      if (!valid()) return
+      ++selectionVersion
+      listLoading.value = false
+      links.value = links.value.map((item) => (item.id === link.id ? updated : item))
+      ElMessage.success('短链名称已更新')
+    } catch (error) {
+      if (!valid() || isCancel(error)) return
+      uncertain.value = needsReconcile(error)
+      ElMessage.error(
+        mutationUnknown(error)
+          ? unknownMutationMessage
+          : shortLinkManagementError(error, '保存失败，请稍后重试'),
+      )
+    }
+  } finally {
+    if (valid()) actionBusy.value = false
+  }
 }
 
 async function toggle(link: ShortLink) {
   if (actionBusy.value || expired(link)) return
-  const disabling = link.status === 0
-  try {
-    await ElMessageBox.confirm(disabling ? `禁用「${link.name}」后将无法公开跳转。确定继续吗？` : `确定重新启用「${link.name}」吗？`, disabling ? '禁用短链' : '启用短链', {
-      type: disabling ? 'warning' : 'info', confirmButtonText: disabling ? '确认禁用' : '确认启用', cancelButtonText: '取消',
-    })
-  } catch { return }
+  if (uncertain.value || listLoading.value || keyLoading.value) return
   actionBusy.value = true
+  const pageValid = scope.capture()
+  const action = ++actionVersion
+  const selection = `${selectedApplicationId.value}:${selectedKeyId.value}:${linkCurrent.value}`
+  const valid = () =>
+    pageValid() && action === actionVersion &&
+    selection === `${selectedApplicationId.value}:${selectedKeyId.value}:${linkCurrent.value}`
   try {
-    const updated = await updateManagedShortLink({ id: link.id, status: disabling ? 1 : 0 })
-    links.value = links.value.map((item) => item.id === link.id ? updated : item)
-    ElMessage.success(disabling ? '短链已禁用' : '短链已启用')
-  } catch (error) { ElMessage.error(shortLinkManagementError(error, '修改状态失败，请稍后重试')) }
-  finally { actionBusy.value = false }
+    const disabling = link.status === 0
+    try {
+      await ElMessageBox.confirm(
+        disabling
+          ? `禁用「${link.name}」后将无法公开跳转。确定继续吗？`
+          : `确定重新启用「${link.name}」吗？`,
+        disabling ? '禁用短链' : '启用短链',
+        {
+          type: disabling ? 'warning' : 'info',
+          confirmButtonText: disabling ? '确认禁用' : '确认启用',
+          cancelButtonText: '取消',
+        },
+      )
+    } catch {
+      return
+    }
+    if (!valid()) return
+    try {
+      const updated = await updateManagedShortLink({
+        id: link.id,
+        expectedUpdatedAt: link.updatedAt,
+        status: disabling ? 1 : 0,
+      })
+      if (!valid()) return
+      ++selectionVersion
+      listLoading.value = false
+      links.value = links.value.map((item) => (item.id === link.id ? updated : item))
+      ElMessage.success(disabling ? '短链已禁用' : '短链已启用')
+    } catch (error) {
+      if (!valid() || isCancel(error)) return
+      uncertain.value = needsReconcile(error)
+      ElMessage.error(
+        mutationUnknown(error)
+          ? unknownMutationMessage
+          : shortLinkManagementError(error, '修改状态失败，请稍后重试'),
+      )
+    }
+  } finally {
+    if (valid()) actionBusy.value = false
+  }
 }
 
 async function remove(link: ShortLink) {
   if (actionBusy.value) return
-  try {
-    await ElMessageBox.confirm(`删除「${link.name}」后，短地址永久失效且短码不会复用。确定删除吗？`, '删除短链', {
-      type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消',
-    })
-  } catch { return }
+  if (uncertain.value || listLoading.value || keyLoading.value) return
   actionBusy.value = true
+  const pageValid = scope.capture()
+  const action = ++actionVersion
+  const selection = `${selectedApplicationId.value}:${selectedKeyId.value}:${linkCurrent.value}`
+  const valid = () =>
+    pageValid() && action === actionVersion &&
+    selection === `${selectedApplicationId.value}:${selectedKeyId.value}:${linkCurrent.value}`
   try {
-    await deleteManagedShortLink(link.id)
-    await loadLinks()
-    ElMessage.success('短链已删除')
-  } catch (error) { ElMessage.error(shortLinkManagementError(error, '删除失败，请稍后重试')) }
-  finally { actionBusy.value = false }
+    try {
+      await ElMessageBox.confirm(
+        `删除「${link.name}」后，短地址永久失效且短码不会复用。确定删除吗？`,
+        '删除短链',
+        {
+          type: 'warning',
+          confirmButtonText: '确认删除',
+          cancelButtonText: '取消',
+        },
+      )
+    } catch {
+      return
+    }
+    if (!valid()) return
+    try {
+      await deleteManagedShortLink(link.id)
+      if (!valid()) return
+      ++selectionVersion
+      listLoading.value = false
+      await loadLinks()
+      ElMessage.success('短链已删除')
+    } catch (error) {
+      if (!valid() || isCancel(error)) return
+      uncertain.value = needsReconcile(error)
+      ElMessage.error(
+        mutationUnknown(error)
+          ? unknownMutationMessage
+          : shortLinkManagementError(error, '删除失败，请稍后重试'),
+      )
+    }
+  } finally {
+    if (valid()) actionBusy.value = false
+  }
 }
 
-onMounted(() => { clockTimer = setInterval(() => { now.value = Date.now() }, 1000); void initialize() })
-onUnmounted(() => { if (clockTimer) clearInterval(clockTimer); loadVersion++; selectionVersion++ })
+onMounted(() => {
+  clockTimer = setInterval(() => {
+    now.value = Date.now()
+  }, 1000)
+  void initialize()
+})
+onUnmounted(() => {
+  if (clockTimer) clearInterval(clockTimer)
+  loadVersion++
+  selectionVersion++
+})
 </script>
 
 <template>
   <section class="short-links-page" aria-labelledby="short-links-title">
+    <div v-if="uncertain" class="short-links-card short-links-error" role="alert"><p>请先刷新核对最新资料，再决定下一步操作。</p><el-button @click="loadLinks()">刷新核对</el-button></div>
     <header class="short-links-heading"><div><p class="short-links-eyebrow">NEXUS · SHORT LINKS</p><h1 id="short-links-title">短链接</h1><p>按 Application 和 API Key 查找、复制并管理已创建的短链。</p></div></header>
     <div v-if="loading" class="short-links-card" aria-busy="true"><el-skeleton :rows="7" animated /></div>
     <div v-else-if="pageError" class="short-links-card short-links-error" role="alert"><strong>暂时无法查看短链接</strong><p>{{ pageError }}</p><el-button @click="initialize">重试</el-button><el-button link type="primary" class="short-links-clear-filter" @click="clearFilter">查看我的短链接</el-button></div>

@@ -1,10 +1,26 @@
 <script setup lang="ts">
+import { usePageScope } from '@/utils/pageScope'
+import { mutationUnknown, needsReconcile, unknownMutationMessage } from '@/api/mutation'
+import { isCancel } from 'axios'
+import { onBeforeUnmount } from 'vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, CircleCheck, CircleClose, Delete, EditPen, Refresh } from '@element-plus/icons-vue'
+import {
+  ArrowLeft,
+  CircleCheck,
+  CircleClose,
+  Delete,
+  EditPen,
+  Refresh,
+} from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import brandSpark from '@/assets/icons/brand-spark.svg'
-import { deleteApplication, listApplications, updateApplication, type Application } from '@/api/applications'
+import {
+  deleteApplication,
+  listApplications,
+  updateApplication,
+  type Application,
+} from '@/api/applications'
 import { applicationErrorMessage } from '@/api/applicationErrors'
 import ApiKeysPanel from './ApiKeysPanel.vue'
 import ApplicationWebhookPanel from './ApplicationWebhookPanel.vue'
@@ -27,6 +43,19 @@ const activeTab = computed(() => {
 })
 let loadVersion = 0
 
+const uncertain = ref(false)
+const scope = usePageScope(
+  () => String(route.params.id),
+  () => {
+    if (actionBusy.value) ElMessageBox.close()
+    actionBusy.value = false
+    uncertain.value = false
+    ++loadVersion
+    application.value = null
+  },
+)
+onBeforeUnmount(() => ++loadVersion)
+
 async function load() {
   const version = ++loadVersion
   const id = Number(route.params.id)
@@ -45,11 +74,13 @@ async function load() {
   try {
     const applications = await listApplications({ applicationId: id })
     if (version !== loadVersion) return
+    uncertain.value = false
     application.value = applications.records[0] ?? null
     quota.value = applications.records[0]?.quota ?? null
     if (!application.value) errorMessage.value = '这个应用不存在，或你没有访问权限'
   } catch (error) {
-    if (version === loadVersion) errorMessage.value = applicationErrorMessage(error, '加载应用失败，请稍后重试')
+    if (version === loadVersion)
+      errorMessage.value = applicationErrorMessage(error, '加载应用失败，请稍后重试')
   } finally {
     if (version === loadVersion) loading.value = false
   }
@@ -69,7 +100,8 @@ async function refreshQuota() {
     const result = await queryApplicationQuota(id)
     if (version === loadVersion) quota.value = result
   } catch (error) {
-    if (version === loadVersion) quotaError.value = applicationErrorMessage(error, '加载配额失败，请稍后重试')
+    if (version === loadVersion)
+      quotaError.value = applicationErrorMessage(error, '加载配额失败，请稍后重试')
   } finally {
     if (version === loadVersion) quotaLoading.value = false
   }
@@ -77,101 +109,150 @@ async function refreshQuota() {
 
 async function rename() {
   const current = application.value
-  if (!current || actionBusy.value) return
-
-  let name: string
-  try {
-    const answer = await ElMessageBox.prompt('为这个应用设置一个清晰的名称。', '编辑应用名称', {
-      inputValue: current.name,
-      inputPlaceholder: '应用名称',
-      inputValidator: (value) => {
-        const length = value.trim().length
-        return (length > 0 && length <= 64) || '请输入 1–64 个字符的应用名称'
-      },
-      confirmButtonText: '保存修改',
-      cancelButtonText: '取消',
-    })
-    name = answer.value.trim()
-  } catch {
-    return
-  }
-
-  if (name === current.name) return
+  if (!current || actionBusy.value || loading.value || uncertain.value) return
   actionBusy.value = true
+  const valid = scope.capture()
+  let name = current.name
   try {
-    application.value = await updateApplication({ id: current.id, name })
-    ElMessage.success('应用名称已更新')
+    try {
+      const answer = await ElMessageBox.prompt('设置一个清晰的名称。', '编辑应用名称', {
+        inputValue: current.name,
+        inputPlaceholder: '应用名称',
+        inputValidator: (value) =>
+          (value.trim().length > 0 && value.trim().length <= 64) || '请输入 1–64 个字符的名称',
+        confirmButtonText: '保存修改',
+        cancelButtonText: '取消',
+      })
+      name = answer.value.trim()
+    } catch {
+      return
+    }
+    if (!valid()) return
+    if (name === current.name) return
+    const updated = await updateApplication({
+      id: current.id,
+      expectedUpdatedAt: current.updatedAt,
+      name,
+    })
+    if (!valid()) return
+    ++loadVersion
+    quotaLoading.value = false
+    application.value = updated
+    ElMessage.success('名称已更新')
   } catch (error) {
-    ElMessage.error(applicationErrorMessage(error, '保存失败，请稍后重试'))
+    if (!valid() || isCancel(error)) return
+    uncertain.value = needsReconcile(error)
+    ElMessage.error(
+      mutationUnknown(error)
+        ? unknownMutationMessage
+        : applicationErrorMessage(error, '操作失败，请刷新核对后重试'),
+    )
   } finally {
-    actionBusy.value = false
+    if (valid()) actionBusy.value = false
   }
 }
 
 async function toggleStatus() {
   const current = application.value
-  if (!current || actionBusy.value) return
-  const disabling = current.status === 0
-  try {
-    await ElMessageBox.confirm(
-      disabling
-        ? `禁用「${current.name}」后，所属 API Key 将无法调用开放 API。确定继续吗？`
-        : `确定重新启用「${current.name}」吗？`,
-      disabling ? '禁用应用' : '启用应用',
-      { type: disabling ? 'warning' : 'info', confirmButtonText: disabling ? '确认禁用' : '确认启用', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
-
+  if (!current || actionBusy.value || loading.value || uncertain.value) return
   actionBusy.value = true
+  const valid = scope.capture()
+
   try {
-    application.value = await updateApplication({ id: current.id, status: disabling ? 1 : 0 })
-    ElMessage.success(disabling ? '应用已禁用' : '应用已启用')
+    try {
+      await ElMessageBox.confirm(
+        current.status === 0 ? '禁用后将无法调用开放 API。确定继续吗？' : '确定重新启用吗？',
+        current.status === 0 ? '禁用应用' : '启用应用',
+        {
+          confirmButtonText: current.status === 0 ? '确认禁用' : '确认启用',
+          cancelButtonText: '取消',
+        },
+      )
+    } catch {
+      return
+    }
+    if (!valid()) return
+
+    const updated = await updateApplication({
+      id: current.id,
+      expectedUpdatedAt: current.updatedAt,
+      status: current.status === 0 ? 1 : 0,
+    })
+    if (!valid()) return
+    ++loadVersion
+    quotaLoading.value = false
+    application.value = updated
+    ElMessage.success('状态已更新')
   } catch (error) {
-    ElMessage.error(applicationErrorMessage(error, '修改状态失败，请稍后重试'))
+    if (!valid() || isCancel(error)) return
+    uncertain.value = needsReconcile(error)
+    ElMessage.error(
+      mutationUnknown(error)
+        ? unknownMutationMessage
+        : applicationErrorMessage(error, '操作失败，请刷新核对后重试'),
+    )
   } finally {
-    actionBusy.value = false
+    if (valid()) actionBusy.value = false
   }
 }
 
 async function remove() {
   const current = application.value
-  if (!current || actionBusy.value) return
+  if (!current || actionBusy.value || loading.value || uncertain.value) return
+  actionBusy.value = true
+  const valid = scope.capture()
+
   try {
-    await ElMessageBox.prompt(
-      `删除后，应用及所属 API Key 将无法继续使用。请输入「${current.name}」以确认。`,
-      '删除应用',
-      {
-        type: 'warning',
+    try {
+      await ElMessageBox.prompt(`请输入「${current.name}」以确认。`, '删除应用', {
         inputPlaceholder: '输入应用名称',
         inputValidator: (value) => value === current.name || '名称不一致，请重新输入',
         confirmButtonText: '确认删除',
         cancelButtonText: '取消',
-      },
-    )
-  } catch {
-    return
-  }
+      })
+    } catch {
+      return
+    }
+    if (!valid()) return
 
-  actionBusy.value = true
-  try {
     await deleteApplication(current.id)
-    ElMessage.success('应用已删除')
-    await router.replace({ name: 'applications' })
+    if (!valid()) return
+    ++loadVersion
+    application.value = null
+    ElMessage.success('已删除')
+    try {
+      const failure = await router.replace({ name: 'applications' })
+      if (failure && valid()) errorMessage.value = '已删除，但页面跳转失败，请返回列表。'
+    } catch {
+      if (valid()) errorMessage.value = '已删除，但页面跳转失败，请返回列表。'
+    }
   } catch (error) {
-    ElMessage.error(applicationErrorMessage(error, '删除失败，请稍后重试'))
+    if (!valid() || isCancel(error)) return
+    uncertain.value = needsReconcile(error)
+    ElMessage.error(
+      mutationUnknown(error)
+        ? unknownMutationMessage
+        : applicationErrorMessage(error, '操作失败，请刷新核对后重试'),
+    )
   } finally {
-    actionBusy.value = false
+    if (valid()) actionBusy.value = false
   }
 }
 
-onMounted(() => { void load() })
-watch(() => route.params.id, () => { void load() })
+onMounted(() => {
+  void load()
+})
+watch(
+  () => route.params.id,
+  () => {
+    void load()
+  },
+)
 </script>
 
 <template>
   <section class="detail-page" aria-labelledby="detail-title">
+    <div v-if="uncertain" class="detail-card error-card" role="alert"><p>请先刷新核对最新资料，再决定下一步操作。</p><el-button @click="load">刷新核对</el-button></div>
     <RouterLink class="back-link" :to="{ name: 'applications' }"><el-icon :size="16" aria-hidden="true"><ArrowLeft /></el-icon>返回 Applications</RouterLink>
 
     <div v-if="loading" class="detail-card" aria-busy="true"><el-skeleton :rows="5" animated /></div>
@@ -193,9 +274,9 @@ watch(() => route.params.id, () => { void load() })
           </div>
         </div>
         <div class="heading-actions" role="group" aria-label="应用操作">
-          <el-tooltip content="编辑名称" placement="top"><el-button class="icon-action" :disabled="actionBusy" aria-label="编辑应用名称" @click="rename"><el-icon :size="18" aria-hidden="true"><EditPen /></el-icon></el-button></el-tooltip>
-          <el-tooltip :content="application.status === 0 ? '禁用应用' : '启用应用'" placement="top"><el-button class="icon-action warning-action" :disabled="actionBusy" :aria-label="application.status === 0 ? '禁用应用' : '启用应用'" @click="toggleStatus"><el-icon :size="18" aria-hidden="true"><CircleClose v-if="application.status === 0" /><CircleCheck v-else /></el-icon></el-button></el-tooltip>
-          <el-tooltip content="删除应用" placement="top"><el-button class="icon-action danger-action" :disabled="actionBusy" aria-label="删除应用" @click="remove"><el-icon :size="18" aria-hidden="true"><Delete /></el-icon></el-button></el-tooltip>
+          <el-tooltip content="编辑名称" placement="top"><el-button class="icon-action" :disabled="actionBusy || loading || uncertain" aria-label="编辑应用名称" @click="rename"><el-icon :size="18" aria-hidden="true"><EditPen /></el-icon></el-button></el-tooltip>
+          <el-tooltip :content="application.status === 0 ? '禁用应用' : '启用应用'" placement="top"><el-button class="icon-action warning-action" :disabled="actionBusy || loading || uncertain" :aria-label="application.status === 0 ? '禁用应用' : '启用应用'" @click="toggleStatus"><el-icon :size="18" aria-hidden="true"><CircleClose v-if="application.status === 0" /><CircleCheck v-else /></el-icon></el-button></el-tooltip>
+          <el-tooltip content="删除应用" placement="top"><el-button class="icon-action danger-action" :disabled="actionBusy || loading || uncertain" aria-label="删除应用" @click="remove"><el-icon :size="18" aria-hidden="true"><Delete /></el-icon></el-button></el-tooltip>
         </div>
       </div>
 

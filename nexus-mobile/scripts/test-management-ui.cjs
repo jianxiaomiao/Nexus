@@ -56,6 +56,7 @@ async function main() {
 			lostRotate = false,
 			quotaFailed = false,
 			slowSummary = false
+		let summaryBarrier = null
 		const mark = (x) => {
 			checks.push(x)
 			console.log(x)
@@ -249,6 +250,9 @@ async function main() {
 				})
 			if (url.pathname === '/api/usage') {
 				const today = url.searchParams.get('timeRange') === 'TODAY'
+				if (summaryBarrier && url.searchParams.get('timeRange') === 'LAST_30_DAYS') {
+					const barrier = summaryBarrier; summaryBarrier = null; barrier.enter(); await barrier.promise
+				}
 				if (slowSummary && !today) {
 					slowSummary = false
 					await new Promise((r) => setTimeout(r, 700))
@@ -420,8 +424,16 @@ async function main() {
 		mark(
 			'KEY_ONE_TIME_REVEAL_RENAME_DISABLED_HISTORY_USAGE_ZERO_AND_STALE_RESPONSE_PASSED',
 		)
-		await button('自定义').click()
-		await button('查询时间范围').click()
+        let releaseSummary, enteredSummary
+        const entered = new Promise(resolve => { enteredSummary = resolve })
+        summaryBarrier = { enter: enteredSummary, promise: new Promise(resolve => { releaseSummary = resolve }) }
+        await button('近30天').click()
+        await entered
+        await button('自定义').click()
+        await expect.poll(() => button('查询时间范围').getAttribute('disabled')).toBeNull()
+        releaseSummary()
+        await button('查询时间范围').click()
+        mark('CUSTOM_SWITCH_DURING_PENDING_QUERY_REMAINS_QUERYABLE_PASSED')
 		await expect(p.locator('.period-count')).toHaveText('7')
 		const customQuery = new URLSearchParams(
 			calls.filter((call) => call.path === '/api/usage').at(-1).query,

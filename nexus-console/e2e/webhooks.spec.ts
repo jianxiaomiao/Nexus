@@ -84,9 +84,9 @@ test('已配置 Webhook 可修改 URL、暂停恢复并轮换 Secret', async ({ 
   await dialog.getByRole('button', { name: '完成' }).click()
 
   expect(api.calls.filter((call) => call.method === 'PUT' && call.path.endsWith('/webhook')).map((call) => call.body)).toEqual([
-    { url: 'https://new.example.test/webhook' },
-    { status: 1 },
-    { status: 0 },
+    { url: 'https://new.example.test/webhook', expectedUpdatedAt: expect.any(String) },
+    { status: 1, expectedUpdatedAt: expect.any(String) },
+    { status: 0, expectedUpdatedAt: expect.any(String) },
   ])
   const rotations = api.calls.filter((call) => call.path.endsWith('/rotate-secret'))
   expect(rotations).toHaveLength(1)

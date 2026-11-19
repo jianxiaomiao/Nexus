@@ -137,6 +137,7 @@ public interface ScreenshotJobMapper extends BaseMapper<ScreenshotJob> {
             FROM screenshot_jobs
             WHERE status IN (3, 4)
               AND completed_at <= #{completedBefore}
+              AND (submission_expires_at IS NULL OR submission_expires_at <= #{completedBefore})
             ORDER BY completed_at, id
             LIMIT #{limit}
             """)
@@ -149,6 +150,7 @@ public interface ScreenshotJobMapper extends BaseMapper<ScreenshotJob> {
             WHERE id = #{id}
               AND status IN (3, 4)
               AND completed_at <= #{completedBefore}
+              AND (submission_expires_at IS NULL OR submission_expires_at <= #{completedBefore})
             """)
     int deleteTerminalIfEligible(@Param("id") long id,
                                  @Param("completedBefore") LocalDateTime completedBefore);

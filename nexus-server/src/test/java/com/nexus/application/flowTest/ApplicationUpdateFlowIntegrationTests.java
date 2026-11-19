@@ -39,6 +39,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @Transactional
+@org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
 class ApplicationUpdateFlowIntegrationTests {
     @Autowired private JwtTokenService jwtTokenService;
     @Autowired private AuthSessionMapper authSessions;

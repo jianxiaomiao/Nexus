@@ -243,6 +243,8 @@ class ApplicationServiceImplTests {
 
     @Test
     void updateShouldScopeWriteToActiveOwnerAndReturnPersistedResponse() {
+        Application before = new Application(); before.setUpdatedAt(UTC_NOW.minusSeconds(1));
+        when(applicationMapper.selectOne(any())).thenReturn(before);
         LocalDateTime createdAt = LocalDateTime.of(2026, 9, 26, 10, 0);
         LocalDateTime updatedAt = createdAt.plusHours(1);
         Application persisted = new Application();
@@ -278,11 +280,35 @@ class ApplicationServiceImplTests {
                     && update.getParamNameValuePairs().containsValue(1);
         }));
         verify(applicationMapper).selectById(100L);
+        verify(applicationMapper).selectOne(any());
         verifyNoMoreInteractions(applicationMapper);
     }
 
     @Test
+    void conditionalUpdateAdvancesTheTimestampWithAFrozenClock() {
+        Application before = new Application();
+        before.setId(100L); before.setName("before"); before.setStatus(0);
+        before.setCreatedAt(UTC_NOW.minusDays(1)); before.setUpdatedAt(UTC_NOW);
+        Application after = new Application();
+        after.setId(100L); after.setName("after"); after.setStatus(0);
+        after.setCreatedAt(before.getCreatedAt()); after.setUpdatedAt(UTC_NOW.plusNanos(1_000_000));
+        when(applicationMapper.selectOne(any())).thenReturn(before);
+        when(applicationMapper.update(isNull(), any(LambdaUpdateWrapper.class))).thenReturn(1);
+        when(applicationMapper.selectById(100L)).thenReturn(after);
+        var response = applicationService.updateMyApplication(42L,
+                new UpdateApplicationRequest(100L, "after", null, UTC_NOW.toInstant(ZoneOffset.UTC)));
+        assertEquals(UTC_NOW.plusNanos(1_000_000).toInstant(ZoneOffset.UTC), response.updatedAt());
+        verify(applicationMapper).update(isNull(), argThat(wrapper -> {
+            LambdaUpdateWrapper<?> update = (LambdaUpdateWrapper<?>) wrapper;
+            update.getSqlSet();
+            return update.getParamNameValuePairs().containsValue(UTC_NOW.plusNanos(1_000_000));
+        }));
+    }
+
+    @Test
     void statusOnlyUpdateShouldNotWriteName() {
+        Application before = new Application(); before.setUpdatedAt(UTC_NOW.minusSeconds(1));
+        when(applicationMapper.selectOne(any())).thenReturn(before);
         when(applicationMapper.update(isNull(), any(LambdaUpdateWrapper.class))).thenReturn(0);
 
         assertThrows(ApplicationNotFoundException.class,
@@ -296,11 +322,14 @@ class ApplicationServiceImplTests {
             return !update.getSqlSet().contains("name")
                     && update.getSqlSet().contains("status");
         }));
+        verify(applicationMapper).selectOne(any());
         verifyNoMoreInteractions(applicationMapper);
     }
 
     @Test
     void nameOnlyUpdateShouldNotWriteStatus() {
+        Application before = new Application(); before.setUpdatedAt(UTC_NOW.minusSeconds(1));
+        when(applicationMapper.selectOne(any())).thenReturn(before);
         when(applicationMapper.update(isNull(), any(LambdaUpdateWrapper.class))).thenReturn(0);
 
         assertThrows(ApplicationNotFoundException.class,
@@ -315,23 +344,26 @@ class ApplicationServiceImplTests {
                     && !update.getSqlSet().contains("status")
                     && update.getParamNameValuePairs().containsValue("appA");
         }));
+        verify(applicationMapper).selectOne(any());
         verifyNoMoreInteractions(applicationMapper);
     }
 
     @Test
-    void updateShouldReturnNotFoundWithoutReadingWhenNoOwnedActiveRowMatches() {
-        when(applicationMapper.update(isNull(), any(LambdaUpdateWrapper.class))).thenReturn(0);
+    void updateShouldRejectBeforeWritingWhenNoOwnedActiveRowMatches() {
+
 
         assertThrows(ApplicationNotFoundException.class,
                 () -> applicationService.updateMyApplication(
                         42L, new UpdateApplicationRequest(100L, "appA", null)));
 
-        verify(applicationMapper).update(isNull(), any(LambdaUpdateWrapper.class));
+        verify(applicationMapper).selectOne(any());
         verifyNoMoreInteractions(applicationMapper);
     }
 
     @Test
-    void updateShouldTranslateDuplicateNameWithoutReading() {
+    void updateShouldTranslateDuplicateNameAfterOwnershipLock() {
+        Application before = new Application(); before.setUpdatedAt(UTC_NOW.minusSeconds(1));
+        when(applicationMapper.selectOne(any())).thenReturn(before);
         DuplicateKeyException databaseException = new DuplicateKeyException("duplicate name");
         when(applicationMapper.update(isNull(), any(LambdaUpdateWrapper.class)))
                 .thenThrow(databaseException);
@@ -343,6 +375,7 @@ class ApplicationServiceImplTests {
 
         assertEquals(databaseException, exception.getCause());
         verify(applicationMapper).update(isNull(), any(LambdaUpdateWrapper.class));
+        verify(applicationMapper).selectOne(any());
         verifyNoMoreInteractions(applicationMapper);
     }
 

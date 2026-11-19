@@ -2,7 +2,7 @@
 import LoginPlanetScene from '@/components/LoginPlanetScene.vue'
 import loginIllustration from '@/assets/login_page.png'
 import brandSpark from '@/assets/icons/brand-spark.svg'
-import { reactive, ref } from 'vue'
+import { reactive, ref, onBeforeUnmount } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { isAxiosError } from 'axios'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
@@ -18,6 +18,12 @@ const registerForm = reactive({
 
 const formRef = ref<FormInstance>()
 const submitting = ref(false)
+let disposed = false
+onBeforeUnmount(() => {
+  disposed = true
+  registerForm.password = ''
+  registerForm.confirmPassword = ''
+})
 const router = useRouter()
 
 const rules: FormRules<typeof registerForm> = {
@@ -49,9 +55,15 @@ const rules: FormRules<typeof registerForm> = {
 const onSubmit = async () => {
   if (submitting.value || !formRef.value) return
 
+  submitting.value = true
   try {
     await formRef.value.validate()
   } catch {
+    submitting.value = false
+    return
+  }
+  if (disposed) {
+    submitting.value = false
     return
   }
 
@@ -66,12 +78,15 @@ const onSubmit = async () => {
   try {
     response = await register(request)
   } catch (error) {
+    if (disposed) return
     if (
       isAxiosError<ApiResponse<unknown>>(error) &&
       error.response?.status === 409 &&
       error.response.data?.code === 'AUTH_EMAIL_ALREADY_REGISTERED'
     ) {
       ElMessage.error('该邮箱已被注册，请直接登录')
+    } else if (isAxiosError(error) && error.response?.status === 429) {
+      ElMessage.error('操作过于频繁，请稍后再试')
     } else if (isAxiosError(error) && !error.response) {
       ElMessage.error('无法连接服务器，请确认后端已启动')
     } else {
@@ -82,6 +97,7 @@ const onSubmit = async () => {
     submitting.value = false
   }
 
+  if (disposed) return
   if (response.code !== 'SUCCESS') {
     ElMessage.error(response.message || '注册失败，请稍后重试')
     return
@@ -108,6 +124,7 @@ const onSubmit = async () => {
           <p class="form-description">用邮箱注册，开启你的开发者空间。</p>
 
           <el-form
+            :disabled="submitting"
             ref="formRef"
             :model="registerForm"
             :rules="rules"

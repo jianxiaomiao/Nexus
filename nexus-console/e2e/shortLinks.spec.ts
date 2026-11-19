@@ -128,7 +128,7 @@ test('调试台的查询、修改和删除都只携带机器 Key', async ({ page
       }] } })
     } else if (request.method() === 'PUT') {
       expect(request.postDataJSON()).toEqual({ id: 123, name: '新名称', status: 1 })
-      await route.fulfill({ status: 200, json: { code: 'SUCCESS', message: '更新成功', data: { id: 123, name: '新名称', status: 1 } } })
+      await route.fulfill({ status: 200, json: { code: 'SUCCESS', message: '更新成功', data: { id: 123, apiKeyId: sampleKey.id, name: '新名称', status: 1, shortCode: 'DemoList1', originalUrl: 'https://weibo.com/1', expiresAt: '2030-01-01T00:00:00Z', createdAt: '2026-10-05T10:00:00Z', updatedAt: '2026-10-05T10:01:00Z' } } })
     } else {
       expect(request.url()).toContain('/v1/short-links/123')
       await route.fulfill({ status: 200, json: { code: 'SUCCESS', message: '删除成功', data: null } })
