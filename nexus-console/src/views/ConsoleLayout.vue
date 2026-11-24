@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { isNavigationFailure, RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { ElMessage, type ScrollbarInstance } from 'element-plus'
 import { useUserStore } from '@/stores/userStore'
-import { Close, Document, Expand, Fold, Grid, Link, Monitor, SwitchButton } from '@element-plus/icons-vue'
+import { Close, Document, Expand, Fold, Grid, Link, Monitor, SwitchButton, Tickets } from '@element-plus/icons-vue'
 import brandSpark from '@/assets/icons/brand-spark.svg'
 
 const route = useRoute()
@@ -99,6 +99,10 @@ async function logout() {
           <el-icon class="nav-icon" :size="20" aria-hidden="true"><Link /></el-icon>
           <span>短链接</span>
         </RouterLink>
+        <RouterLink class="nav-item" :to="{ name: 'support-tickets' }" aria-label="我的工单" @click="mobileMenuOpen = false">
+          <el-icon class="nav-icon" :size="20" aria-hidden="true"><Tickets /></el-icon>
+          <span>我的工单</span>
+        </RouterLink>
         <RouterLink class="nav-item" :to="{ name: 'playground' }" aria-label="API 调试台" @click="mobileMenuOpen = false">
           <el-icon class="nav-icon" :size="20" aria-hidden="true"><Monitor /></el-icon>
           <span>API 调试台</span>
@@ -123,6 +127,7 @@ async function logout() {
             <RouterLink v-if="route.name === 'application-detail' || route.name === 'api-key-detail'" :to="{ name: 'applications' }">Applications</RouterLink>
             <strong v-else-if="route.name === 'playground'" aria-current="page">API 调试台</strong>
             <strong v-else-if="route.name === 'short-links'" aria-current="page">短链接</strong>
+            <strong v-else-if="route.name === 'support-tickets'" aria-current="page">我的工单</strong>
             <strong v-else>Applications</strong>
             <span v-if="route.name === 'application-detail'" aria-current="page">/ 应用详情</span>
             <template v-else-if="route.name === 'api-key-detail'">

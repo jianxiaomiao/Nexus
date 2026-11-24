@@ -38,6 +38,11 @@ const router = createRouter({
           name: 'short-links',
           component: () => import('../views/ShortLinksView.vue'),
         },
+        {
+          path: 'support/tickets',
+          name: 'support-tickets',
+          component: () => import('../views/SupportTicketsView.vue'),
+        },
       ],
     },
     {
