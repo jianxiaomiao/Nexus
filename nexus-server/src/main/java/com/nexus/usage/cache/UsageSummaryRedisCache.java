@@ -30,6 +30,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -56,15 +57,21 @@ public class UsageSummaryRedisCache implements AutoCloseable {
     private final Counter loads;
     private final Counter joined;
     private final Counter waitTimeouts;
+    private final Counter loadRejections;
+    private final Semaphore loadPermits;
     private final ConcurrentHashMap<Key, CompletableFuture<Refill>> refills = new ConcurrentHashMap<>();
     private volatile StatefulRedisConnection<String, String> connection;
 
     public UsageSummaryRedisCache(ObjectMapper json, MeterRegistry registry,
                                   @Value("${nexus.usage.cache.redis-uri:redis://127.0.0.1:6379}") String uri,
                                   @Value("${nexus.usage.cache.namespace:local}") String namespace,
-                                  @Value("${nexus.usage.cache.timeout-ms:25}") int timeoutMs) {
+                                  @Value("${nexus.usage.cache.timeout-ms:25}") int timeoutMs,
+                                  @Value("${nexus.usage.cache.max-concurrent-loads:4}") int maxConcurrentLoads) {
         if (!namespace.matches("[A-Za-z0-9_-]{1,48}") || timeoutMs < 1 || timeoutMs > 100) {
             throw new IllegalArgumentException("Invalid Usage Redis namespace or command timeout");
+        }
+        if (maxConcurrentLoads < 1) {
+            throw new IllegalArgumentException("Usage cache max-concurrent-loads must be positive");
         }
         RedisURI endpoint;
         try {
@@ -93,6 +100,11 @@ public class UsageSummaryRedisCache implements AutoCloseable {
         loads = registry.counter("nexus.usage.cache.loads");
         joined = registry.counter("nexus.usage.cache.joined");
         waitTimeouts = registry.counter("nexus.usage.cache.wait.timeouts");
+        loadRejections = registry.counter("nexus.usage.cache.load.rejections");
+        loadPermits = new Semaphore(maxConcurrentLoads);
+        registry.gauge("nexus.usage.cache.load.limit", this, cache -> maxConcurrentLoads);
+        registry.gauge("nexus.usage.cache.load.active", this,
+                cache -> maxConcurrentLoads - cache.loadPermits.availablePermits());
         connector = Executors.newSingleThreadScheduledExecutor(
                 Thread.ofPlatform().daemon().name("usage-redis-connect").factory());
         connector.scheduleWithFixedDelay(this::connect, 0, 1, TimeUnit.SECONDS);
@@ -152,8 +164,7 @@ public class UsageSummaryRedisCache implements AutoCloseable {
             }
         }
 
-        loads.increment();
-        UsageQueryResponse result = load.get();
+        UsageQueryResponse result = loadFromMySql(load);
         // Jitter only shortens the freshness window, measured from the start of the snapshot.
         Instant expiresAt = snapshotStartedAt.plus(MAX_TTL)
                 .minusMillis(ThreadLocalRandom.current().nextLong(MAX_TTL_JITTER_MS + 1));
@@ -166,6 +177,19 @@ public class UsageSummaryRedisCache implements AutoCloseable {
             }
         }
         return new Refill(result, expiresAt);
+    }
+
+    private UsageQueryResponse loadFromMySql(Supplier<UsageQueryResponse> load) {
+        if (!loadPermits.tryAcquire()) {
+            loadRejections.increment();
+            throw new UsageSummaryUnavailableException();
+        }
+        try {
+            loads.increment();
+            return load.get();
+        } finally {
+            loadPermits.release();
+        }
     }
 
     private UsageQueryResponse waitForRefill(CompletableFuture<Refill> running, Key key, String redisKey) {

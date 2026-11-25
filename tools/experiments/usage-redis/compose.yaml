@@ -15,6 +15,7 @@ x-nexus: &nexus
     SPRING_DATASOURCE_URL: "jdbc:mysql://mysql:3306/nexus_usage_cache_lab?useSSL=false&allowPublicKeyRetrieval=true&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true"
     SPRING_DATASOURCE_USERNAME: usage_lab
     SPRING_DATASOURCE_PASSWORD: ${USAGE_LAB_DB_PASSWORD:?}
+    SPRING_FLYWAY_TARGET: ${USAGE_LAB_FLYWAY_TARGET:-latest}
     NEXUS_AUTH_JWT_ISSUER: usage-cache-lab
     NEXUS_AUTH_JWT_SECRET: ${USAGE_LAB_JWT_SECRET:?}
     NEXUS_AUTH_JWT_ACCESS_TOKEN_TTL: 30m
@@ -58,3 +59,4 @@ services:
       NEXUS_USAGE_CACHE_ENABLED: "true"
       NEXUS_USAGE_CACHE_REDIS_URI: redis://redis:6379
       NEXUS_USAGE_CACHE_NAMESPACE: acceptance
+      NEXUS_USAGE_CACHE_MAX_CONCURRENT_LOADS:
