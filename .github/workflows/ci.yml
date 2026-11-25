@@ -112,6 +112,16 @@ jobs:
       SPRING_DATASOURCE_HIKARI_MINIMUMIDLE: 1
       NEXUS_WEBHOOK_SCHEDULING_ENABLED: 'false'
     services:
+      redis:
+        image: redis:7.4.2-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
       mysql:
         image: mysql:8.4
         ports:
@@ -173,6 +183,16 @@ jobs:
       - name: 运行后端测试
         working-directory: ./nexus-server
         run: sh ./mvnw -B clean test
+
+      - name: 验证真实 Redis 汇总缓存和 MySQL 工单租约
+        working-directory: ./nexus-server
+        env:
+          NEXUS_TEST_REDIS_URI: redis://127.0.0.1:6379
+          NEXUS_SUPPORT_LEASE_ACCEPTANCE: 'true'
+        run: >-
+          sh ./mvnw -B
+          -Dtest=UsageSummaryRedisCacheIntegrationTests,SupportTicketLeaseIntegrationTest
+          test
 
       - name: 验证默认时区不改变 UTC 业务时间
         working-directory: ./nexus-server

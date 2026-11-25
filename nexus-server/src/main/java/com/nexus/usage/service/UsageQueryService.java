@@ -9,6 +9,7 @@ import com.nexus.application.entity.Application;
 import com.nexus.application.exception.ApplicationNotFoundException;
 import com.nexus.application.mapper.ApplicationMapper;
 import com.nexus.usage.ApiCode;
+import com.nexus.usage.cache.UsageSummaryRedisCache;
 import com.nexus.usage.dto.TimeRange;
 import com.nexus.usage.dto.UsageQueryRequest;
 import com.nexus.usage.dto.UsageQueryResponse;
@@ -19,23 +20,26 @@ import com.nexus.usage.exception.InvalidUsagePaginationException;
 import com.nexus.usage.mapper.UsageApiCountRow;
 import com.nexus.usage.mapper.UsageDailyCountRow;
 import com.nexus.usage.mapper.UsageEventMapper;
-import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Duration;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
-@AllArgsConstructor
 public class UsageQueryService {
     private static final ZoneId DISPLAY_ZONE = ZoneId.of("Asia/Shanghai");
     private static final Duration MAX_CUSTOM_RANGE = Duration.ofDays(90);
@@ -44,6 +48,22 @@ public class UsageQueryService {
     private final ApplicationMapper applicationMapper;
     private final ApiKeyMapper apiKeyMapper;
     private final Clock clock;
+    private final Optional<UsageSummaryRedisCache> summaryCache;
+    private final TransactionTemplate summaryRead;
+
+    public UsageQueryService(UsageEventMapper usageEventMapper, ApplicationMapper applicationMapper,
+                             ApiKeyMapper apiKeyMapper, Clock clock,
+                             Optional<UsageSummaryRedisCache> summaryCache,
+                             PlatformTransactionManager transactionManager) {
+        this.usageEventMapper = usageEventMapper;
+        this.applicationMapper = applicationMapper;
+        this.apiKeyMapper = apiKeyMapper;
+        this.clock = clock;
+        this.summaryCache = summaryCache;
+        this.summaryRead = new TransactionTemplate(transactionManager);
+        this.summaryRead.setReadOnly(true);
+        this.summaryRead.setIsolationLevel(Isolation.REPEATABLE_READ.value());
+    }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public UsageEventPageResponse queryMyUsageEvents(Long userId, Long applicationId, Long apiKeyId,
@@ -63,9 +83,33 @@ public class UsageQueryService {
                 .toList());
     }
 
-    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    @Transactional(propagation = Propagation.NEVER)
     public UsageQueryResponse queryMyUsageEvent(Long userId, UsageQueryRequest usageQueryRequest) {
-        assertOwnedKey(userId, usageQueryRequest.applicationId(), usageQueryRequest.apiKeyId());
+        Instant snapshotStartedAt = clock.instant();
+        var timeRange = usageQueryRequest.timeRange();
+        if (timeRange == null || timeRange == TimeRange.CUSTOM || summaryCache.isEmpty()) {
+            return loadAuthorizedSummary(userId, usageQueryRequest, snapshotStartedAt);
+        }
+
+        long applicationId = usageQueryRequest.applicationId();
+        long apiKeyId = usageQueryRequest.apiKeyId();
+        summaryRead.executeWithoutResult(status -> assertOwnedKey(userId, applicationId, apiKeyId));
+        var period = resolvePeriod(usageQueryRequest, snapshotStartedAt);
+        var key = new UsageSummaryRedisCache.Key(userId, applicationId, apiKeyId,
+                period.startUtc(), period.endUtc());
+        return summaryCache.get().getOrLoad(key, snapshotStartedAt,
+                () -> loadAuthorizedSummary(userId, usageQueryRequest, snapshotStartedAt));
+    }
+
+    private UsageQueryResponse loadAuthorizedSummary(long userId, UsageQueryRequest request, Instant startedAt) {
+        return summaryRead.execute(status -> {
+            assertOwnedKey(userId, request.applicationId(), request.apiKeyId());
+            var period = resolvePeriod(request, startedAt);
+            return loadSummary(request.applicationId(), request.apiKeyId(), period);
+        });
+    }
+
+    private UsagePeriod resolvePeriod(UsageQueryRequest usageQueryRequest, Instant snapshotStartedAt) {
         // 禁用只阻止机器调用，不影响所属用户查看历史用量。
         LocalDateTime startLocal;
         LocalDateTime endLocal;
@@ -73,7 +117,7 @@ public class UsageQueryService {
         if (timeRange == null) {
             throw new InvalidUsageTimeRangeException("请选择时间范围");
         }
-        LocalDate today = LocalDate.ofInstant(clock.instant(), DISPLAY_ZONE);
+        LocalDate today = LocalDate.ofInstant(snapshotStartedAt, DISPLAY_ZONE);
         if (timeRange == TimeRange.CUSTOM) {
             // 前端的无时区日期时间按北京时间解释。
             startLocal = usageQueryRequest.customStartTime();
@@ -99,20 +143,28 @@ public class UsageQueryService {
         LocalDateTime endUtc = endLocal.atZone(DISPLAY_ZONE)
                 .withZoneSameInstant(ZoneOffset.UTC).toLocalDateTime();
 
+        return new UsagePeriod(startLocal, endLocal, startUtc, endUtc);
+    }
+
+    private record UsagePeriod(LocalDateTime startLocal, LocalDateTime endLocal,
+                               LocalDateTime startUtc, LocalDateTime endUtc) {
+    }
+
+    private UsageQueryResponse loadSummary(long applicationId, long apiKeyId, UsagePeriod period) {
         long allTimeCount = usageEventMapper.selectCount(
                 Wrappers.<UsageEvent>lambdaQuery()
-                        .eq(UsageEvent::getApiKeyId, usageQueryRequest.apiKeyId())
-                        .eq(UsageEvent::getApplicationId, usageQueryRequest.applicationId())
+                        .eq(UsageEvent::getApiKeyId, apiKeyId)
+                        .eq(UsageEvent::getApplicationId, applicationId)
         );
         List<UsageDailyCountRow> dailyRows = usageEventMapper.selectDailyCounts(
-                usageQueryRequest.apiKeyId(), usageQueryRequest.applicationId(), startUtc, endUtc);
+                apiKeyId, applicationId, period.startUtc(), period.endUtc());
         List<UsageApiCountRow> apiRows = usageEventMapper.selectApiCounts(
-                usageQueryRequest.apiKeyId(), usageQueryRequest.applicationId(), startUtc, endUtc);
+                apiKeyId, applicationId, period.startUtc(), period.endUtc());
 
         Map<LocalDate, Long> countsByDate = dailyRows.stream().collect(Collectors.toMap(
                 UsageDailyCountRow::getDate, UsageDailyCountRow::getCallCount));
-        LocalDate lastIncludedDate = endLocal.minusNanos(1).toLocalDate();
-        List<UsageQueryResponse.DailyCount> dailyCounts = startLocal.toLocalDate()
+        LocalDate lastIncludedDate = period.endLocal().minusNanos(1).toLocalDate();
+        List<UsageQueryResponse.DailyCount> dailyCounts = period.startLocal().toLocalDate()
                 .datesUntil(lastIncludedDate.plusDays(1))
                 .map(date -> new UsageQueryResponse.DailyCount(date, countsByDate.getOrDefault(date, 0L)))
                 .toList();
@@ -127,8 +179,8 @@ public class UsageQueryService {
                 allTimeCount,
                 periodCount,
                 DISPLAY_ZONE.getId(),
-                startLocal.atZone(DISPLAY_ZONE).toOffsetDateTime(),
-                endLocal.atZone(DISPLAY_ZONE).toOffsetDateTime(),
+                period.startLocal().atZone(DISPLAY_ZONE).toOffsetDateTime(),
+                period.endLocal().atZone(DISPLAY_ZONE).toOffsetDateTime(),
                 dailyCounts,
                 apiCounts
         );

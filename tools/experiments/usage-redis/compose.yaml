@@ -1,0 +1,60 @@
+x-nexus: &nexus
+  image: eclipse-temurin:21-jre-jammy@sha256:d63bd8d9b171999cbed8576f2c76e874dd4856791a358536e5c4d407e77edc13
+  user: "10001:10001"
+  entrypoint: ["java", "-jar", "/app.jar"]
+  volumes:
+    - type: bind
+      source: ${USAGE_LAB_JAR:?}
+      target: /app.jar
+      read_only: true
+      bind:
+        create_host_path: false
+  ports:
+    - "127.0.0.1::8080"
+  environment: &nexus-env
+    SPRING_DATASOURCE_URL: "jdbc:mysql://mysql:3306/nexus_usage_cache_lab?useSSL=false&allowPublicKeyRetrieval=true&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true"
+    SPRING_DATASOURCE_USERNAME: usage_lab
+    SPRING_DATASOURCE_PASSWORD: ${USAGE_LAB_DB_PASSWORD:?}
+    NEXUS_AUTH_JWT_ISSUER: usage-cache-lab
+    NEXUS_AUTH_JWT_SECRET: ${USAGE_LAB_JWT_SECRET:?}
+    NEXUS_AUTH_JWT_ACCESS_TOKEN_TTL: 30m
+    NEXUS_WEBHOOK_CRYPTO_CURRENT_KEY_VERSION: v1
+    NEXUS_WEBHOOK_CRYPTO_KEYS_V1: ${USAGE_LAB_WEBHOOK_KEY:?}
+    NEXUS_WEBHOOK_SCHEDULING_ENABLED: "false"
+    NEXUS_LOG_DIR: /tmp/nexus-logs
+    NEXUS_SCREENSHOT_JOB_RESULT_DIR: /tmp/nexus-jobs
+    MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,metrics
+    SERVER_ADDRESS: 0.0.0.0
+    SERVER_PORT: "8080"
+
+services:
+  mysql:
+    image: mysql:8.4@sha256:c592c15aaf4a1961e15d82eb31ea5987dda862d1c4b1e93424438c0e91dc1f8d
+    command: ["--default-time-zone=+00:00"]
+    environment:
+      MYSQL_DATABASE: nexus_usage_cache_lab
+      MYSQL_USER: usage_lab
+      MYSQL_PASSWORD: ${USAGE_LAB_DB_PASSWORD:?}
+      MYSQL_ROOT_PASSWORD: ${USAGE_LAB_ROOT_PASSWORD:?}
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_PASSWORD\" mysql --protocol=tcp -h127.0.0.1 -u\"$$MYSQL_USER\" \"$$MYSQL_DATABASE\" -Nse 'SELECT 1'"]
+      interval: 2s
+      timeout: 3s
+      retries: 45
+  redis:
+    image: redis:7.4.2-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 1s
+      retries: 20
+  baseline:
+    <<: *nexus
+  cached:
+    <<: *nexus
+    environment:
+      <<: *nexus-env
+      NEXUS_USAGE_CACHE_ENABLED: "true"
+      NEXUS_USAGE_CACHE_REDIS_URI: redis://redis:6379
+      NEXUS_USAGE_CACHE_NAMESPACE: acceptance

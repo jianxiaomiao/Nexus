@@ -93,6 +93,27 @@ class ShortLinkFlowIntegrationTests {
             assertEquals(1, shortLinkService.listMyShortLinks(owner.getId(), key.getId(), 1, 10).records().size());
             assertEquals(target, shortLinkRedirectService.resolveTarget(created.shortCode()).toString());
 
+            key.setStatus(1);
+            apiKeyMapper.updateById(key);
+            assertThrows(ShortLinkNotFoundException.class,
+                    () -> shortLinkRedirectService.resolveTarget(created.shortCode()));
+            key.setStatus(0);
+            apiKeyMapper.updateById(key);
+
+            app.setStatus(1);
+            applicationMapper.updateById(app);
+            assertThrows(ShortLinkNotFoundException.class,
+                    () -> shortLinkRedirectService.resolveTarget(created.shortCode()));
+            app.setStatus(0);
+            applicationMapper.updateById(app);
+
+            owner.setStatus(1);
+            userMapper.updateById(owner);
+            assertThrows(ShortLinkNotFoundException.class,
+                    () -> shortLinkRedirectService.resolveTarget(created.shortCode()));
+            owner.setStatus(0);
+            userMapper.updateById(owner);
+
             var renamed = shortLinkService.updateMyShortLink(owner.getId(), new UpdateShortLinkRequest(created.id(), "renamed", 1, created.updatedAt()));
             org.junit.jupiter.api.Assertions.assertTrue(renamed.updatedAt().isAfter(created.updatedAt()));
             assertThrows(com.nexus.common.web.ResourceChangedException.class, () -> shortLinkService.updateMyShortLink(

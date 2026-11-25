@@ -29,6 +29,7 @@ import com.nexus.shortlink.exception.ShortLinkExpiredException;
 import com.nexus.shortlink.exception.ShortLinkNotFoundException;
 import com.nexus.usage.exception.InvalidUsageTimeRangeException;
 import com.nexus.usage.exception.InvalidUsagePaginationException;
+import com.nexus.usage.exception.UsageSummaryUnavailableException;
 import com.nexus.webExtract.exception.InvalidWebExtractRequestException;
 import com.nexus.webExtract.exception.WebContentUnavailableException;
 import com.nexus.webExtract.exception.WebPageFetchException;
@@ -219,6 +220,14 @@ public class GlobalExceptionHandler{
     @ExceptionHandler(InvalidUsageTimeRangeException.class)
     public ApiResponse<Void> handleInvalidUsageTimeRange(InvalidUsageTimeRangeException exception, HttpServletRequest request) {
         return handled(request, exception, HttpStatus.BAD_REQUEST, "INVALID_USAGE_TIME_RANGE", exception.getMessage(), null);
+    }
+
+    @ExceptionHandler(UsageSummaryUnavailableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUsageSummaryUnavailable(UsageSummaryUnavailableException exception,
+                                                                          HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).header(HttpHeaders.RETRY_AFTER, "1")
+                .body(handled(request, exception, HttpStatus.SERVICE_UNAVAILABLE,
+                        "USAGE_SUMMARY_UNAVAILABLE", exception.getMessage(), null, CAPACITY_PROTECTION));
     }
 
     @ResponseStatus(HttpStatus.BAD_REQUEST)
