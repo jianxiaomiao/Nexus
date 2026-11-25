@@ -3,6 +3,8 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { isNavigationFailure, RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { ElMessage, type ScrollbarInstance } from 'element-plus'
 import { useUserStore } from '@/stores/userStore'
+import { http, type ApiResponse } from '@/api/http'
+import { isWebBrowser } from '@/auth/webSession'
 import { Close, Document, Expand, Fold, Grid, Link, Monitor, SwitchButton, Tickets } from '@element-plus/icons-vue'
 import brandSpark from '@/assets/icons/brand-spark.svg'
 
@@ -13,6 +15,8 @@ const collapsed = ref(false)
 const mobileMenuOpen = ref(false)
 const scrollArea = ref<ScrollbarInstance | null>(null)
 const logoutPending = ref(false)
+const chatLaunching = ref(false)
+const chatEnabled = import.meta.env.VITE_NEXUS_CHAT_ENABLED === 'true' && isWebBrowser()
 const logoutError = ref<string | null>(null)
 const logoutMessage = computed(() => logoutError.value ?? userStore.clearError)
 let disposed = false
@@ -32,6 +36,40 @@ onUnmounted(() => {
   disposed = true
   window.removeEventListener('keydown', closeMenuOnEscape)
 })
+
+async function openSupportChat() {
+  if (chatLaunching.value || logoutPending.value || userStore.clearing) return
+  const operationVersion = userStore.operationVersion
+  chatLaunching.value = true
+  try {
+    const { data } = await http.post<ApiResponse<{ action: string; grant: string }>>('/support/chat/launch')
+    if (disposed || operationVersion !== userStore.operationVersion || !userStore.checkWebState()) return
+    const { action, grant } = data.data
+    const target = new URL(action)
+    const loopback = ['localhost', '127.0.0.1'].includes(target.hostname)
+    if (!(target.protocol === 'https:' || (loopback && target.protocol === 'http:')) ||
+        target.pathname !== '/launch/nexus' || target.username || target.password || target.search || target.hash ||
+        !/^[A-Za-z0-9_-]{43}$/.test(grant)) throw new Error('Invalid chat launch')
+    const form = document.createElement('form')
+    form.method = 'POST'
+    form.action = target.href
+    const field = document.createElement('input')
+    field.type = 'hidden'
+    field.name = 'grant'
+    field.value = grant
+    form.append(field)
+    document.body.append(form)
+    form.submit()
+    form.remove()
+    mobileMenuOpen.value = false
+  } catch {
+    if (!disposed && operationVersion === userStore.operationVersion) {
+      ElMessage.error('暂时无法进入在线客服，请稍后重试。')
+    }
+  } finally {
+    chatLaunching.value = false
+  }
+}
 
 async function logout() {
   if (logoutPending.value || userStore.clearing) return
@@ -103,6 +141,17 @@ async function logout() {
           <el-icon class="nav-icon" :size="20" aria-hidden="true"><Tickets /></el-icon>
           <span>我的工单</span>
         </RouterLink>
+        <button
+          v-if="chatEnabled"
+          class="nav-item"
+          type="button"
+          :disabled="chatLaunching || logoutPending"
+          aria-label="在线客服"
+          @click="openSupportChat"
+        >
+          <el-icon class="nav-icon" :size="20" aria-hidden="true"><Tickets /></el-icon>
+          <span>{{ chatLaunching ? '正在进入…' : '在线客服' }}</span>
+        </button>
         <RouterLink class="nav-item" :to="{ name: 'playground' }" aria-label="API 调试台" @click="mobileMenuOpen = false">
           <el-icon class="nav-icon" :size="20" aria-hidden="true"><Monitor /></el-icon>
           <span>API 调试台</span>
@@ -219,6 +268,14 @@ async function logout() {
   text-decoration: none;
   white-space: nowrap;
 }
+button.nav-item {
+  border: 0;
+  border-left: 3px solid transparent;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+button.nav-item:disabled { cursor: wait; }
 .nav-item:hover { background: #e4ece3; }
 .nav-item.is-active, .nav-item.router-link-active {
   border-left-color: var(--nexus-teal);
