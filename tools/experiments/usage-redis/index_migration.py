@@ -13,7 +13,7 @@ from zipfile import ZipFile
 from check import JAR, ROOT, call, compose, open_backend, require, run_lab
 from coalescing import ROWS_PER_KEY, clear_cache, metric
 from mixed import mysql
-from refill_limits import (BUSY, LIMIT_SETTING, QUOTA_RATE, ROUNDS, SUMMARY_RATE, dispatch_valid,
+from refill_limits import (BUSY, LIMIT_SETTING, QUOTA_RATE, ROUNDS, SUMMARY_CLIENTS, SUMMARY_RATE, dispatch_valid,
                            fixed_window, outage_recovery, prepare_fixture, verify)
 
 INDEX = "idx_usage_summary_cover"
@@ -64,11 +64,11 @@ def ddl_timing():
     return float(elapsed)
 
 
-def measure(cached, lookups, quota, label, rounds):
+def measure(cached, lookups, quota, label, rounds, summary_clients):
     require(metric(cached, "nexus.usage.cache.load.limit")["VALUE"] == PERMITS,
             "Cached lab must use the code default of four permits")
     clear_cache()
-    fixed_window(cached, lookups, quota, PERMITS, seconds=4)
+    fixed_window(cached, lookups, quota, PERMITS, seconds=4, summary_clients=summary_clients)
     control = fixed_window(cached, [], quota, PERMITS)
     late_controls = []
     if not dispatch_valid(control):
@@ -77,10 +77,12 @@ def measure(cached, lookups, quota, label, rounds):
     record = {"limit": PERMITS, "quota_only": control, "rounds": [],
               "late_pairs": [], "late_controls": late_controls}
     for attempt in range(1, rounds + 4):
-        pair = outage_recovery(cached, lookups, quota, PERMITS)
+        pair = outage_recovery(cached, lookups, quota, PERMITS, summary_clients=summary_clients)
         valid = all(dispatch_valid(window) for window in pair.values())
         record["rounds" if valid else "late_pairs"].append(pair)
         print(json.dumps({"schema": label, "attempt": attempt, "valid_dispatch": valid,
+                          "max_dispatch_ms": max(trace["dispatch_max_ms"] for w in pair.values()
+                                                 for trace in (w["summary"], w["quota"])),
                           **{stage + "_503": w["summary"]["outcomes"].get(BUSY, 0)
                              for stage, w in pair.items()}}), flush=True)
         if len(record["rounds"]) == rounds:
@@ -88,7 +90,7 @@ def measure(cached, lookups, quota, label, rounds):
     return record
 
 
-def experiment(baseline, initial_cached, rounds, jar_sha256):
+def experiment(baseline, initial_cached, rounds, summary_clients, jar_sha256):
     require(sql("SELECT DATABASE()") == "nexus_usage_cache_lab", "Unexpected database")
     status, registry = call(baseline, "GET", "/actuator/metrics")
     require(status == 200 and "nexus.usage.cache.load.limit" not in registry["names"],
@@ -106,7 +108,7 @@ def experiment(baseline, initial_cached, rounds, jar_sha256):
     with closing(open_backend("cached")) as cached:
         for target, path, expected in lookups:
             require(target.fetch(cached, path) == expected, "Baseline Usage summary differed from the fixture")
-        old = measure(cached, lookups, quota, "V16", rounds)
+        old = measure(cached, lookups, quota, "V16", rounds, summary_clients)
     require(usage_snapshot() == before, "The baseline HTTP trace changed historical Usage data")
 
     compose("stop", "cached")
@@ -132,7 +134,7 @@ def experiment(baseline, initial_cached, rounds, jar_sha256):
         print(json.dumps({"migration": version[2], "rows": before["rows"],
                           "flyway_ms": int(version[4]), "mysql_ddl_ms": ddl_ms,
                           "boot_ready_seconds": ready_seconds}), flush=True)
-        new = measure(cached, lookups, quota, "V17", rounds)
+        new = measure(cached, lookups, quota, "V17", rounds, summary_clients)
 
     compose("stop", "cached")
     with closing(open_backend("cached")):
@@ -141,6 +143,7 @@ def experiment(baseline, initial_cached, rounds, jar_sha256):
     require(usage_snapshot() == before, "Post-upgrade trace changed historical Usage data")
     return {"mysql_version": sql("SELECT VERSION()"), "jar_sha256": jar_sha256,
             "rates": {"summary": SUMMARY_RATE, "quota": QUOTA_RATE},
+            "summary_clients": summary_clients,
             "fixture": {"keys": len(lookups), "rows_per_key": ROWS_PER_KEY, **before},
             "upgrade": {"history_before": initial_history, "history_after": upgraded_history,
                         "indexes_before": initial_indexes, "indexes_after": upgraded_indexes,
@@ -154,8 +157,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--jar", type=Path, default=JAR)
     parser.add_argument("--rounds", type=int, default=ROUNDS)
+    parser.add_argument("--summary-clients", type=int, default=SUMMARY_CLIENTS,
+                        help="Concurrent HTTP connections available to the fixed-rate summary trace")
     args = parser.parse_args()
     require(args.rounds > 0, "At least one round is required")
+    require(args.summary_clients > 0, "At least one summary client is required")
     jar = args.jar.resolve()
     source = ROOT / "nexus-server/src/main/resources/db/migration" / MIGRATION
     with ZipFile(jar) as archive:
@@ -167,7 +173,8 @@ if __name__ == "__main__":
             jar_hash.update(block)
     os.environ[TARGET] = "16"
     os.environ.pop(LIMIT_SETTING, None)
-    report = run_lab(lambda baseline, cached: experiment(baseline, cached, args.rounds, jar_hash.hexdigest()), jar)
+    report = run_lab(lambda baseline, cached: experiment(baseline, cached, args.rounds, args.summary_clients,
+                                                        jar_hash.hexdigest()), jar)
+    verify({"results": list(report["results"].values())})
     require(all(len(result["rounds"]) == args.rounds for result in report["results"].values()),
             "Could not collect enough valid outage/recovery pairs")
-    verify({"results": list(report["results"].values())})

@@ -19,14 +19,15 @@ SUMMARY_RATE = 96
 QUOTA_RATE = 20
 SECONDS = 10
 ROUNDS = 3
+SUMMARY_CLIENTS = 64
 METRICS = ("loads", "load.rejections", "wait.timeouts", "joined")
 SUCCESS = "200:SUCCESS"
 BUSY = "503:USAGE_SUMMARY_UNAVAILABLE"
 
 
-def fixed_window(backend, summaries, quota, permits, seconds=SECONDS):
+def fixed_window(backend, summaries, quota, permits, seconds=SECONDS, *, summary_clients=SUMMARY_CLIENTS):
     # Workers use distinct keep-alive connections and predetermined slots.
-    summary_workers = 64 if summaries else 0
+    summary_workers = summary_clients if summaries else 0
     quota_workers = 8
     started = None
 
@@ -107,12 +108,12 @@ def prepare_fixture(baseline):
     return lookups, quota
 
 
-def outage_recovery(cached, lookups, quota, permits):
+def outage_recovery(cached, lookups, quota, permits, *, summary_clients=SUMMARY_CLIENTS):
     compose("stop", "redis")
-    outage = fixed_window(cached, lookups, quota, permits)
+    outage = fixed_window(cached, lookups, quota, permits, summary_clients=summary_clients)
     compose("up", "-d", "--wait", "redis")
     # Redis has no persistence in this lab. The trace sees a cold cache after restart.
-    recovery = fixed_window(cached, lookups, quota, permits)
+    recovery = fixed_window(cached, lookups, quota, permits, summary_clients=summary_clients)
     return {"outage": outage, "recovery": recovery}
 
 
