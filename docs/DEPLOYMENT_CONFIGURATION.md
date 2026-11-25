@@ -104,6 +104,10 @@ Windows 服务的工作目录不一定是部署根目录，因此生产启动命
 
 环境变量的作用是避免秘密进入 Git，不代表它能防住 Windows 管理员或以同等账号运行的其他进程；操作系统账号与服务权限属于后续部署边界。
 
+## NewCrisp 客户资料同步
+
+`NEXUS_CHAT_PROFILE_ENABLED` 默认是 `false`，跳转客服时继续发送用户 ID 和会话 ID。NewCrisp 升级到支持 `profile` 的版本并完成 V10 迁移后，可在 Nexus 后端设置 `NEXUS_CHAT_PROFILE_ENABLED=true`。开启后，跳转请求会额外发送当前用户的显示名、邮箱、邮箱验证状态和 UTC 注册日期，供对应租户的客服查看。
+
 ## Ubuntu 服务身份与目录边界
 
 Ubuntu 正式 Java 进程使用静态系统账号 `nexus`：没有登录 Shell，不使用个人账号，也不持有 sudo。发布与切换由管理员执行，服务账号只读取当前 release，并只写共享日志和运行时数据。`nexus-readers` 是 Java 和发布验收所需的发布物只读组；Nginx 的 `www-data` 不加入该组，避免顺带读取 JAR 与固定浏览器目录。Nginx 只通过精确 POSIX ACL 遍历当前 release 的父路径并读取 `console/dist`。
