@@ -5,6 +5,8 @@ import com.nexus.auth.exception.InvalidAccessTokenException;
 import com.nexus.auth.token.AccessTokenIdentity;
 import com.nexus.auth.web.BearerUserIdResolver;
 import com.nexus.common.web.ApiResponse;
+import com.nexus.user.entity.User;
+import com.nexus.user.mapper.UserMapper;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 import java.io.IOException;
@@ -17,6 +19,8 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
@@ -30,19 +34,24 @@ import tools.jackson.databind.ObjectMapper;
 @RestController
 class NexusChatController {
     private final BearerUserIdResolver identities;
+    private final UserMapper userMapper;
     private final ObjectMapper json;
     private final URI origin;
     private final String credential;
+    private final boolean profileEnabled;
     private final byte[] verifierDigest;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
 
-    NexusChatController(BearerUserIdResolver identities, ObjectMapper json,
+    NexusChatController(BearerUserIdResolver identities, UserMapper userMapper, ObjectMapper json,
                         @Value("${NEXUS_CHAT_ORIGIN:}") String origin,
                         @Value("${NEXUS_CHAT_CREDENTIAL:}") String credential,
-                        @Value("${NEXUS_CHAT_VERIFY_KEY_SHA256:}") String verifyKeySha256) {
+                        @Value("${NEXUS_CHAT_VERIFY_KEY_SHA256:}") String verifyKeySha256,
+                        @Value("${NEXUS_CHAT_PROFILE_ENABLED:false}") boolean profileEnabled) {
         this.identities = identities;
+        this.userMapper = userMapper;
         this.json = json;
         this.credential = credential;
+        this.profileEnabled = profileEnabled;
         if (origin.isEmpty() && credential.isEmpty() && verifyKeySha256.isEmpty()) {
             this.origin = null;
             this.verifierDigest = new byte[0];
@@ -58,11 +67,23 @@ class NexusChatController {
     @PostMapping("/api/support/chat/launch")
     ResponseEntity<ApiResponse<Launch>> launch(@RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String auth) {
         AccessTokenIdentity identity = identities.resolveIdentity(auth);
-        Grant grant = request("/integrations/nexus/launch-grants",
-                new SessionReference(identity.userId(), identity.sessionId()), 201, Grant.class);
+        var session = new SessionReference(identity.userId(), identity.sessionId());
+        var payload = profileEnabled && origin != null
+                ? new LaunchGrantRequest(session.userId(), session.sessionId(), resolveProfile(session.userId()))
+                : session;
+        Grant grant = request("/integrations/nexus/launch-grants", payload, 201, Grant.class);
         if (grant.grant() == null || !grant.grant().matches("[A-Za-z0-9_-]{43}")) throw unavailable();
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
                 .body(new ApiResponse<>("SUCCESS", null, new Launch(origin.resolve("/launch/nexus").toString(), grant.grant())));
+    }
+
+    private CustomerProfile resolveProfile(long userId) {
+        User user = userMapper.selectById(userId);
+        if (user == null) return null;
+        Map<String, Object> attrs = new LinkedHashMap<>();
+        attrs.put("emailVerified", user.getEmailVerifiedAt() != null);
+        if (user.getCreatedAt() != null) attrs.put("registeredAt", user.getCreatedAt().toLocalDate().toString());
+        return new CustomerProfile(user.getDisplayName(), user.getEmail(), null, null, attrs);
     }
 
     @GetMapping("/api/support/chat/unread")
@@ -145,6 +166,8 @@ class NexusChatController {
     }
 
     record SessionReference(@Positive long userId, @Positive long sessionId) {}
+    record CustomerProfile(String displayName, String email, String phone, String avatarUrl, Map<String, Object> attributes) {}
+    record LaunchGrantRequest(long userId, long sessionId, CustomerProfile profile) {}
     record Grant(String grant) {}
     record UnreadQuery(long userId) {}
     record Unread(Long unread) {}
