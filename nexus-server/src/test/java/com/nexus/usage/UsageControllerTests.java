@@ -5,6 +5,7 @@ import com.nexus.usage.controller.UsageEventController;
 import com.nexus.usage.dto.TimeRange;
 import com.nexus.usage.dto.UsageQueryRequest;
 import com.nexus.usage.dto.UsageQueryResponse;
+import com.nexus.usage.exception.UsageSummaryUnavailableException;
 import com.nexus.usage.service.UsageQueryService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,6 +22,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(UsageEventController.class)
@@ -68,5 +70,19 @@ class UsageControllerTests {
                         .param("customEndTime", "2026-10-09T00:00:00"))
                 .andExpect(status().isOk());
         verify(usageQueryService).queryMyUsageEvent(42L, request);
+    }
+
+    @Test
+    void refillWaitTimeoutReturnsRetryableError() throws Exception {
+        UsageQueryRequest request = new UsageQueryRequest(11L, 1L, TimeRange.LAST_7_DAYS, null, null);
+        when(bearerUserIdResolver.resolve("Bearer valid-token")).thenReturn(42L);
+        when(usageQueryService.queryMyUsageEvent(42L, request)).thenThrow(new UsageSummaryUnavailableException());
+
+        mockMvc.perform(get("/api/usage").header("Authorization", "Bearer valid-token")
+                        .param("applicationId", "1").param("apiKeyId", "11").param("timeRange", "LAST_7_DAYS"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(header().string("Retry-After", "1"))
+                .andExpect(jsonPath("$.code").value("USAGE_SUMMARY_UNAVAILABLE"))
+                .andExpect(jsonPath("$.data").doesNotExist());
     }
 }

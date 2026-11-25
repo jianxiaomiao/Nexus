@@ -254,6 +254,7 @@ function isTrustedAppUrl(value){
       '/applications',
       '/playground',
       '/short-links',
+      '/support/tickets',
       '/docs',
     ])
 
@@ -312,7 +313,9 @@ function isTrustedAppUrl(value){
 
       const header = new Headers()
       const allowNames = ['Content-Type', 'Accept', 'Authorization']
-      if (url.pathname === '/v1/web/screenshot-jobs' && request.method === 'POST') allowNames.push('Idempotency-Key')
+      if (request.method === 'POST' && ['/v1/web/screenshot-jobs', '/api/support/tickets'].includes(url.pathname)) {
+        allowNames.push('Idempotency-Key')
+      }
       for (const name of allowNames) {
         const value = request.headers.get(name)
         if (value !== null)

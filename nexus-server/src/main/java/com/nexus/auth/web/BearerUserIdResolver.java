@@ -22,7 +22,16 @@ public class BearerUserIdResolver {
     private final Clock clock;
 
     public long resolve(String authorization) {
+        return resolveIdentity(authorization).userId();
+    }
+
+    public AccessTokenIdentity resolveIdentity(String authorization) {
         AccessTokenIdentity identity = verifier.verify(authorization, false);
+        requireActive(identity);
+        return identity;
+    }
+
+    public void requireActive(AccessTokenIdentity identity) {
         User user = userMapper.selectById(identity.userId());
         if (user == null || Integer.valueOf(1).equals(user.getIsDeleted())) throw new InvalidAccessTokenException();
         if (Integer.valueOf(1).equals(user.getStatus())) throw new AccountForbiddenException();
@@ -32,6 +41,5 @@ public class BearerUserIdResolver {
                 || !clock.instant().isBefore(session.getExpiresAt().toInstant(ZoneOffset.UTC))) {
             throw new InvalidAccessTokenException();
         }
-        return identity.userId();
     }
 }

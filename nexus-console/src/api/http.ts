@@ -32,7 +32,7 @@ export function configureSessionNavigation(router: Pick<Router, 'replace' | 'cur
 }
 
 // 人类用户的 Bearer token 只用于管理接口，不发送给登录/注册或机器 API。
-const managementPaths = ['/application', '/apiKey', '/short-links', '/usage']
+const managementPaths = ['/application', '/apiKey', '/short-links', '/usage', '/support/tickets', '/support/chat/launch']
 
 function isManagementRequest(config: AxiosRequestConfig): boolean {
   if (config.baseURL !== '/api' || !config.url) return false
