@@ -41,7 +41,7 @@ class UsageSummaryRedisCacheIntegrationTests {
         var otherOwner = new UsageSummaryRedisCache.Key(4, 2, 3, key.startUtc(), key.endUtc());
         var loads = new AtomicInteger();
         var client = RedisClient.create(uri);
-        try (var cache = new UsageSummaryRedisCache(new ObjectMapper(), meters, uri, namespace, 100);
+        try (var cache = new UsageSummaryRedisCache(new ObjectMapper(), meters, uri, namespace, 100, 2);
              var redis = client.connect()) {
             waitForConnection(cache);
             var expected = cache.getOrLoad(key, Instant.now().minusSeconds(2), () -> response(key, loads));
@@ -76,7 +76,7 @@ class UsageSummaryRedisCacheIntegrationTests {
         LocalDateTime endUtc = startUtc.plusDays(1);
         var client = RedisClient.create(uri);
         try (var cache = new UsageSummaryRedisCache(new ObjectMapper(), new SimpleMeterRegistry(),
-                uri, namespace, 100);
+                uri, namespace, 100, 2);
              var redis = client.connect()) {
             waitForConnection(cache);
             var snapshotLifetimes = new HashSet<Long>();
@@ -105,8 +105,9 @@ class UsageSummaryRedisCacheIntegrationTests {
         var oldReadStarted = new CountDownLatch(1);
         var finishOldRead = new CountDownLatch(1);
         var meters = new SimpleMeterRegistry();
-        try (var cache = new UsageSummaryRedisCache(new ObjectMapper(), meters, uri, namespace, 100);
-             var secondCache = new UsageSummaryRedisCache(new ObjectMapper(), meters, uri, namespace, 100);
+        var secondMeters = new SimpleMeterRegistry();
+        try (var cache = new UsageSummaryRedisCache(new ObjectMapper(), meters, uri, namespace, 100, 2);
+             var secondCache = new UsageSummaryRedisCache(new ObjectMapper(), secondMeters, uri, namespace, 100, 2);
              var worker = Executors.newSingleThreadExecutor()) {
             waitForConnection(cache);
             waitForConnection(secondCache);
@@ -126,7 +127,8 @@ class UsageSummaryRedisCacheIntegrationTests {
                 finishOldRead.countDown();
                 assertEquals(1, delayed.get(3, TimeUnit.SECONDS).allTimeCount());
                 assertEquals(fresh, cache.getOrLoad(key, Instant.now(), () -> response(key, new AtomicInteger(99))));
-                assertEquals(2, meters.get("nexus.usage.cache.reads").tag("outcome", "miss").counter().count());
+                assertEquals(1, meters.get("nexus.usage.cache.reads").tag("outcome", "miss").counter().count());
+                assertEquals(1, secondMeters.get("nexus.usage.cache.reads").tag("outcome", "miss").counter().count());
                 assertEquals(1, meters.get("nexus.usage.cache.reads").tag("outcome", "hit").counter().count());
             } finally {
                 finishOldRead.countDown();
@@ -140,7 +142,7 @@ class UsageSummaryRedisCacheIntegrationTests {
         var key = new UsageSummaryRedisCache.Key(1, 2, 3,
                 LocalDateTime.parse("2026-11-24T16:00:00"), LocalDateTime.parse("2026-11-25T16:00:00"));
         try (var cache = new UsageSummaryRedisCache(new ObjectMapper(), meters,
-                "redis://127.0.0.1:1", "test", 25)) {
+                "redis://127.0.0.1:1", "test", 25, 2)) {
             assertEquals(1, cache.getOrLoad(key, Instant.now(), () -> response(key, new AtomicInteger())).allTimeCount());
             assertEquals(1, meters.get("nexus.usage.cache.reads").tag("outcome", "error").counter().count());
         }
@@ -156,7 +158,7 @@ class UsageSummaryRedisCacheIntegrationTests {
         var release = new CountDownLatch(1);
         var expected = response(key, new AtomicInteger());
         try (var cache = new UsageSummaryRedisCache(new ObjectMapper(), meters,
-                "redis://127.0.0.1:1", "test", 25);
+                "redis://127.0.0.1:1", "test", 25, 2);
              var pool = Executors.newFixedThreadPool(6)) {
             var leader = pool.submit(() -> cache.getOrLoad(key, Instant.now(), () -> {
                 entered.countDown();
@@ -196,7 +198,7 @@ class UsageSummaryRedisCacheIntegrationTests {
         var release = new CountDownLatch(1);
         var failure = new IllegalStateException("test database failure");
         try (var cache = new UsageSummaryRedisCache(new ObjectMapper(), meters,
-                "redis://127.0.0.1:1", "test", 25);
+                "redis://127.0.0.1:1", "test", 25, 2);
              var pool = Executors.newFixedThreadPool(2)) {
             var leader = pool.submit(() -> cache.getOrLoad(key, Instant.now(), () -> {
                 entered.countDown();
@@ -234,7 +236,7 @@ class UsageSummaryRedisCacheIntegrationTests {
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
         var client = RedisClient.create(uri);
-        try (var cache = new UsageSummaryRedisCache(new ObjectMapper(), meters, uri, namespace, 100);
+        try (var cache = new UsageSummaryRedisCache(new ObjectMapper(), meters, uri, namespace, 100, 2);
              var redis = client.connect();
              var pool = Executors.newFixedThreadPool(2)) {
             waitForConnection(cache);
@@ -259,6 +261,50 @@ class UsageSummaryRedisCacheIntegrationTests {
             }
         } finally {
             client.shutdown();
+        }
+    }
+
+    @Test
+    void fullLoadLimitRejectsANewKeyButAllowsHitsAndReleasesAfterFailure() throws Exception {
+        String uri = System.getenv("NEXUS_TEST_REDIS_URI");
+        String namespace = "test-" + UUID.randomUUID();
+        var meters = new SimpleMeterRegistry();
+        var start = LocalDateTime.parse("2026-11-24T16:00:00");
+        var warmKey = new UsageSummaryRedisCache.Key(1, 2, 3, start, start.plusDays(1));
+        var loadingKey = new UsageSummaryRedisCache.Key(1, 2, 4, start, start.plusDays(1));
+        var rejectedKey = new UsageSummaryRedisCache.Key(1, 2, 5, start, start.plusDays(1));
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var failure = new IllegalStateException("test database failure while holding permit");
+        try (var cache = new UsageSummaryRedisCache(new ObjectMapper(), meters, uri, namespace, 100, 1);
+             var pool = Executors.newSingleThreadExecutor()) {
+            waitForConnection(cache);
+            var warm = cache.getOrLoad(warmKey, Instant.now(), () -> response(warmKey, new AtomicInteger()));
+            var leader = pool.submit(() -> cache.getOrLoad(loadingKey, Instant.now(), () -> {
+                entered.countDown();
+                awaitRelease(release);
+                throw failure;
+            }));
+            try {
+                assertTrue(entered.await(2, TimeUnit.SECONDS));
+                assertEquals(1, meters.get("nexus.usage.cache.load.active").gauge().value());
+                assertEquals(warm, cache.getOrLoad(warmKey, Instant.now(),
+                        () -> { throw new AssertionError("Warm hit must not consume a permit"); }));
+                assertThrows(UsageSummaryUnavailableException.class, () -> cache.getOrLoad(rejectedKey, Instant.now(),
+                        () -> { throw new AssertionError("Rejected load must not query MySQL"); }));
+                assertEquals(1, meters.get("nexus.usage.cache.load.rejections").counter().count());
+                assertEquals(2, meters.get("nexus.usage.cache.loads").counter().count());
+                release.countDown();
+                assertSame(failure, assertThrows(ExecutionException.class,
+                        () -> leader.get(2, TimeUnit.SECONDS)).getCause());
+                assertEquals(0, meters.get("nexus.usage.cache.load.active").gauge().value());
+                assertEquals(1, cache.getOrLoad(rejectedKey, Instant.now(),
+                        () -> response(rejectedKey, new AtomicInteger())).allTimeCount());
+                assertEquals(3, meters.get("nexus.usage.cache.loads").counter().count());
+                assertEquals(0, meters.get("nexus.usage.cache.load.active").gauge().value());
+            } finally {
+                release.countDown();
+            }
         }
     }
 
