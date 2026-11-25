@@ -58,20 +58,34 @@ class NexusChatController {
     @PostMapping("/api/support/chat/launch")
     ResponseEntity<ApiResponse<Launch>> launch(@RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String auth) {
         AccessTokenIdentity identity = identities.resolveIdentity(auth);
+        Grant grant = request("/integrations/nexus/launch-grants",
+                new SessionReference(identity.userId(), identity.sessionId()), 201, Grant.class);
+        if (grant.grant() == null || !grant.grant().matches("[A-Za-z0-9_-]{43}")) throw unavailable();
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(new ApiResponse<>("SUCCESS", null, new Launch(origin.resolve("/launch/nexus").toString(), grant.grant())));
+    }
+
+    @GetMapping("/api/support/chat/unread")
+    ResponseEntity<ApiResponse<Unread>> unread(@RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String auth) {
+        long userId = identities.resolve(auth);
+        Unread result = request("/integrations/nexus/unread-summary", new UnreadQuery(userId), 200, Unread.class);
+        if (result.unread() == null || result.unread() < 0 || result.unread() > 9_007_199_254_740_991L) throw unavailable();
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(new ApiResponse<>("SUCCESS", null, result));
+    }
+
+    private <T> T request(String path, Object input, int successStatus, Class<T> responseType) {
         if (origin == null) throw unavailable();
-        var request = HttpRequest.newBuilder(origin.resolve("/integrations/nexus/launch-grants"))
+        var request = HttpRequest.newBuilder(origin.resolve(path))
                 .timeout(Duration.ofSeconds(4)).header("Authorization", "Bearer " + credential)
                 .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(
-                        new SessionReference(identity.userId(), identity.sessionId()))))
+                .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(input)))
                 .build();
         try {
             var response = http.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() != 201 || response.body().length() > 1024) throw unavailable();
-            Grant grant = json.readValue(response.body(), Grant.class);
-            if (grant == null || grant.grant() == null || !grant.grant().matches("[A-Za-z0-9_-]{43}")) throw unavailable();
-            return ResponseEntity.ok().cacheControl(CacheControl.noStore())
-                    .body(new ApiResponse<>("SUCCESS", null, new Launch(origin.resolve("/launch/nexus").toString(), grant.grant())));
+            if (response.statusCode() != successStatus || response.body().length() > 1024) throw unavailable();
+            T result = json.readValue(response.body(), responseType);
+            if (result == null) throw unavailable();
+            return result;
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw unavailable();
@@ -132,5 +146,7 @@ class NexusChatController {
 
     record SessionReference(@Positive long userId, @Positive long sessionId) {}
     record Grant(String grant) {}
+    record UnreadQuery(long userId) {}
+    record Unread(Long unread) {}
     record Launch(String action, String grant) {}
 }

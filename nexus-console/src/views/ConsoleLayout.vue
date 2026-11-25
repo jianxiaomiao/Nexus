@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { isNavigationFailure, RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { ElMessage, type ScrollbarInstance } from 'element-plus'
 import { useUserStore } from '@/stores/userStore'
+import { useSupportUnread } from '@/composables/useSupportUnread'
 import { http, type ApiResponse } from '@/api/http'
 import { isWebBrowser } from '@/auth/webSession'
 import { Close, Document, Expand, Fold, Grid, Link, Monitor, SwitchButton, Tickets } from '@element-plus/icons-vue'
@@ -17,6 +18,7 @@ const scrollArea = ref<ScrollbarInstance | null>(null)
 const logoutPending = ref(false)
 const chatLaunching = ref(false)
 const chatEnabled = import.meta.env.VITE_NEXUS_CHAT_ENABLED === 'true' && isWebBrowser()
+const chatUnread = useSupportUnread(chatEnabled)
 const logoutError = ref<string | null>(null)
 const logoutMessage = computed(() => logoutError.value ?? userStore.clearError)
 let disposed = false
@@ -143,14 +145,15 @@ async function logout() {
         </RouterLink>
         <button
           v-if="chatEnabled"
-          class="nav-item"
+          class="nav-item chat-entry"
           type="button"
           :disabled="chatLaunching || logoutPending"
-          aria-label="在线客服"
+          :aria-label="chatUnread ? `在线客服，${chatUnread} 条未读回复` : '在线客服'"
           @click="openSupportChat"
         >
           <el-icon class="nav-icon" :size="20" aria-hidden="true"><Tickets /></el-icon>
           <span>{{ chatLaunching ? '正在进入…' : '在线客服' }}</span>
+          <small v-if="chatUnread" class="chat-unread-count" aria-hidden="true">{{ chatUnread > 99 ? '99+' : chatUnread }}</small>
         </button>
         <RouterLink class="nav-item" :to="{ name: 'playground' }" aria-label="API 调试台" @click="mobileMenuOpen = false">
           <el-icon class="nav-icon" :size="20" aria-hidden="true"><Monitor /></el-icon>
@@ -283,6 +286,21 @@ button.nav-item:disabled { cursor: wait; }
   color: #17685e;
 }
 .nav-icon { flex: none; }
+.chat-entry { position: relative; }
+.chat-unread-count {
+  margin-left: auto;
+  padding: 2px 5px;
+  min-width: 20px;
+  border-radius: 999px;
+  background: var(--nexus-teal, #17685e);
+  color: #fff;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.3;
+}
+@media (min-width: 701px) {
+  .console-sidebar.is-collapsed .chat-unread-count { position: absolute; top: 2px; right: 1px; }
+}
 .sidebar-bottom { margin-top: auto; }
 .collapse-button {
   display: flex;
