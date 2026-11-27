@@ -41,6 +41,17 @@ function search() {
   void load()
 }
 
+function changePage(value: number) {
+  current.value = value
+  void load()
+}
+
+function changeSize(value: number) {
+  size.value = value
+  current.value = 1
+  void load()
+}
+
 async function toggleStatus(app: AdminApplicationListItem) {
   if (updatingId.value !== null) return
   const nextStatus: 0 | 1 = app.status === 0 ? 1 : 0
@@ -112,7 +123,7 @@ onMounted(() => {
             size="small"
             :type="row.status === 0 ? 'danger' : 'primary'"
             :loading="updatingId === row.id"
-            @click="toggleStatus(row)"
+            @click="toggleStatus(row as AdminApplicationListItem)"
           >
             {{ row.status === 0 ? '禁用' : '启用' }}
           </el-button>
@@ -125,8 +136,8 @@ onMounted(() => {
       :current="current"
       :size="size"
       :total="total"
-      @update:current="(v) => { current = v; void load() }"
-      @update:size="(v) => { size = v; current = 1; void load() }"
+      @update:current="changePage"
+      @update:size="changeSize"
     />
   </section>
 </template>
