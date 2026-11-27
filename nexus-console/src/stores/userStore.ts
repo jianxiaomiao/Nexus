@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { toRaw } from 'vue'
-import type { LoginResponse } from "@/api/auth"
+import type { AuthMeResponse, LoginResponse } from "@/api/auth"
+import { getMe } from "@/api/auth"
 import type { AuthState } from '@/types/desktop'
 import { isWebBrowser, webSession, type WebTokens, type SharedWebState } from '../auth/webSession.ts'
 
@@ -77,6 +78,8 @@ type UserSession = {
   webGeneration: string
   webRevision: number
   webEvent: number
+  profile: AuthMeResponse | null
+  profileSessionId: string
 }
 
 export const useUserStore = defineStore('userStore', {
@@ -97,6 +100,8 @@ export const useUserStore = defineStore('userStore', {
     webGeneration: '',
     webRevision: 0,
     webEvent: 0,
+    profile: null,
+    profileSessionId: '',
   }),
 
   // 删掉那些单纯返回state的getter，直接 store.xxx 访问即可
@@ -427,6 +432,8 @@ export const useUserStore = defineStore('userStore', {
         this.expiresAt = 0
         this.sessionId = ''
         this.sessionExpiresAt = 0
+        this.profile = null
+        this.profileSessionId = ''
       } else {
         this.accessToken = session.accessToken
         this.tokenType = session.tokenType
@@ -515,6 +522,32 @@ export const useUserStore = defineStore('userStore', {
       this.expiresAt = 0
       this.sessionId = ''
       this.sessionExpiresAt = 0
+      this.profile = null
+      this.profileSessionId = ''
+    },
+
+    async ensureProfile(): Promise<AuthMeResponse | null> {
+      if (!this.accessToken || this.expiresAt <= Date.now()) {
+        this.profile = null
+        this.profileSessionId = ''
+        return null
+      }
+      if (this.profile && this.profileSessionId === this.sessionId) {
+        return this.profile
+      }
+      const versionAtStart = this.operationVersion
+      const sessionAtStart = this.sessionId
+      try {
+        const res = await getMe()
+        if (this.operationVersion !== versionAtStart || this.sessionId !== sessionAtStart) {
+          return null
+        }
+        this.profile = res.data
+        this.profileSessionId = sessionAtStart
+        return res.data
+      } catch {
+        return null
+      }
     },
   },
 })

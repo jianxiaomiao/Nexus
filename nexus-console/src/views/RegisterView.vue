@@ -2,15 +2,16 @@
 import LoginPlanetScene from '@/components/LoginPlanetScene.vue'
 import loginIllustration from '@/assets/login_page.png'
 import brandSpark from '@/assets/icons/brand-spark.svg'
-import { reactive, ref } from 'vue'
+import { reactive, ref, onBeforeUnmount } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { isAxiosError } from 'axios'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { register, type RegisterRequest, type RegisterResponse } from '@/api/auth'
+import { register, sendRegisterEmailCode, type RegisterRequest, type RegisterResponse } from '@/api/auth'
 import type { ApiResponse } from '@/api/http'
 
 const registerForm = reactive({
   email: '',
+  verificationCode: '',
   displayName: '',
   password: '',
   confirmPassword: '',
@@ -18,6 +19,19 @@ const registerForm = reactive({
 
 const formRef = ref<FormInstance>()
 const submitting = ref(false)
+const sendingCode = ref(false)
+const cooldown = ref(0)
+let cooldownTimer: ReturnType<typeof setInterval> | null = null
+let disposed = false
+onBeforeUnmount(() => {
+  disposed = true
+  if (cooldownTimer !== null) {
+    clearInterval(cooldownTimer)
+    cooldownTimer = null
+  }
+  registerForm.password = ''
+  registerForm.confirmPassword = ''
+})
 const router = useRouter()
 
 const rules: FormRules<typeof registerForm> = {
@@ -25,6 +39,10 @@ const rules: FormRules<typeof registerForm> = {
     { required: true, whitespace: true, message: '邮箱不能为空', trigger: 'blur' },
     { type: 'email', message: '邮箱格式不正确', trigger: 'blur' },
     { max: 254, message: '邮箱长度不能超过254个字符', trigger: 'blur' },
+  ],
+  verificationCode: [
+    { required: true, whitespace: true, message: '请输入邮箱验证码', trigger: 'blur' },
+    { len: 6, message: '验证码为 6 位数字', trigger: 'blur' },
   ],
   displayName: [
     { required: true, whitespace: true, message: '显示名称不能为空', trigger: 'blur' },
@@ -46,12 +64,61 @@ const rules: FormRules<typeof registerForm> = {
   ],
 }
 
+function startCooldown() {
+  cooldown.value = 60
+  if (cooldownTimer !== null) clearInterval(cooldownTimer)
+  cooldownTimer = setInterval(() => {
+    cooldown.value = Math.max(0, cooldown.value - 1)
+    if (cooldown.value === 0 && cooldownTimer !== null) {
+      clearInterval(cooldownTimer)
+      cooldownTimer = null
+    }
+  }, 1000)
+}
+
+async function onSendCode() {
+  if (sendingCode.value || cooldown.value > 0 || !formRef.value) return
+  try {
+    await formRef.value.validateField('email')
+  } catch {
+    return
+  }
+  sendingCode.value = true
+  try {
+    await sendRegisterEmailCode(registerForm.email.trim())
+    if (disposed) return
+    ElMessage.success('验证码已发送，请查收邮箱')
+    startCooldown()
+  } catch (error) {
+    if (disposed) return
+    if (isAxiosError<ApiResponse<unknown>>(error) && error.response?.data?.code === 'AUTH_EMAIL_ALREADY_REGISTERED') {
+      ElMessage.error('该邮箱已被注册，请直接登录')
+    } else if (isAxiosError<ApiResponse<unknown>>(error) && (error.response?.status === 429 || error.response?.data?.code === 'AUTH_EMAIL_CODE_RATE_LIMITED')) {
+      ElMessage.error('发送过于频繁，请 60 秒后再试')
+    } else if (isAxiosError<ApiResponse<unknown>>(error) && error.response?.data?.code === 'AUTH_EMAIL_DELIVERY_FAILED') {
+      ElMessage.error('验证码邮件发送失败，请稍后重试')
+    } else if (isAxiosError(error) && !error.response) {
+      ElMessage.error('无法连接服务器，请确认后端已启动')
+    } else {
+      ElMessage.error('发送验证码失败，请稍后重试')
+    }
+  } finally {
+    if (!disposed) sendingCode.value = false
+  }
+}
+
 const onSubmit = async () => {
   if (submitting.value || !formRef.value) return
 
+  submitting.value = true
   try {
     await formRef.value.validate()
   } catch {
+    submitting.value = false
+    return
+  }
+  if (disposed) {
+    submitting.value = false
     return
   }
 
@@ -59,6 +126,7 @@ const onSubmit = async () => {
     email: registerForm.email.trim(),
     displayName: registerForm.displayName.trim(),
     password: registerForm.password,
+    verificationCode: registerForm.verificationCode.trim(),
   }
 
   submitting.value = true
@@ -66,12 +134,17 @@ const onSubmit = async () => {
   try {
     response = await register(request)
   } catch (error) {
+    if (disposed) return
     if (
       isAxiosError<ApiResponse<unknown>>(error) &&
       error.response?.status === 409 &&
       error.response.data?.code === 'AUTH_EMAIL_ALREADY_REGISTERED'
     ) {
       ElMessage.error('该邮箱已被注册，请直接登录')
+    } else if (isAxiosError<ApiResponse<unknown>>(error) && error.response?.data?.code === 'AUTH_INVALID_EMAIL_CODE') {
+      ElMessage.error('邮箱验证码无效或已过期')
+    } else if (isAxiosError(error) && error.response?.status === 429) {
+      ElMessage.error('操作过于频繁，请稍后再试')
     } else if (isAxiosError(error) && !error.response) {
       ElMessage.error('无法连接服务器，请确认后端已启动')
     } else {
@@ -82,6 +155,7 @@ const onSubmit = async () => {
     submitting.value = false
   }
 
+  if (disposed) return
   if (response.code !== 'SUCCESS') {
     ElMessage.error(response.message || '注册失败，请稍后重试')
     return
@@ -108,6 +182,7 @@ const onSubmit = async () => {
           <p class="form-description">用邮箱注册，开启你的开发者空间。</p>
 
           <el-form
+            :disabled="submitting"
             ref="formRef"
             :model="registerForm"
             :rules="rules"
@@ -118,7 +193,15 @@ const onSubmit = async () => {
           >
             <el-form-item label="邮箱" prop="email">
               <el-input v-model="registerForm.email" type="email" placeholder="请输入常用邮箱" autocomplete="email" :maxlength="254" />
-              <p class="field-hint">此邮箱将用于登录。</p>
+              <p class="field-hint">此邮箱将用于登录与接收验证码。</p>
+            </el-form-item>
+            <el-form-item label="邮箱验证码" prop="verificationCode">
+              <div style="display: flex; gap: 8px; width: 100%">
+                <el-input v-model="registerForm.verificationCode" placeholder="6 位数字验证码" :maxlength="6" />
+                <el-button :loading="sendingCode" :disabled="sendingCode || cooldown > 0" @click="onSendCode">
+                  {{ cooldown > 0 ? `${cooldown}s 后重试` : '发送验证码' }}
+                </el-button>
+              </div>
             </el-form-item>
             <el-form-item label="显示名称" prop="displayName">
               <el-input v-model="registerForm.displayName" placeholder="给自己取个名字" :maxlength="64" />

@@ -38,6 +38,23 @@ const router = createRouter({
           name: 'short-links',
           component: () => import('../views/ShortLinksView.vue'),
         },
+        {
+          path: 'support/tickets',
+          name: 'support-tickets',
+          component: () => import('../views/SupportTicketsView.vue'),
+        },
+        {
+          path: 'admin/users',
+          name: 'admin-users',
+          meta: { requiresAdmin: true },
+          component: () => import('../views/AdminUsersView.vue'),
+        },
+        {
+          path: 'admin/applications',
+          name: 'admin-applications',
+          meta: { requiresAdmin: true },
+          component: () => import('../views/AdminApplicationsView.vue'),
+        },
       ],
     },
     {
@@ -99,6 +116,13 @@ router.beforeEach(async (to) => {
 
   if (to.matched.some((record) => record.meta.requiresAuth) && !signedIn) {
     return { name: 'login', replace: true }
+  }
+  if (signedIn && to.matched.some((record) => record.meta.requiresAdmin)) {
+    const profile = await userStore.ensureProfile()
+    if (profile?.role !== 'ADMIN') {
+      ElMessage.warning({ message: '需要管理员权限才能访问该页面', grouping: true })
+      return { name: 'applications', replace: true }
+    }
   }
   if (signedIn && (to.name === 'login' || to.name === 'register')) {
     return { name: 'applications' }

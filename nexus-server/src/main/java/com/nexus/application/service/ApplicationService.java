@@ -7,18 +7,23 @@ import com.nexus.apikey.entity.ApiKey;
 import com.nexus.apikey.mapper.ApiKeyMapper;
 import com.nexus.application.dto.*;
 import com.nexus.application.entity.Application;
+import com.nexus.application.exception.ApplicationLimitExceededException;
 import com.nexus.application.exception.ApplicationNameAlreadyExistsException;
 import com.nexus.application.exception.ApplicationNotFoundException;
 import com.nexus.application.exception.InvalidApplicationIdException;
 import com.nexus.application.exception.InvalidApplicationUpdateException;
 import com.nexus.application.mapper.ApplicationMapper;
+import com.nexus.auth.exception.InvalidAccessTokenException;
 import com.nexus.shortlink.entity.ShortLink;
 import com.nexus.shortlink.mapper.ShortLinkMapper;
 import com.nexus.common.web.ListPage;
 import com.nexus.common.web.ListPageParameters;
 import com.nexus.quota.dto.QueryQuotaResponse;
 import com.nexus.quota.service.ApplicationQuotaService;
-import lombok.AllArgsConstructor;
+import com.nexus.user.entity.User;
+import com.nexus.user.mapper.UserMapper;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,7 +36,6 @@ import java.util.List;
 import java.util.ArrayList;
 
 @Service
-@AllArgsConstructor
 public class ApplicationService {
 
     private final ApplicationMapper applicationMapper;
@@ -39,10 +43,45 @@ public class ApplicationService {
     private final ApiKeyMapper apiKeyMapper;
     private final ShortLinkMapper shortLinkMapper;
     private final ApplicationQuotaService quotaService;
+    private final UserMapper userMapper;
     private final Clock clock;
+    private final int maxApplicationsPerUser;
 
+    @Autowired
+    public ApplicationService(
+            ApplicationMapper applicationMapper,
+            ApiKeyMapper apiKeyMapper,
+            ShortLinkMapper shortLinkMapper,
+            ApplicationQuotaService quotaService,
+            UserMapper userMapper,
+            Clock clock,
+            @Value("${nexus.application.max-per-user:10}") int maxApplicationsPerUser) {
+        this.applicationMapper = applicationMapper;
+        this.apiKeyMapper = apiKeyMapper;
+        this.shortLinkMapper = shortLinkMapper;
+        this.quotaService = quotaService;
+        this.userMapper = userMapper;
+        this.clock = clock;
+        this.maxApplicationsPerUser = maxApplicationsPerUser;
+    }
+
+    @Transactional
     public CreateApplicationResponse createApplication(Long userId, CreateApplicationRequest createApplicationRequest){
-        //获取用户id
+        // 对同一用户行加锁，串行化该用户的创建请求，避免并发下统计数量被穿透
+        User owner = userMapper.selectOne(Wrappers.<User>lambdaQuery()
+                .eq(User::getId, userId)
+                .eq(User::getIsDeleted, 0)
+                .last("FOR UPDATE"));
+        if (owner == null) {
+            throw new InvalidAccessTokenException();
+        }
+        long activeCount = applicationMapper.selectCount(Wrappers.<Application>lambdaQuery()
+                .eq(Application::getOwnerUserId, userId)
+                .eq(Application::getIsDeleted, 0));
+        if (activeCount >= maxApplicationsPerUser) {
+            throw new ApplicationLimitExceededException(maxApplicationsPerUser);
+        }
+
         //new 一个application（包含name和owner——userId）
         Application application = new Application();
         application.setOwnerUserId(userId);
@@ -81,6 +120,7 @@ public class ApplicationService {
         return new ListPage<>(applications.getTotal(), applications.getCurrent(), applications.getSize(), responses);
     }
 
+    @Transactional
     public ApplicationResponse updateMyApplication(Long userId, UpdateApplicationRequest updateApplicationRequest){
         int affetRow = 0;
         if (updateApplicationRequest.id() == null || updateApplicationRequest.id() <= 0) {
@@ -101,6 +141,17 @@ public class ApplicationService {
             throw new InvalidApplicationUpdateException("应用状态只能是 0 或 1");
         }
 
+        Application before = applicationMapper.selectOne(Wrappers.<Application>lambdaQuery()
+                .eq(Application::getId, updateApplicationRequest.id())
+                .eq(Application::getOwnerUserId, userId).eq(Application::getIsDeleted, 0).last("FOR UPDATE"));
+        if (before == null) throw new ApplicationNotFoundException();
+        if (updateApplicationRequest.expectedUpdatedAt() != null &&
+                !updateApplicationRequest.expectedUpdatedAt().equals(before.getUpdatedAt().toInstant(ZoneOffset.UTC))) {
+            throw new com.nexus.common.web.ResourceChangedException();
+        }
+        LocalDateTime updated = utcNow();
+        if (!updated.isAfter(before.getUpdatedAt())) updated = before.getUpdatedAt().plusNanos(1_000_000);
+
         LambdaUpdateWrapper<Application> lambdaUpdateWrapper = Wrappers.lambdaUpdate();
         lambdaUpdateWrapper
                 .eq(Application::getId,updateApplicationRequest.id())
@@ -108,7 +159,7 @@ public class ApplicationService {
                 .eq(Application::getIsDeleted,0)
                 .set(name != null, Application::getName, name)
                 .set(status != null, Application::getStatus, status)
-                .set(Application::getUpdatedAt, utcNow());
+                .set(Application::getUpdatedAt, updated);
         try {
             affetRow =applicationMapper.update(null, lambdaUpdateWrapper);
         }catch (DuplicateKeyException exception){

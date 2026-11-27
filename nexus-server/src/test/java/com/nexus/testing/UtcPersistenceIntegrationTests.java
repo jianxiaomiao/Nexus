@@ -8,6 +8,8 @@ import com.nexus.apikey.service.ApiKeyService;
 import com.nexus.application.dto.CreateApplicationRequest;
 import com.nexus.application.service.ApplicationService;
 import com.nexus.auth.dto.RegisterRequest;
+import com.nexus.auth.service.EmailSender;
+import com.nexus.auth.service.EmailVerificationService;
 import com.nexus.auth.service.RegistrationService;
 import com.nexus.job.mapper.ScreenshotJobMapper;
 import com.nexus.user.mapper.UserMapper;
@@ -45,6 +47,8 @@ class UtcPersistenceIntegrationTests {
     @Autowired JdbcTemplate jdbc;
     @Autowired Flyway flyway;
     @Autowired RegistrationService registration;
+    @Autowired EmailVerificationService emailVerification;
+    @org.springframework.test.context.bean.override.mockito.MockitoBean EmailSender emailSender;
     @Autowired ApplicationService applications;
     @Autowired ApiKeyService keys;
     @Autowired ApiKeyMapper keyMapper;
@@ -73,7 +77,7 @@ class UtcPersistenceIntegrationTests {
     }
 
     @Test
-    void registrationKeyLifecycleAndCascadeStoreTheSameUtcInstant() {
+    void registrationKeyLifecycleUsesUtcAndMonotonicEditTimestamps() {
         long[] ids = createOwnerAndApplication();
         var created = keys.createMyApiKey(ids[0], new CreateApiKeyRequest("utc-key", ids[1]));
         assertEquals(NOW, created.createdAt());
@@ -81,10 +85,14 @@ class UtcPersistenceIntegrationTests {
         assertEquals(UTC_NOW, user.getCreatedAt());
         assertEquals(UTC_NOW, user.getUpdatedAt());
         var rotated = keys.rotateMyApiKey(ids[0], created.id(), created.publicId());
-        assertEquals(NOW, rotated.updatedAt());
+        // The fixed business clock stays at NOW; edit versions must still advance at millisecond precision.
+        assertEquals(NOW.plusMillis(1), rotated.updatedAt());
+        assertEquals(UTC_NOW.plusNanos(1_000_000), keyMapper.selectById(created.id()).getUpdatedAt());
         var updated = keys.updateMyApiKey(ids[0], new UpdateApiKeyRequest("renamed", ids[1], created.id(), 1));
         assertEquals(NOW, updated.createdAt());
-        assertEquals(NOW, updated.updatedAt());
+        assertEquals(NOW.plusMillis(2), updated.updatedAt());
+        assertEquals(UTC_NOW, keyMapper.selectById(created.id()).getCreatedAt());
+        assertEquals(UTC_NOW.plusNanos(2_000_000), keyMapper.selectById(created.id()).getUpdatedAt());
         String code = UUID.randomUUID().toString().substring(0, 8);
         jdbc.update("INSERT INTO short_links (api_key_id,name,original_url,short_code,expires_at) VALUES (?,?,?,?,?)",
                 created.id(), "utc-link", "https://weibo.com/1", code, UTC_NOW.plusDays(1));
@@ -139,7 +147,13 @@ class UtcPersistenceIntegrationTests {
 
     private long[] createOwnerAndApplication() {
         String email = UUID.randomUUID() + "@example.com";
-        registration.register(new RegisterRequest(email, "utc-owner", "test-only-password"));
+        java.util.concurrent.atomic.AtomicReference<String> code = new java.util.concurrent.atomic.AtomicReference<>();
+        org.mockito.Mockito.doAnswer(inv -> {
+            code.set(inv.getArgument(1));
+            return null;
+        }).when(emailSender).sendVerificationCode(org.mockito.ArgumentMatchers.eq(email), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyInt());
+        emailVerification.sendRegisterCode(email);
+        registration.register(new RegisterRequest(email, "utc-owner", "test-only-password", code.get()));
         long userId = jdbc.queryForObject("SELECT id FROM users WHERE email=?", Long.class, email);
         return new long[]{userId, applications.createApplication(userId, new CreateApplicationRequest("utc-app")).id()};
     }

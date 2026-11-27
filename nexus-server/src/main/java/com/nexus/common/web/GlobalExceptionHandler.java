@@ -1,5 +1,8 @@
 package com.nexus.common.web;
 
+import com.nexus.admin.exception.AdminResourceNotFoundException;
+import com.nexus.admin.exception.InvalidAdminOperationException;
+import com.nexus.application.exception.ApplicationLimitExceededException;
 import com.nexus.application.exception.ApplicationNameAlreadyExistsException;
 import com.nexus.application.exception.ApplicationDisabledException;
 import com.nexus.application.exception.ApplicationNotFoundException;
@@ -12,6 +15,10 @@ import com.nexus.apikey.exception.InvalidApiKeyDeleteException;
 import com.nexus.apikey.exception.InvalidApiKeyRotationException;
 import com.nexus.apikey.exception.InvalidApiKeyUpdateException;
 import com.nexus.auth.exception.AccountForbiddenException;
+import com.nexus.auth.exception.AdminForbiddenException;
+import com.nexus.auth.exception.EmailCodeRateLimitedException;
+import com.nexus.auth.exception.EmailDeliveryException;
+import com.nexus.auth.exception.InvalidEmailVerificationCodeException;
 import com.nexus.auth.exception.AuthSessionUnavailableException;
 import com.nexus.auth.exception.EmailAlreadyRegisteredException;
 import com.nexus.auth.exception.InvalidAccessTokenException;
@@ -29,6 +36,7 @@ import com.nexus.shortlink.exception.ShortLinkExpiredException;
 import com.nexus.shortlink.exception.ShortLinkNotFoundException;
 import com.nexus.usage.exception.InvalidUsageTimeRangeException;
 import com.nexus.usage.exception.InvalidUsagePaginationException;
+import com.nexus.usage.exception.UsageSummaryUnavailableException;
 import com.nexus.webExtract.exception.InvalidWebExtractRequestException;
 import com.nexus.webExtract.exception.WebContentUnavailableException;
 import com.nexus.webExtract.exception.WebPageFetchException;
@@ -72,6 +80,23 @@ import static com.nexus.common.web.RequestFailureLogContext.Category.SYSTEM_FAIL
 
 @RestControllerAdvice
 public class GlobalExceptionHandler{
+
+    @ResponseStatus(HttpStatus.CONFLICT)
+    @ExceptionHandler(ResourceChangedException.class)
+    public ApiResponse<Void> handleResourceChanged(ResourceChangedException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.CONFLICT, "RESOURCE_CHANGED", exception.getMessage(), null);
+    }
+
+    @ExceptionHandler(com.nexus.job.exception.ScreenshotSubmissionException.class)
+    public ResponseEntity<ApiResponse<Void>> handleSubmission(com.nexus.job.exception.ScreenshotSubmissionException exception, HttpServletRequest request) {
+        HttpStatus status = switch (exception.kind()) {
+            case INVALID -> HttpStatus.BAD_REQUEST;
+            case CONFLICT -> HttpStatus.CONFLICT;
+            case EXPIRED -> HttpStatus.GONE;
+        };
+        return ResponseEntity.status(status).body(handled(request, exception, status,
+                "SCREENSHOT_SUBMISSION_" + exception.kind().name(), exception.getMessage(), null));
+    }
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
@@ -204,6 +229,14 @@ public class GlobalExceptionHandler{
         return handled(request, exception, HttpStatus.BAD_REQUEST, "INVALID_USAGE_TIME_RANGE", exception.getMessage(), null);
     }
 
+    @ExceptionHandler(UsageSummaryUnavailableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUsageSummaryUnavailable(UsageSummaryUnavailableException exception,
+                                                                          HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).header(HttpHeaders.RETRY_AFTER, "1")
+                .body(handled(request, exception, HttpStatus.SERVICE_UNAVAILABLE,
+                        "USAGE_SUMMARY_UNAVAILABLE", exception.getMessage(), null, CAPACITY_PROTECTION));
+    }
+
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     @ExceptionHandler(InvalidShortLinkRequestException.class)
     public ApiResponse<Void> handleInvalidShortLinkRequest(InvalidShortLinkRequestException exception, HttpServletRequest request) {
@@ -309,6 +342,48 @@ public class GlobalExceptionHandler{
                 "AUTH_ACCOUNT_FORBIDDEN", exception.getMessage(), null);
     }
 
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    @ExceptionHandler(AdminForbiddenException.class)
+    public ApiResponse<Void> handleAdminForbiddenException(AdminForbiddenException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.FORBIDDEN,
+                "ADMIN_REQUIRED", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ExceptionHandler(InvalidAdminOperationException.class)
+    public ApiResponse<Void> handleInvalidAdminOperationException(InvalidAdminOperationException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.BAD_REQUEST,
+                "INVALID_ADMIN_OPERATION", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    @ExceptionHandler(AdminResourceNotFoundException.class)
+    public ApiResponse<Void> handleAdminResourceNotFoundException(AdminResourceNotFoundException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.NOT_FOUND,
+                "ADMIN_RESOURCE_NOT_FOUND", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.TOO_MANY_REQUESTS)
+    @ExceptionHandler(EmailCodeRateLimitedException.class)
+    public ApiResponse<Void> handleEmailCodeRateLimited(EmailCodeRateLimitedException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.TOO_MANY_REQUESTS,
+                "AUTH_EMAIL_CODE_RATE_LIMITED", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ExceptionHandler(InvalidEmailVerificationCodeException.class)
+    public ApiResponse<Void> handleInvalidEmailVerificationCode(InvalidEmailVerificationCodeException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.BAD_REQUEST,
+                "AUTH_INVALID_EMAIL_CODE", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
+    @ExceptionHandler(EmailDeliveryException.class)
+    public ApiResponse<Void> handleEmailDelivery(EmailDeliveryException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.SERVICE_UNAVAILABLE,
+                "AUTH_EMAIL_DELIVERY_FAILED", exception.getMessage(), null, SYSTEM_FAILURE);
+    }
+
     @ResponseStatus(HttpStatus.UNAUTHORIZED)
     @ExceptionHandler(InvalidRefreshTokenException.class)
     public ApiResponse<Void> handleInvalidRefreshToken(InvalidRefreshTokenException exception,
@@ -338,6 +413,13 @@ public class GlobalExceptionHandler{
     public ApiResponse<Void> handleApplicationNameAlreadyExistsException(ApplicationNameAlreadyExistsException exception, HttpServletRequest request){
         return handled(request, exception, HttpStatus.CONFLICT,
                 "APPLICATION_NAME_ALREADY_EXISTS", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.CONFLICT)
+    @ExceptionHandler(ApplicationLimitExceededException.class)
+    public ApiResponse<Void> handleApplicationLimitExceededException(ApplicationLimitExceededException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.CONFLICT,
+                "APPLICATION_LIMIT_EXCEEDED", exception.getMessage(), null);
     }
 
     @ResponseStatus(HttpStatus.UNAUTHORIZED)

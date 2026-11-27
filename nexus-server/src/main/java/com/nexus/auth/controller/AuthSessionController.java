@@ -2,7 +2,9 @@ package com.nexus.auth.controller;
 
 import com.nexus.auth.dto.*;
 import com.nexus.auth.service.*;
+import com.nexus.auth.web.BearerUserIdResolver;
 import com.nexus.common.web.ApiResponse;
+import com.nexus.user.entity.User;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -14,6 +16,21 @@ import org.springframework.web.bind.annotation.*;
 public class AuthSessionController {
     private final AuthSessionService sessions;
     private final LogoutService logout;
+    private final BearerUserIdResolver bearerUserIdResolver;
+
+    @GetMapping("/me")
+    public ApiResponse<AuthMeResponse> me(@RequestHeader(value = "Authorization", required = false) String authorization) {
+        User user = bearerUserIdResolver.resolveActiveUser(authorization);
+        String role = user.getRole() != null ? user.getRole() : "USER";
+        int status = user.getStatus() != null ? user.getStatus() : 0;
+        return new ApiResponse<>("SUCCESS", "查询成功", new AuthMeResponse(
+                user.getId(),
+                user.getEmail(),
+                user.getDisplayName(),
+                role,
+                status
+        ));
+    }
 
     @PostMapping(value = "/refresh", headers = "X-Nexus-Session-Transport!=cookie")
     public ApiResponse<AuthTokensResponse> refresh(@Valid @RequestBody RefreshRequest request, HttpServletResponse response) {

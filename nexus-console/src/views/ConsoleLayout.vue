@@ -3,7 +3,10 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { isNavigationFailure, RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { ElMessage, type ScrollbarInstance } from 'element-plus'
 import { useUserStore } from '@/stores/userStore'
-import { Close, Document, Expand, Fold, Grid, Link, Monitor, SwitchButton } from '@element-plus/icons-vue'
+import { useSupportUnread } from '@/composables/useSupportUnread'
+import { http, type ApiResponse } from '@/api/http'
+import { isWebBrowser } from '@/auth/webSession'
+import { Close, Document, Expand, Fold, Grid, Link, Monitor, Setting, SwitchButton, Tickets, User } from '@element-plus/icons-vue'
 import brandSpark from '@/assets/icons/brand-spark.svg'
 
 const route = useRoute()
@@ -13,8 +16,12 @@ const collapsed = ref(false)
 const mobileMenuOpen = ref(false)
 const scrollArea = ref<ScrollbarInstance | null>(null)
 const logoutPending = ref(false)
+const chatLaunching = ref(false)
+const chatEnabled = import.meta.env.VITE_NEXUS_CHAT_ENABLED === 'true' && isWebBrowser()
+const chatUnread = useSupportUnread(chatEnabled)
 const logoutError = ref<string | null>(null)
 const logoutMessage = computed(() => logoutError.value ?? userStore.clearError)
+const isAdmin = computed(() => userStore.profile?.role === 'ADMIN')
 let disposed = false
 
 watch(() => route.fullPath, () => { mobileMenuOpen.value = false })
@@ -27,11 +34,48 @@ function closeMenuOnEscape(event: KeyboardEvent) {
   if (event.key === 'Escape') mobileMenuOpen.value = false
 }
 
-onMounted(() => window.addEventListener('keydown', closeMenuOnEscape))
+onMounted(() => {
+  window.addEventListener('keydown', closeMenuOnEscape)
+  void userStore.ensureProfile()
+})
 onUnmounted(() => {
   disposed = true
   window.removeEventListener('keydown', closeMenuOnEscape)
 })
+
+async function openSupportChat() {
+  if (chatLaunching.value || logoutPending.value || userStore.clearing) return
+  const operationVersion = userStore.operationVersion
+  chatLaunching.value = true
+  try {
+    const { data } = await http.post<ApiResponse<{ action: string; grant: string }>>('/support/chat/launch')
+    if (disposed || operationVersion !== userStore.operationVersion || !userStore.checkWebState()) return
+    const { action, grant } = data.data
+    const target = new URL(action)
+    const loopback = ['localhost', '127.0.0.1'].includes(target.hostname)
+    if (!(target.protocol === 'https:' || (loopback && target.protocol === 'http:')) ||
+        target.pathname !== '/launch/nexus' || target.username || target.password || target.search || target.hash ||
+        !/^[A-Za-z0-9_-]{43}$/.test(grant)) throw new Error('Invalid chat launch')
+    const form = document.createElement('form')
+    form.method = 'POST'
+    form.action = target.href
+    const field = document.createElement('input')
+    field.type = 'hidden'
+    field.name = 'grant'
+    field.value = grant
+    form.append(field)
+    document.body.append(form)
+    form.submit()
+    form.remove()
+    mobileMenuOpen.value = false
+  } catch {
+    if (!disposed && operationVersion === userStore.operationVersion) {
+      ElMessage.error('暂时无法进入在线客服，请稍后重试。')
+    }
+  } finally {
+    chatLaunching.value = false
+  }
+}
 
 async function logout() {
   if (logoutPending.value || userStore.clearing) return
@@ -99,10 +143,36 @@ async function logout() {
           <el-icon class="nav-icon" :size="20" aria-hidden="true"><Link /></el-icon>
           <span>短链接</span>
         </RouterLink>
+        <RouterLink class="nav-item" :to="{ name: 'support-tickets' }" aria-label="我的工单" @click="mobileMenuOpen = false">
+          <el-icon class="nav-icon" :size="20" aria-hidden="true"><Tickets /></el-icon>
+          <span>我的工单</span>
+        </RouterLink>
+        <button
+          v-if="chatEnabled"
+          class="nav-item chat-entry"
+          type="button"
+          :disabled="chatLaunching || logoutPending"
+          :aria-label="chatUnread ? `在线客服，${chatUnread} 条未读回复` : '在线客服'"
+          @click="openSupportChat"
+        >
+          <el-icon class="nav-icon" :size="20" aria-hidden="true"><Tickets /></el-icon>
+          <span>{{ chatLaunching ? '正在进入…' : '在线客服' }}</span>
+          <small v-if="chatUnread" class="chat-unread-count" aria-hidden="true">{{ chatUnread > 99 ? '99+' : chatUnread }}</small>
+        </button>
         <RouterLink class="nav-item" :to="{ name: 'playground' }" aria-label="API 调试台" @click="mobileMenuOpen = false">
           <el-icon class="nav-icon" :size="20" aria-hidden="true"><Monitor /></el-icon>
           <span>API 调试台</span>
         </RouterLink>
+        <template v-if="isAdmin">
+          <RouterLink class="nav-item" :to="{ name: 'admin-users' }" active-class="is-active" aria-label="用户管理" @click="mobileMenuOpen = false">
+            <el-icon class="nav-icon" :size="20" aria-hidden="true"><User /></el-icon>
+            <span>用户管理</span>
+          </RouterLink>
+          <RouterLink class="nav-item" :to="{ name: 'admin-applications' }" active-class="is-active" aria-label="全局应用" @click="mobileMenuOpen = false">
+            <el-icon class="nav-icon" :size="20" aria-hidden="true"><Setting /></el-icon>
+            <span>全局应用</span>
+          </RouterLink>
+        </template>
       </nav>
 
       <div class="sidebar-bottom">
@@ -123,6 +193,7 @@ async function logout() {
             <RouterLink v-if="route.name === 'application-detail' || route.name === 'api-key-detail'" :to="{ name: 'applications' }">Applications</RouterLink>
             <strong v-else-if="route.name === 'playground'" aria-current="page">API 调试台</strong>
             <strong v-else-if="route.name === 'short-links'" aria-current="page">短链接</strong>
+            <strong v-else-if="route.name === 'support-tickets'" aria-current="page">我的工单</strong>
             <strong v-else>Applications</strong>
             <span v-if="route.name === 'application-detail'" aria-current="page">/ 应用详情</span>
             <template v-else-if="route.name === 'api-key-detail'">
@@ -214,6 +285,14 @@ async function logout() {
   text-decoration: none;
   white-space: nowrap;
 }
+button.nav-item {
+  border: 0;
+  border-left: 3px solid transparent;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+button.nav-item:disabled { cursor: wait; }
 .nav-item:hover { background: #e4ece3; }
 .nav-item.is-active, .nav-item.router-link-active {
   border-left-color: var(--nexus-teal);
@@ -221,6 +300,21 @@ async function logout() {
   color: #17685e;
 }
 .nav-icon { flex: none; }
+.chat-entry { position: relative; }
+.chat-unread-count {
+  margin-left: auto;
+  padding: 2px 5px;
+  min-width: 20px;
+  border-radius: 999px;
+  background: var(--nexus-teal, #17685e);
+  color: #fff;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.3;
+}
+@media (min-width: 701px) {
+  .console-sidebar.is-collapsed .chat-unread-count { position: absolute; top: 2px; right: 1px; }
+}
 .sidebar-bottom { margin-top: auto; }
 .collapse-button {
   display: flex;

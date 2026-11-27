@@ -156,6 +156,49 @@ class ApplicationCreationFlowIntegrationTests {
         }
     }
 
+    @Test
+    void userCannotCreateMoreThanTenActiveApplicationsEvenWithDisabledOnes() throws Exception {
+        AuthenticatedUser owner = loginAsNewUser();
+        Long firstId = null;
+        for (int i = 1; i <= 10; i++) {
+            String body = objectMapper.writeValueAsString(new CreateApplicationRequest("app-" + i + "-" + UUID.randomUUID()));
+            MvcResult result = mockMvc.perform(post("/api/application/create")
+                            .header("Authorization", "Bearer " + owner.accessToken())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isOk())
+                    .andReturn();
+            if (i == 1) {
+                firstId = objectMapper.readTree(result.getResponse().getContentAsString()).path("data").path("id").asLong();
+            }
+        }
+
+        // 禁用其中一个应用，仍应计入 10 个上限
+        applicationMapper.update(null, Wrappers.<Application>lambdaUpdate()
+                .eq(Application::getId, firstId)
+                .set(Application::getStatus, 1));
+
+        String eleventhBody = objectMapper.writeValueAsString(new CreateApplicationRequest("app-11-" + UUID.randomUUID()));
+        mockMvc.perform(post("/api/application/create")
+                        .header("Authorization", "Bearer " + owner.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(eleventhBody))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("APPLICATION_LIMIT_EXCEEDED"));
+
+        // 软删除一个应用后，应可再次创建第 10 个活跃应用
+        applicationMapper.update(null, Wrappers.<Application>lambdaUpdate()
+                .eq(Application::getId, firstId)
+                .set(Application::getIsDeleted, 1)
+                .set(Application::getDeletedAt, java.time.LocalDateTime.now()));
+
+        mockMvc.perform(post("/api/application/create")
+                        .header("Authorization", "Bearer " + owner.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(eleventhBody))
+                .andExpect(status().isOk());
+    }
+
     private AuthenticatedUser loginAsNewUser() throws Exception {
         String email = "application-flow-" + UUID.randomUUID() + "@example.com";
         User user = new User();

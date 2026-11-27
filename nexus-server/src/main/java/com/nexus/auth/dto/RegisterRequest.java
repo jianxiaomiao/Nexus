@@ -17,6 +17,10 @@ public record RegisterRequest(
 
         @NotBlank(message = "密码不能为空")
         @Size(min = 8, max = 64, message = "密码长度必须在8到64个字符之间")
-        String password
+        String password,
+
+        @NotBlank(message = "邮箱验证码不能为空")
+        @Size(min = 6, max = 6, message = "邮箱验证码必须为6位")
+        String verificationCode
 ) {
 }
