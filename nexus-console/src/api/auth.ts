@@ -81,8 +81,25 @@ export interface RegisterResponse {
   displayName: string
 }
 
-export async function sendRegisterEmailCode(email: string): Promise<ApiResponse<void>> {
-  const response = await http.post<ApiResponse<void>>('/auth/register/email-code', { email })
+export interface CaptchaResponse {
+  captchaId: string
+  imageDataUrl: string
+  expiresInSeconds: number
+}
+
+export async function fetchRegisterCaptcha(): Promise<ApiResponse<CaptchaResponse>> {
+  const response = await http.get<ApiResponse<CaptchaResponse>>('/auth/register/captcha')
+  return response.data
+}
+
+export interface SendRegisterEmailCodeRequest {
+  email: string
+  captchaId: string
+  captchaAnswer: string
+}
+
+export async function sendRegisterEmailCode(request: SendRegisterEmailCodeRequest): Promise<ApiResponse<void>> {
+  const response = await http.post<ApiResponse<void>>('/auth/register/email-code', request)
   return response.data
 }
 

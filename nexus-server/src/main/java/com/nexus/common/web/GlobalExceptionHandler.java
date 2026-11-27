@@ -18,6 +18,7 @@ import com.nexus.auth.exception.AccountForbiddenException;
 import com.nexus.auth.exception.AdminForbiddenException;
 import com.nexus.auth.exception.EmailCodeRateLimitedException;
 import com.nexus.auth.exception.EmailDeliveryException;
+import com.nexus.auth.exception.InvalidCaptchaException;
 import com.nexus.auth.exception.InvalidEmailVerificationCodeException;
 import com.nexus.auth.exception.AuthSessionUnavailableException;
 import com.nexus.auth.exception.EmailAlreadyRegisteredException;
@@ -368,6 +369,13 @@ public class GlobalExceptionHandler{
     public ApiResponse<Void> handleEmailCodeRateLimited(EmailCodeRateLimitedException exception, HttpServletRequest request) {
         return handled(request, exception, HttpStatus.TOO_MANY_REQUESTS,
                 "AUTH_EMAIL_CODE_RATE_LIMITED", exception.getMessage(), null);
+    }
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ExceptionHandler(InvalidCaptchaException.class)
+    public ApiResponse<Void> handleInvalidCaptcha(InvalidCaptchaException exception, HttpServletRequest request) {
+        return handled(request, exception, HttpStatus.BAD_REQUEST,
+                "AUTH_INVALID_CAPTCHA", exception.getMessage(), null);
     }
 
     @ResponseStatus(HttpStatus.BAD_REQUEST)

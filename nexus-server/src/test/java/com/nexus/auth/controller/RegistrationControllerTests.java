@@ -3,6 +3,7 @@ package com.nexus.auth.controller;
 import com.nexus.auth.dto.RegisterRequest;
 import com.nexus.auth.dto.RegisterResponse;
 import com.nexus.auth.exception.EmailAlreadyRegisteredException;
+import com.nexus.auth.service.ArithmeticCaptchaService;
 import com.nexus.auth.service.EmailVerificationService;
 import com.nexus.auth.service.RegistrationService;
 import org.junit.jupiter.api.Test;
@@ -36,6 +37,9 @@ class RegistrationControllerTests {
 
     @MockitoBean
     private EmailVerificationService emailVerificationService;
+
+    @MockitoBean
+    private ArithmeticCaptchaService captchaService;
 
     @Test
     void normalRegisterTest() throws Exception {

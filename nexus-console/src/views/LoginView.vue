@@ -93,8 +93,10 @@ const onSubmit = async () => {
     }
     if (disposed || completion.operationVersion !== userStore.operationVersion) return
     loginCompleted = true
+    const profile = await userStore.ensureProfile()
+    if (disposed || completion.operationVersion !== userStore.operationVersion) return
     ElMessage.success('登录成功')
-    await router.replace({ name: 'applications' })
+    await router.replace({ name: profile?.role === 'ADMIN' ? 'admin-users' : 'applications' })
   } catch (error) {
     if (attempt.operationVersion !== userStore.operationVersion) return
     if (
