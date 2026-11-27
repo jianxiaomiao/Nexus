@@ -213,6 +213,8 @@ class ApiKeyServiceTests {
         stored.setPublicId("public-id");
         stored.setKeyPreview("masked-preview");
         stored.setStatus(1);
+        stored.setUpdatedAt(java.time.LocalDateTime.of(2026, 1, 1, 0, 0));
+        when(apiKeyMapper.selectOne(any())).thenReturn(stored);
         when(apiKeyMapper.selectById(9L)).thenReturn(stored);
 
         ApiKeyResponse response = service.updateMyApiKey(
@@ -241,7 +243,7 @@ class ApiKeyServiceTests {
     @Test
     void missingOrDeletedKeyCannotBeUpdated() {
         when(applicationMapper.selectOne(any())).thenReturn(new Application());
-        when(apiKeyMapper.update(any(), any())).thenReturn(0);
+
 
         assertThrows(ApiKeyNotFoundException.class,
                 () -> service.updateMyApiKey(42L, new UpdateApiKeyRequest("new name", 7L, 9L, null)));
@@ -250,6 +252,8 @@ class ApiKeyServiceTests {
     @Test
     void duplicateNameOnUpdateIsReportedAsConflict() {
         when(applicationMapper.selectOne(any())).thenReturn(new Application());
+        ApiKey before = new ApiKey(); before.setUpdatedAt(java.time.LocalDateTime.of(2026, 1, 1, 0, 0));
+        when(apiKeyMapper.selectOne(any())).thenReturn(before);
         when(apiKeyMapper.update(any(), any()))
                 .thenThrow(new DuplicateKeyException("duplicate key"));
 

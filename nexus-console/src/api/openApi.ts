@@ -1,3 +1,5 @@
+import { withNetworkDeadline } from './networkDeadline'
+import { prepareScreenshotSubmission, screenshotSubmissionNeedsReconcile } from './screenshotSubmission'
 import type { ApiResponse } from './http'
 
 export type OpenApiEndpoint = 'uuid' | 'hash'
@@ -28,6 +30,7 @@ export async function callOpenApi(
   value: string,
   signal?: AbortSignal,
 ): Promise<OpenApiResult> {
+  return withNetworkDeadline(signal, 15000, async (signal) => {
   const isHash = endpoint === 'hash'
   const response = await fetch(isHash ? '/v1/utils/hash' : '/v1/utils/uuid', {
     method: isHash ? 'POST' : 'GET',
@@ -45,9 +48,11 @@ export async function callOpenApi(
   // 认证失败也需要把真实 HTTP 状态和后端错误体展示在响应区。
   const body = await response.json() as ApiResponse<unknown>
   return { status: response.status, body }
+  })
 }
 
 export async function callWebExtract(apiKey: string, url: string, signal?: AbortSignal): Promise<OpenApiResult> {
+  return withNetworkDeadline(signal, 75000, async (signal) => {
   const response = await fetch('/v1/web/extract', {
     method: 'POST',
     cache: 'no-store',
@@ -58,6 +63,7 @@ export async function callWebExtract(apiKey: string, url: string, signal?: Abort
     signal,
   })
   return { status: response.status, body: await response.json() as ApiResponse<unknown> }
+  })
 }
 
 export interface WebScreenshotResult extends OpenApiResult {
@@ -163,12 +169,14 @@ async function readScreenshotResponse(response: Response): Promise<WebScreenshot
 }
 
 export async function callWebScreenshot(apiKey: string, url: string, signal?: AbortSignal): Promise<WebScreenshotResult> {
+  return withNetworkDeadline(signal, 75000, async (signal) => {
   const response = await fetch('/v1/web/screenshot', {
     method: 'POST', cache: 'no-store', credentials: 'omit', redirect: 'error',
     headers: { Authorization: `ApiKey ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ url }), signal,
   })
   return readScreenshotResponse(response)
+  })
 }
 
 export async function submitScreenshotJob(
@@ -176,17 +184,22 @@ export async function submitScreenshotJob(
   url: string,
   signal?: AbortSignal,
 ): Promise<ScreenshotJobApiResult<CreatedScreenshotJob>> {
+  return withNetworkDeadline(signal, 15000, async (signal) => {
+  const submission = await prepareScreenshotSubmission(apiKey, url)
   const response = await fetch('/v1/web/screenshot-jobs', {
     method: 'POST', cache: 'no-store', credentials: 'omit', redirect: 'error',
-    headers: { Authorization: `ApiKey ${apiKey}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `ApiKey ${apiKey}`, 'Content-Type': 'application/json', 'Idempotency-Key': submission.key },
     body: JSON.stringify({ url }), signal,
   })
   const body = await readJsonResponse(response)
+  const validSuccess = response.ok && body?.code === 'SUCCESS' && isCreatedScreenshotJob(body?.data)
+  if (validSuccess || response.status >= 400 && response.status < 500 && !screenshotSubmissionNeedsReconcile(response.status, false)) await submission.settle()
   return {
     status: response.status,
     body,
-    data: isCreatedScreenshotJob(body?.data) ? body.data : null,
+    data: validSuccess && isCreatedScreenshotJob(body?.data) ? body.data : null,
   }
+  })
 }
 
 export async function getScreenshotJob(
@@ -194,6 +207,7 @@ export async function getScreenshotJob(
   jobId: string,
   signal?: AbortSignal,
 ): Promise<ScreenshotJobApiResult<ScreenshotJob>> {
+  return withNetworkDeadline(signal, 15000, async (signal) => {
   const response = await fetch(`/v1/web/screenshot-jobs/${encodeURIComponent(jobId)}`, {
     method: 'GET', cache: 'no-store', credentials: 'omit', redirect: 'error',
     headers: { Authorization: `ApiKey ${apiKey}` }, signal,
@@ -204,6 +218,7 @@ export async function getScreenshotJob(
     body,
     data: isScreenshotJob(body?.data) ? body.data : null,
   }
+  })
 }
 
 export async function getScreenshotJobResult(
@@ -211,9 +226,11 @@ export async function getScreenshotJobResult(
   jobId: string,
   signal?: AbortSignal,
 ): Promise<WebScreenshotResult> {
+  return withNetworkDeadline(signal, 15000, async (signal) => {
   const response = await fetch(`/v1/web/screenshot-jobs/${encodeURIComponent(jobId)}/result`, {
     method: 'GET', cache: 'no-store', credentials: 'omit', redirect: 'error',
     headers: { Authorization: `ApiKey ${apiKey}` }, signal,
   })
   return readScreenshotResponse(response)
+  })
 }

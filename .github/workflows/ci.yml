@@ -66,6 +66,9 @@ jobs:
           scripts/test-auth-session-login.mjs
           scripts/test-auth-session-invalidation.mjs
           scripts/test-auth-session-renewal.mjs
+          scripts/test-request-gate.mjs
+          scripts/test-network-deadline.mjs
+          scripts/test-screenshot-submission.mjs
 
       - name: 桌面 Renderer 类型检查与生产构建
         working-directory: ./nexus-desktop
@@ -93,6 +96,7 @@ jobs:
           node --test
           scripts/test-auth-session.cjs
           scripts/test-management-contracts.cjs
+          scripts/test-management-lifecycle.cjs
 
   backend:
     runs-on: ubuntu-latest
@@ -108,6 +112,16 @@ jobs:
       SPRING_DATASOURCE_HIKARI_MINIMUMIDLE: 1
       NEXUS_WEBHOOK_SCHEDULING_ENABLED: 'false'
     services:
+      redis:
+        image: redis:7.4.2-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
       mysql:
         image: mysql:8.4
         ports:
@@ -170,11 +184,21 @@ jobs:
         working-directory: ./nexus-server
         run: sh ./mvnw -B clean test
 
+      - name: 验证真实 Redis 汇总缓存和 MySQL 工单租约
+        working-directory: ./nexus-server
+        env:
+          NEXUS_TEST_REDIS_URI: redis://127.0.0.1:6379
+          NEXUS_SUPPORT_LEASE_ACCEPTANCE: 'true'
+        run: >-
+          sh ./mvnw -B
+          -Dtest=UsageSummaryRedisCacheIntegrationTests,SupportTicketLeaseIntegrationTest
+          test
+
       - name: 验证默认时区不改变 UTC 业务时间
         working-directory: ./nexus-server
         env:
           JAVA_TOOL_OPTIONS: -Duser.timezone=America/Los_Angeles
         run: >-
           sh ./mvnw -B
-          -Dtest=ApplicationServiceImplTests,ApplicationQuotaServiceTests,ApiKeyServiceTests,ApiKeyControllerTests,RegistrationClockTests,UsageClockTests
+          -Dtest=ApplicationServiceImplTests,ApplicationQuotaServiceTests,ApiKeyServiceTests,ApiKeyControllerTests,RegistrationClockTests,UsageClockTests,UtcPersistenceIntegrationTests
           test

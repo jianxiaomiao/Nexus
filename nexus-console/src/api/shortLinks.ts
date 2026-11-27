@@ -1,3 +1,6 @@
+import { MutationResultUnknown } from './mutation'
+import { checkedListPage } from './listPage'
+import { withNetworkDeadline } from './networkDeadline'
 import { isAxiosError } from 'axios'
 import { http, type ApiResponse } from './http'
 import type { ListPage, ListPageQuery } from './listPage'
@@ -21,6 +24,7 @@ export interface CreateShortLinkRequest {
 }
 
 export interface UpdateShortLinkRequest {
+  expectedUpdatedAt?: string
   id: number
   name?: string
   status?: 0 | 1
@@ -46,6 +50,7 @@ export async function callShortLinkOpenApi(
   payload?: CreateShortLinkRequest | UpdateShortLinkRequest | number,
   signal?: AbortSignal,
 ): Promise<ShortLinkOpenApiResult> {
+  return withNetworkDeadline(signal, 15000, async (signal) => {
   const id = operation === 'delete' ? payload as number : null
   const response = await fetch(operation === 'delete' ? `/v1/short-links/${id}` : '/v1/short-links', {
     method: { create: 'POST', list: 'GET', update: 'PUT', delete: 'DELETE' }[operation],
@@ -60,16 +65,19 @@ export async function callShortLinkOpenApi(
     signal,
   })
   return { status: response.status, body: await response.json() as ShortLinkOpenApiResult['body'] }
+  })
 }
 
 export async function listManagedShortLinks(apiKeyId: number, query: ListPageQuery = {}): Promise<ListPage<ShortLink>> {
   const response = await http.get<ApiResponse<ListPage<ShortLink>>>('/short-links', { params: { apiKeyId, ...query } })
-  return response.data.data
+  return checkedListPage(response.data.data)
 }
 
 export async function updateManagedShortLink(request: UpdateShortLinkRequest): Promise<ShortLink> {
   const response = await http.put<ApiResponse<ShortLink>>('/short-links', request)
-  return response.data.data
+  const data = response.data.data
+  if (!data || data.id !== request.id || typeof data.updatedAt !== 'string') throw new MutationResultUnknown()
+  return data
 }
 
 export async function deleteManagedShortLink(id: number): Promise<void> {
@@ -80,6 +88,7 @@ export function shortLinkManagementError(error: unknown, fallback: string): stri
   if (!isAxiosError<ApiResponse<unknown>>(error)) return fallback
   if (!error.response) return '无法连接服务器，请确认后端已启动'
   switch (error.response.data?.code) {
+    case 'RESOURCE_CHANGED': return '资料已被修改，请刷新核对后重新操作'
     case 'INVALID_ACCESS_TOKEN': return '登录已过期，请重新登录'
     case 'AUTH_ACCOUNT_FORBIDDEN': return '账号已被禁用，无法管理短链接'
     case 'SHORT_LINK_NOT_FOUND': return '短链接或所属 API Key 不存在，或你没有访问权限'

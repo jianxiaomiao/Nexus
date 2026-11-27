@@ -1,3 +1,5 @@
+import { MutationResultUnknown } from './mutation'
+import { checkedListPage } from './listPage'
 import { http, type ApiResponse } from './http'
 import type { ListPage, ListPageQuery } from './listPage'
 import type { ApplicationQuota } from './applicationQuota'
@@ -25,6 +27,7 @@ export interface CreateApplicationResponse {
 }
 
 export interface UpdateApplicationRequest {
+  expectedUpdatedAt?: string
   id: number
   name?: string
   status?: 0 | 1
@@ -32,7 +35,7 @@ export interface UpdateApplicationRequest {
 
 export async function listApplications(query: ListPageQuery & { applicationId?: number } = {}): Promise<ListPage<ApplicationListItem>> {
   const response = await http.get<ApiResponse<ListPage<ApplicationListItem>>>('/application', { params: query })
-  return response.data.data
+  return checkedListPage(response.data.data)
 }
 
 export async function createApplication(request: CreateApplicationRequest): Promise<CreateApplicationResponse> {
@@ -42,7 +45,9 @@ export async function createApplication(request: CreateApplicationRequest): Prom
 
 export async function updateApplication(request: UpdateApplicationRequest): Promise<Application> {
   const response = await http.put<ApiResponse<Application>>('/application', request)
-  return response.data.data
+  const data = response.data.data
+  if (!data || data.id !== request.id || typeof data.updatedAt !== 'string') throw new MutationResultUnknown()
+  return data
 }
 
 export async function deleteApplication(id: number): Promise<void> {

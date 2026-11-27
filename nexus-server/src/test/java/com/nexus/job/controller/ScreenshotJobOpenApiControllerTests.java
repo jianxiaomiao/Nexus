@@ -173,6 +173,32 @@ class ScreenshotJobOpenApiControllerTests {
         return get(path).requestAttr(MachineIdentityResolver.ATTRIBUTE_NAME, IDENTITY);
     }
 
+    @Test void idempotencyHeaderReachesTheOwnedServiceAndDuplicateHeadersAreRejected() throws Exception {
+        String key = "1795046400000.123e4567-e89b-42d3-a456-426614174000";
+        when(service.submit(IDENTITY, URL, key)).thenReturn(job(ScreenshotJobStatus.QUEUED));
+        mvc.perform(post("/v1/web/screenshot-jobs").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"url\":\"" + URL + "\"}").header("Idempotency-Key", key)
+                .requestAttr(MachineIdentityResolver.ATTRIBUTE_NAME, IDENTITY)).andExpect(status().isCreated());
+        verify(service).submit(IDENTITY, URL, key);
+        clearInvocations(service);
+        mvc.perform(post("/v1/web/screenshot-jobs").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"url\":\"" + URL + "\"}").header("Idempotency-Key", key, key)
+                .requestAttr(MachineIdentityResolver.ATTRIBUTE_NAME, IDENTITY)).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("SCREENSHOT_SUBMISSION_INVALID"));
+        verifyNoInteractions(service);
+    }
+
+    @Test void expiredAndConflictingSubmissionKeysHaveDistinctRecoveryResponses() throws Exception {
+        for (var kind : com.nexus.job.exception.ScreenshotSubmissionException.Kind.values()) {
+            doThrow(new com.nexus.job.exception.ScreenshotSubmissionException(kind)).when(service).submit(IDENTITY, URL, "fixture");
+            int expected = switch (kind) { case INVALID -> 400; case CONFLICT -> 409; case EXPIRED -> 410; };
+            mvc.perform(post("/v1/web/screenshot-jobs").contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"url\":\"" + URL + "\"}").header("Idempotency-Key", "fixture")
+                    .requestAttr(MachineIdentityResolver.ATTRIBUTE_NAME, IDENTITY)).andExpect(status().is(expected))
+                    .andExpect(jsonPath("$.code").value("SCREENSHOT_SUBMISSION_" + kind.name()));
+        }
+    }
+
     private static ScreenshotJob job(ScreenshotJobStatus status) {
         ScreenshotJob job = new ScreenshotJob();
         job.setJobId(JOB_ID);

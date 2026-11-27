@@ -147,13 +147,22 @@ public class ShortLinkOpenApiService {
         if (status != null && status != 0 && status != 1) {
             throw new InvalidShortLinkRequestException("状态只能是 0 或 1");
         }
+        LocalDateTime updated = utc(clock.instant().truncatedTo(ChronoUnit.MILLIS));
+        {
+            ShortLink before = shortLinkMapper.selectOne(Wrappers.<ShortLink>lambdaQuery()
+                    .eq(ShortLink::getId, request.id()).eq(ShortLink::getApiKeyId, keyId)
+                    .eq(ShortLink::getIsDeleted, 0).last("FOR UPDATE"));
+            if (before == null) throw new ShortLinkNotFoundException();
+            if (request.expectedUpdatedAt() != null && !request.expectedUpdatedAt().equals(asInstant(before.getUpdatedAt()))) throw new com.nexus.common.web.ResourceChangedException();
+            if (!updated.isAfter(before.getUpdatedAt())) updated = before.getUpdatedAt().plusNanos(1_000_000);
+        }
         int changed = shortLinkMapper.update(null, Wrappers.<ShortLink>lambdaUpdate()
                 .eq(ShortLink::getId, request.id())
                 .eq(ShortLink::getApiKeyId, keyId)
                 .eq(ShortLink::getIsDeleted, 0)
                 .set(name != null, ShortLink::getName, name)
                 .set(status != null, ShortLink::getStatus, status)
-                .set(ShortLink::getUpdatedAt, utc(clock.instant())));
+                .set(ShortLink::getUpdatedAt, updated));
         if (changed == 0) {
             throw new ShortLinkNotFoundException();
         }

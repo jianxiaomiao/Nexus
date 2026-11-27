@@ -17,6 +17,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionStatus;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -40,7 +42,10 @@ class UsageClockTests {
         key.setApplicationId(1L);
         when(keys.selectOne(any())).thenReturn(key);
         Clock clock = Clock.fixed(Instant.parse(now), ZoneId.of("America/Los_Angeles"));
-        var response = new UsageQueryService(events, apps, keys, clock).queryMyUsageEvent(42L,
+        var manager = mock(PlatformTransactionManager.class);
+        var transaction = mock(TransactionStatus.class);
+        when(manager.getTransaction(any())).thenReturn(transaction);
+        var response = new UsageQueryService(events, apps, keys, clock, java.util.Optional.empty(), manager).queryMyUsageEvent(42L,
                 new UsageQueryRequest(11L, 1L, TimeRange.TODAY, null, null));
         LocalDate date = LocalDate.parse(day);
         assertEquals(date.atStartOfDay().atOffset(java.time.ZoneOffset.ofHours(8)), response.periodStart());

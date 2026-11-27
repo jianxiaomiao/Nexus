@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import { createRequestGate } from '@/utils/requestGate'
+import { usePageScope } from '@/utils/pageScope'
+import { mutationUnknown, needsReconcile, unknownMutationMessage } from '@/api/mutation'
+import { isCancel } from 'axios'
+import { onBeforeUnmount } from 'vue'
 import { formatBeijingTime } from '@/utils/beijingTime'
 import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
@@ -37,74 +42,128 @@ let copyResetTimer: ReturnType<typeof setTimeout> | undefined
 let removeNavigationGuard: (() => void) | undefined
 
 function warnBeforeUnload(event: BeforeUnloadEvent) {
-  if (!rawKey.value || savedConfirmation.value) return
+  if (!scope.authenticated() || !rawKey.value || savedConfirmation.value) return
   event.preventDefault()
   event.returnValue = ''
 }
 
-async function load() {
+const queryGate = createRequestGate()
+const uncertain = ref(false)
+const scope = usePageScope(
+  () => props.application.id,
+  () => {
+    creating.value = false
+    uncertain.value = false
+    queryGate.invalidate()
+    keys.value = []
+    total.value = 0
+    loading.value = false
+    rawKey.value = ''
+    revealOpen.value = false
+    createDialogOpen.value = false
+    savedConfirmation.value = false
+    copied.value = false
+    if (copyResetTimer) clearTimeout(copyResetTimer)
+  },
+)
+onBeforeUnmount(() => queryGate.dispose())
+
+async function load(repair = true) {
+  const latest = queryGate.begin()
+  const currentScope = scope.capture()
+  const valid = () => latest() && currentScope()
+
   loading.value = true
   loadError.value = ''
   try {
-    const page = await listApiKeys(props.application.id, { current: current.value, size: size.value })
-    if (current.value > 1 && page.records.length === 0 && page.total > 0) {
-      current.value = Math.ceil(page.total / size.value)
-      await load()
+    const page = await listApiKeys(props.application.id, {
+      current: current.value,
+      size: size.value,
+    })
+    if (!valid()) return
+    uncertain.value = false
+    if (repair && current.value > 1 && page.records.length === 0) {
+      current.value = Math.max(1, Math.ceil(page.total / size.value))
+      await load(false)
       return
     }
+    if (!page.records.length && page.total > 0) throw new Error('INVALID_LIST_RESPONSE')
     keys.value = page.records
     total.value = page.total
   } catch (error) {
+    if (!valid() || isCancel(error)) return
     loadError.value = apiKeyErrorMessage(error, '加载 API Key 失败，请稍后重试')
   } finally {
-    loading.value = false
+    if (valid()) loading.value = false
   }
 }
 
-function changePage(value: number) { current.value = value; void load() }
-function changeSize(value: number) { size.value = value; current.value = 1; void load() }
+function changePage(value: number) {
+  current.value = value
+  void load()
+}
+function changeSize(value: number) {
+  size.value = value
+  current.value = 1
+  void load()
+}
 
 function openCreate() {
-  if (props.application.status !== 0) return
+  if (props.application.status !== 0 || creating.value || uncertain.value || loading.value) return
   form.name = ''
   formRef.value?.clearValidate()
   createDialogOpen.value = true
 }
 
 async function submitCreate() {
-  if (creating.value || !formRef.value) return
-  try {
-    await formRef.value.validate()
-  } catch {
-    return
-  }
-
+  if (creating.value || uncertain.value || loading.value || !formRef.value) return
   creating.value = true
+  const valid = scope.capture()
+  const applicationId = props.application.id
+  const name = form.name.trim()
   try {
-    const response = await createApiKey(props.application.id, form.name.trim())
+    try {
+      await formRef.value.validate()
+    } catch {
+      return
+    }
+    if (!valid()) return
+    const response = await createApiKey(applicationId, name)
+    if (!valid()) return
     createDialogOpen.value = false
     savedConfirmation.value = false
     copied.value = false
     rawKey.value = response.apiKey
     revealOpen.value = true
+    current.value = 1
     void load()
   } catch (error) {
-    ElMessage.error(apiKeyErrorMessage(error, '创建 API Key 失败，请稍后重试'))
+    if (!valid() || isCancel(error)) return
+    uncertain.value = needsReconcile(error)
+    ElMessage.error(
+      mutationUnknown(error)
+        ? unknownMutationMessage
+        : apiKeyErrorMessage(error, '创建 API Key 失败，请稍后重试'),
+    )
   } finally {
-    creating.value = false
+    if (valid()) creating.value = false
   }
 }
 
 async function copyKey() {
   if (!rawKey.value) return
+  const valid = scope.capture()
   try {
     await navigator.clipboard.writeText(rawKey.value)
+    if (!valid()) return
     copied.value = true
     ElMessage.success('已复制，请妥善保存')
     if (copyResetTimer) clearTimeout(copyResetTimer)
-    copyResetTimer = setTimeout(() => { copied.value = false }, 2000)
+    copyResetTimer = setTimeout(() => {
+      copied.value = false
+    }, 2000)
   } catch {
-    ElMessage.error('复制失败，请手动选择并复制')
+    if (valid()) ElMessage.error('复制失败，请手动选择并复制')
   }
 }
 
@@ -123,7 +182,7 @@ onMounted(() => {
   void load()
   window.addEventListener('beforeunload', warnBeforeUnload)
   removeNavigationGuard = router.beforeEach(() => {
-    if (!rawKey.value || savedConfirmation.value) return
+    if (!scope.authenticated() || !rawKey.value || savedConfirmation.value) return
     ElMessage.warning('请先保存完整 API Key，并勾选确认后再离开')
     return false
   })
@@ -148,9 +207,10 @@ onUnmounted(() => {
 
     <el-alert v-if="application.status !== 0" class="disabled-alert" type="warning" :closable="false" title="应用已禁用，现有 Key 无法调用开放 API，也不能创建新 Key。" />
 
+    <div v-if="uncertain" class="notice error-notice" role="alert"><p>请先刷新核对最新资料，再决定下一步操作。</p><el-button @click="load()">刷新核对</el-button></div>
     <div v-if="loadError" class="notice error-notice" role="alert">
       <div><strong>暂时无法加载 API Key</strong><p>{{ loadError }}</p></div>
-      <el-button @click="load">重试</el-button>
+      <el-button @click="load()">重试</el-button>
     </div>
     <div v-else-if="loading" class="panel-card" aria-busy="true"><el-skeleton :rows="4" animated /></div>
     <div v-else-if="keys.length === 0" class="empty-state">
@@ -180,12 +240,12 @@ onUnmounted(() => {
 
     <ListPagination v-if="!loadError && total > 0" :current="current" :size="size" :total="total" @page-change="changePage" @size-change="changeSize" />
 
-    <el-dialog v-model="createDialogOpen" title="创建 API Key" width="min(440px, 92vw)" destroy-on-close>
+    <el-dialog v-model="createDialogOpen" title="创建 API Key" :close-on-click-modal="!creating" :close-on-press-escape="!creating" :show-close="!creating" width="min(440px, 92vw)" destroy-on-close>
       <p class="dialog-hint">用一个名称区分这枚 Key 的用途。</p>
-      <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent="submitCreate">
+      <el-form :disabled="creating" ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent="submitCreate">
         <el-form-item label="Key 名称" prop="name"><el-input v-model="form.name" maxlength="64" show-word-limit placeholder="例如：生产环境 Key" autocomplete="off" /></el-form-item>
       </el-form>
-      <template #footer><el-button @click="createDialogOpen = false">取消</el-button><el-button type="primary" :loading="creating" @click="submitCreate">创建 Key</el-button></template>
+      <template #footer><el-button :disabled="creating" @click="createDialogOpen = false">取消</el-button><el-button type="primary" :loading="creating" @click="submitCreate">创建 Key</el-button></template>
     </el-dialog>
 
     <el-dialog :model-value="revealOpen" title="API Key 创建成功" width="min(560px, 94vw)" destroy-on-close :show-close="false" :close-on-click-modal="false" :close-on-press-escape="false">

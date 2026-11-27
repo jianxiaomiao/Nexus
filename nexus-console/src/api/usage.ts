@@ -1,3 +1,4 @@
+import { checkedListPage } from './listPage'
 import { isAxiosError } from 'axios'
 import { http, type ApiResponse } from './http'
 
@@ -37,18 +38,22 @@ export interface UsageEventPage {
 
 export async function queryUsageEvents(query: { applicationId: number; apiKeyId: number; current: number; size: number }): Promise<UsageEventPage> {
   const response = await http.get<ApiResponse<UsageEventPage>>('/usage/events', { params: query })
-  return response.data.data
+  return checkedListPage(response.data.data)
 }
 
 export async function queryUsage(query: UsageQuery): Promise<UsageSummary> {
   const response = await http.get<ApiResponse<UsageSummary>>('/usage', { params: query })
-  return response.data.data
+  const data = response.data.data
+  if (!data || !Array.isArray(data.dailyCounts) || !Array.isArray(data.apiCounts) ||
+      !Number.isSafeInteger(data.allTimeCount) || data.allTimeCount < 0 || !Number.isSafeInteger(data.periodCount) || data.periodCount < 0) throw new Error('INVALID_USAGE_RESPONSE')
+  return data
 }
 
 export function usageErrorMessage(error: unknown): string {
   if (!isAxiosError<ApiResponse<unknown>>(error)) return '加载调用统计失败，请稍后重试'
   if (!error.response) return '无法连接服务器，请确认后端已启动'
   switch (error.response.data?.code) {
+    case 'RESOURCE_CHANGED': return '资料已被修改，请刷新核对后重新操作'
     case 'INVALID_ACCESS_TOKEN':
       return '登录已过期，请重新登录'
     case 'AUTH_ACCOUNT_FORBIDDEN':

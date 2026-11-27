@@ -33,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
+@org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
 class ShortLinkFlowIntegrationTests {
     private static final String TEST_JWT_SECRET = newTestSecret();
 
@@ -92,11 +93,49 @@ class ShortLinkFlowIntegrationTests {
             assertEquals(1, shortLinkService.listMyShortLinks(owner.getId(), key.getId(), 1, 10).records().size());
             assertEquals(target, shortLinkRedirectService.resolveTarget(created.shortCode()).toString());
 
-            shortLinkService.updateMyShortLink(owner.getId(), new UpdateShortLinkRequest(created.id(), "renamed", 1));
+            key.setStatus(1);
+            apiKeyMapper.updateById(key);
             assertThrows(ShortLinkNotFoundException.class,
                     () -> shortLinkRedirectService.resolveTarget(created.shortCode()));
-            shortLinkService.updateMyShortLink(owner.getId(), new UpdateShortLinkRequest(created.id(), null, 0));
+            key.setStatus(0);
+            apiKeyMapper.updateById(key);
+
+            app.setStatus(1);
+            applicationMapper.updateById(app);
+            assertThrows(ShortLinkNotFoundException.class,
+                    () -> shortLinkRedirectService.resolveTarget(created.shortCode()));
+            app.setStatus(0);
+            applicationMapper.updateById(app);
+
+            owner.setStatus(1);
+            userMapper.updateById(owner);
+            assertThrows(ShortLinkNotFoundException.class,
+                    () -> shortLinkRedirectService.resolveTarget(created.shortCode()));
+            owner.setStatus(0);
+            userMapper.updateById(owner);
+
+            var renamed = shortLinkService.updateMyShortLink(owner.getId(), new UpdateShortLinkRequest(created.id(), "renamed", 1, created.updatedAt()));
+            org.junit.jupiter.api.Assertions.assertTrue(renamed.updatedAt().isAfter(created.updatedAt()));
+            assertThrows(com.nexus.common.web.ResourceChangedException.class, () -> shortLinkService.updateMyShortLink(
+                    owner.getId(), new UpdateShortLinkRequest(created.id(), "stale", null, created.updatedAt())));
+            assertThrows(ShortLinkNotFoundException.class,
+                    () -> shortLinkRedirectService.resolveTarget(created.shortCode()));
+            var enabled = shortLinkOpenApiService.update(new ApiKeyIdentity(key.getId(), app.getId()),
+                    new UpdateShortLinkRequest(created.id(), null, 0, renamed.updatedAt()));
+            org.junit.jupiter.api.Assertions.assertTrue(enabled.updatedAt().isAfter(renamed.updatedAt()));
+            assertThrows(com.nexus.common.web.ResourceChangedException.class, () -> shortLinkOpenApiService.update(
+                    new ApiKeyIdentity(key.getId(), app.getId()), new UpdateShortLinkRequest(created.id(), "stale machine edit", null, renamed.updatedAt())));
             assertEquals(target, shortLinkRedirectService.resolveTarget(created.shortCode()).toString());
+
+            // Legacy machine callers must advance the compare token even if the clock is behind stored time.
+            var future = java.time.LocalDateTime.now(ZoneOffset.UTC).plusMinutes(1).withNano(123_000_000);
+            shortLinkMapper.update(null, com.baomidou.mybatisplus.core.toolkit.Wrappers.<ShortLink>lambdaUpdate()
+                    .eq(ShortLink::getId, created.id()).set(ShortLink::getUpdatedAt, future));
+            var legacy = shortLinkOpenApiService.update(new ApiKeyIdentity(key.getId(), app.getId()),
+                    new UpdateShortLinkRequest(created.id(), "legacy edit", null));
+            org.junit.jupiter.api.Assertions.assertTrue(legacy.updatedAt().isAfter(future.toInstant(ZoneOffset.UTC)));
+            assertThrows(com.nexus.common.web.ResourceChangedException.class, () -> shortLinkService.updateMyShortLink(
+                    owner.getId(), new UpdateShortLinkRequest(created.id(), "stale after legacy", null, future.toInstant(ZoneOffset.UTC))));
 
             apiKeyService.deleteMyApiKey(owner.getId(), new DeleteApiKeyRequest(app.getId(), key.getId()));
             ShortLink persisted = shortLinkMapper.selectById(shortLinkId);

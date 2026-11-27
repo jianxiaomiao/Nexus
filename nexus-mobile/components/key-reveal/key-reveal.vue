@@ -30,25 +30,33 @@ export default {
 	props: { value: { type: String, default: '' } },
 	emits: ['close'],
 	data() {
-		return { saved: false, copied: false, copyError: '' }
+		return { saved: false, copied: false, copyError: '', copyVersion: 0, alive: true }
 	},
 	watch: {
 		value() {
+			this.copyVersion++
 			this.saved = false
 			this.copied = false
 			this.copyError = ''
 		},
 	},
+	beforeUnmount() {
+		this.alive = false
+		this.copyVersion++
+	},
 	methods: {
 		copy() {
 			if (!this.value) return
+			const version = ++this.copyVersion
 			uni.setClipboardData({
 				data: this.value,
 				showToast: false,
 				success: () => {
+					if (!this.alive || version !== this.copyVersion || !this.value) return
 					this.copied = true
 				},
 				fail: () => {
+					if (!this.alive || version !== this.copyVersion || !this.value) return
 					this.copyError = '复制失败，请手动选择并保存。'
 				},
 			})

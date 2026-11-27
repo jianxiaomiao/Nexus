@@ -36,6 +36,7 @@ export function createSession({ request, vault, now = Date.now }) {
 		}
 	}
 	function end(code) {
+		++epoch
 		session = null
 		notice = code || ''
 		write({ phase: 'logged-out' })
@@ -260,7 +261,7 @@ export function createSession({ request, vault, now = Date.now }) {
 				...options,
 				accessToken: original.accessToken,
 			})
-			if (version !== epoch) fail('SESSION_CHANGED')
+			if (version !== epoch || !session) fail('SESSION_CHANGED')
 			return data
 		} catch (error) {
 			if (

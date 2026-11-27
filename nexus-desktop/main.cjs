@@ -254,6 +254,7 @@ function isTrustedAppUrl(value){
       '/applications',
       '/playground',
       '/short-links',
+      '/support/tickets',
       '/docs',
     ])
 
@@ -312,6 +313,9 @@ function isTrustedAppUrl(value){
 
       const header = new Headers()
       const allowNames = ['Content-Type', 'Accept', 'Authorization']
+      if (request.method === 'POST' && ['/v1/web/screenshot-jobs', '/api/support/tickets'].includes(url.pathname)) {
+        allowNames.push('Idempotency-Key')
+      }
       for (const name of allowNames) {
         const value = request.headers.get(name)
         if (value !== null)
@@ -870,29 +874,50 @@ function isTrustedAppUrl(value){
       }
     })
 
+    // Human identity changes stop local presentation/tracking, never cancel the server job.
+    function clearIdentityTasks() {
+      cancelActiveRun()
+      trackingSnapshot = createIdleTrace()
+      publishTrackingSnapshot()
+    }
+    let lastHumanSessionId = null
+    function observeHumanSession(result) {
+      const sessionId = authSession.read().authState?.session?.sessionId ?? null
+      if (lastHumanSessionId !== null && lastHumanSessionId !== sessionId) clearIdentityTasks()
+      lastHumanSessionId = sessionId
+      return result
+    }
+
     ipcMain.handle('auth-session:read', event => {
       if (!isTrustedScreenshotCaller(event)) return { status: 'failed', code: 'FORBIDDEN' }
-      return authSession.read()
+      return observeHumanSession(authSession.read())
     })
 
-    ipcMain.handle('auth-session:login', (event, input) => {
+    ipcMain.handle('auth-session:login', async (event, input) => {
       if (!isTrustedScreenshotCaller(event)) return { status: 'failed', code: 'FORBIDDEN', httpStatus: 403 }
-      return authSession.login(input)
+      if (input?.expectedRevision === authSession.read().authState?.revision) clearIdentityTasks()
+      return observeHumanSession(await authSession.login(input))
     })
 
-    ipcMain.handle('auth-session:ensure', (event, input) => {
+    ipcMain.handle('auth-session:ensure', async (event, input) => {
       if (!isTrustedScreenshotCaller(event)) return { status: 'failed', code: 'FORBIDDEN' }
-      return authSession.ensure(input)
+      return observeHumanSession(await authSession.ensure(input))
     })
 
     ipcMain.handle('auth-session:logout', (event, input) => {
       if (!isTrustedScreenshotCaller(event)) return { status: 'failed', code: 'FORBIDDEN' }
-      return authSession.logout(input)
+      const before = authSession.read().authState
+      const result = authSession.logout(input)
+      const after = authSession.read().authState
+      if (before.revision !== after.revision || !after.session) clearIdentityTasks()
+      return result
     })
 
     ipcMain.handle('auth-session:clear', (event, input) => {
       if (!isTrustedScreenshotCaller(event)) return { status: 'failed', code: 'FORBIDDEN' }
-      return authSession.clear(input)
+      const result = authSession.clear(input)
+      if (result.status === 'ok') { clearIdentityTasks(); lastHumanSessionId = null }
+      return result
     })
 
     console.log('[desktop main] Loading existing Vue app')

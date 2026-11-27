@@ -47,7 +47,7 @@ test('卡片更多菜单可以编辑应用名称', async ({ page }) => {
   await dialog.getByPlaceholder('例如：我的第一个应用').fill('卡片改名')
   await dialog.getByRole('button', { name: '保存修改' }).click()
   await expect(page.getByRole('article').filter({ hasText: '卡片改名' })).toBeVisible()
-  expect(api.calls.find((call) => call.method === 'PUT' && call.path === '/api/application')?.body).toEqual({ id: 1, name: '卡片改名' })
+  expect(api.calls.find((call) => call.method === 'PUT' && call.path === '/api/application')?.body).toEqual({ id: 1, name: '卡片改名', expectedUpdatedAt: expect.any(String) })
 })
 
 test('详情页显示应用，支持改名、禁用和重新启用', async ({ page }) => {
@@ -66,7 +66,7 @@ test('详情页显示应用，支持改名、禁用和重新启用', async ({ pa
   await page.getByRole('button', { name: '确认启用' }).click()
   await expect(page.getByRole('button', { name: '禁用应用' })).toBeVisible()
   expect(api.calls.filter((call) => call.method === 'PUT' && call.path === '/api/application').map((call) => call.body)).toEqual([
-    { id: 1, name: '详情改名' }, { id: 1, status: 1 }, { id: 1, status: 0 },
+    { id: 1, name: '详情改名', expectedUpdatedAt: expect.any(String) }, { id: 1, status: 1, expectedUpdatedAt: expect.any(String) }, { id: 1, status: 0, expectedUpdatedAt: expect.any(String) },
   ])
 })
 

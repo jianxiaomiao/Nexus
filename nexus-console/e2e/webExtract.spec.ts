@@ -131,6 +131,9 @@ test('网络连接失败显示提示，切换 API 会取消请求并丢弃过时
   await page.route('**/v1/web/extract', (route) => route.abort('connectionrefused'))
   await page.getByRole('button', { name: '发送请求', exact: true }).click()
   await expect(page.locator('.playground-result-message')).toContainText('无法连接服务器')
+  await expect(page.locator('.playground-result-message')).toContainText('操作结果尚未确认')
+  await page.getByRole('button', { name: '核对后开始新操作', exact: true }).click()
+  await page.getByRole('button', { name: '已核对，允许新操作', exact: true }).click()
   await page.unroute('**/v1/web/extract')
   let release: (() => void) | undefined
   const held = new Promise<void>((resolve) => { release = resolve })

@@ -3,6 +3,7 @@ import { ElMessage } from 'element-plus'
 import { isNavigationFailure, type Router } from 'vue-router'
 import { useUserStore, type SessionContext, type SessionReadyResult } from '@/stores/userStore'
 import { isWebBrowser } from '@/auth/webSession'
+import { MutationResultUnknown } from './mutation'
 
 declare module 'axios' {
   interface AxiosRequestConfig {
@@ -31,7 +32,7 @@ export function configureSessionNavigation(router: Pick<Router, 'replace' | 'cur
 }
 
 // 人类用户的 Bearer token 只用于管理接口，不发送给登录/注册或机器 API。
-const managementPaths = ['/application', '/apiKey', '/short-links', '/usage']
+const managementPaths = ['/application', '/apiKey', '/short-links', '/usage', '/support/tickets', '/support/chat/launch', '/support/chat/unread']
 
 function isManagementRequest(config: AxiosRequestConfig): boolean {
   if (config.baseURL !== '/api' || !config.url) return false
@@ -114,9 +115,24 @@ http.interceptors.request.use(async (config) => {
   return config
 })
 
+function staleContext(config: AxiosRequestConfig): boolean {
+  if (!config.authContext) return false
+  const user = useUserStore()
+  return config.authContext.operationVersion !== user.operationVersion || !user.accessToken || user.clearing || !user.checkWebState()
+}
+
 http.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    if (staleContext(response.config)) throw new CanceledError('SESSION_CHANGED', response.config)
+    if (isManagementRequest(response.config) && (response.data?.code !== 'SUCCESS' ||
+        !Object.prototype.hasOwnProperty.call(response.data, 'data'))) {
+      if (response.config.method?.toUpperCase() !== 'GET') throw new MutationResultUnknown()
+      throw new Error('INVALID_MANAGEMENT_RESPONSE')
+    }
+    return response
+  },
   async (error) => {
+    if (isAxiosError(error) && error.config && staleContext(error.config)) throw new CanceledError('SESSION_CHANGED', error.config)
     if (
       isAxiosError<ApiResponse<unknown>>(error) &&
       error.config &&

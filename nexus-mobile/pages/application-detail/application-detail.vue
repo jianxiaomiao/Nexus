@@ -293,6 +293,7 @@ export default {
 			keysError: '',
 			keyVersion: 0,
 			action: '',
+			actionUpdatedAt: undefined,
 			formName: '',
 			deleteName: '',
 			fieldError: '',
@@ -307,10 +308,7 @@ export default {
 			return (
 				{
 					rename: '编辑 Application',
-					status:
-						this.app?.status === 0
-							? '禁用 Application'
-							: '启用 Application',
+					status: this.app?.status === 0 ? '禁用 Application' : '启用 Application',
 					delete: '删除 Application',
 					'create-key': '创建 API Key',
 				}[this.action] || '确认操作'
@@ -356,6 +354,7 @@ export default {
 			this.keyVersion++
 			this.loading = false
 			this.keysLoading = false
+			this.quotaLoading = false
 			if (this.secret) {
 				this.secret = ''
 				this.notice = '完整 Key 已在切换页面时隐藏，无法再次查看。'
@@ -379,7 +378,8 @@ export default {
 					this.app = null
 					this.currentQuota = null
 					this.keyItems = []
-					this.error = await api.showError(error)
+					const message = await api.showError(error)
+					if (this.visible && version === this.viewVersion) this.error = message
 				}
 			} finally {
 				if (version === this.viewVersion) this.loading = false
@@ -392,20 +392,21 @@ export default {
 			this.quotaError = ''
 			try {
 				const result = await api.quota(this.id)
-				if (this.visible && version === this.viewVersion)
-					this.currentQuota = result
+				if (this.visible && version === this.viewVersion) this.currentQuota = result
 			} catch (e) {
-				if (this.visible && version === this.viewVersion)
-					this.quotaError = await api.showError(e)
+				if (this.visible && version === this.viewVersion) {
+					const message = await api.showError(e)
+					if (this.visible && version === this.viewVersion) this.quotaError = message
+				}
 			} finally {
-				this.quotaLoading = false
+				if (version === this.viewVersion) this.quotaLoading = false
 			}
 		},
 		selectKeys() {
 			this.tab = 'keys'
 			this.loadKeys()
 		},
-		async loadKeys() {
+		async loadKeys(repair = true) {
 			if (this.keysLoading) return
 			const version = ++this.keyVersion
 			this.keysLoading = true
@@ -413,16 +414,19 @@ export default {
 			try {
 				const data = await api.keys(this.id, this.keyPage)
 				if (!this.visible || version !== this.keyVersion) return
-				if (this.keyPage > 1 && !data.records.length) {
+				if (repair !== false && this.keyPage > 1 && !data.records.length) {
 					this.keyPage = Math.max(1, Math.ceil(data.total / 10))
 					this.keysLoading = false
-					return this.loadKeys()
+					return this.loadKeys(false)
 				}
+				if (!data.records.length && data.total > 0) throw { code: 'INVALID_RESPONSE' }
 				this.keyItems = data.records
 				this.keyTotal = data.total
 			} catch (e) {
-				if (this.visible && version === this.keyVersion)
-					this.keysError = await api.showError(e)
+				if (this.visible && version === this.keyVersion) {
+					const message = await api.showError(e)
+					if (this.visible && version === this.keyVersion) this.keysError = message
+				}
 			} finally {
 				if (version === this.keyVersion) this.keysLoading = false
 			}
@@ -434,29 +438,20 @@ export default {
 		},
 		openKey(id) {
 			uni.navigateTo({
-				url:
-					'/pages/key-detail/key-detail?applicationId=' +
-					this.id +
-					'&id=' +
-					id,
+				url: '/pages/key-detail/key-detail?applicationId=' + this.id + '&id=' + id,
 			})
 		},
 		openAction(kind) {
 			if (this.busy || this.loading || this.secret) return
 			this.action = kind
+			this.actionUpdatedAt = this.app.updatedAt
 			this.formName = this.app.name
 			this.deleteName = ''
 			this.actionError = ''
 			this.fieldError = ''
 		},
 		openKeyCreate() {
-			if (
-				this.app.status !== 0 ||
-				this.busy ||
-				this.loading ||
-				this.keysLoading ||
-				this.uncertain
-			)
+			if (this.app.status !== 0 || this.busy || this.loading || this.keysLoading || this.uncertain)
 				return
 			this.openAction('create-key')
 			this.formName = ''
@@ -469,11 +464,9 @@ export default {
 			if (this.busy || this.loading || this.uncertain || !this.app) return
 			const kind = this.action,
 				version = this.viewVersion
-			if (['rename', 'create-key'].includes(kind) && !this.validateName())
-				return
+			if (['rename', 'create-key'].includes(kind) && !this.validateName()) return
 			if (kind === 'delete' && this.deleteName !== this.app.name) return
-			if (!['rename', 'status', 'delete', 'create-key'].includes(kind))
-				return
+			if (!['rename', 'status', 'delete', 'create-key'].includes(kind)) return
 			this.busy = true
 			this.actionError = ''
 			try {
@@ -481,14 +474,28 @@ export default {
 					await api.deleteApplication(this.id)
 					this.action = ''
 					this.busy = false
-					if (this.visible) uni.navigateBack()
+					if (this.visible && version === this.viewVersion) {
+						this.app = null
+						this.currentQuota = null
+						this.keyItems = []
+						uni.navigateBack({
+							fail: () => {
+								if (this.visible)
+									uni.reLaunch({
+										url: '/pages/applications/applications',
+										fail: () => {
+											this.error = '已删除，但未能返回列表，请重新打开管理页。'
+										},
+									})
+							},
+						})
+					}
 					return
 				}
 				if (kind === 'create-key') {
 					const created = await api.createKey(this.id, this.formName)
 					if (!this.visible || version !== this.viewVersion) {
-						this.notice =
-							'创建结果请在列表核对，完整 Key 未保留；必要时轮换或删除。'
+						this.notice = '创建结果请在列表核对，完整 Key 未保留；必要时轮换或删除。'
 						this.uncertain = true
 						return
 					}
@@ -500,8 +507,8 @@ export default {
 					const updated = await api.updateApplication(
 						this.id,
 						kind === 'rename'
-							? { name: this.formName.trim() }
-							: { status: this.app.status === 0 ? 1 : 0 },
+							? { name: this.formName.trim(), expectedUpdatedAt: this.actionUpdatedAt }
+							: { status: this.app.status === 0 ? 1 : 0, expectedUpdatedAt: this.actionUpdatedAt },
 					)
 					if (!this.visible || version !== this.viewVersion) return
 					this.app = { ...this.app, ...updated }
@@ -509,8 +516,10 @@ export default {
 					uni.showToast({ title: '已保存', icon: 'success' })
 				}
 			} catch (error) {
-				this.uncertain = error.code === 'MUTATION_RESULT_UNKNOWN'
-				this.actionError = await api.showError(error)
+				this.uncertain = ['MUTATION_RESULT_UNKNOWN', 'RESOURCE_CHANGED'].includes(error.code)
+				const message = await api.showError(error)
+				if (!this.visible || version !== this.viewVersion) return
+				this.actionError = message
 				if (this.uncertain) this.notice = this.actionError
 			} finally {
 				this.busy = false

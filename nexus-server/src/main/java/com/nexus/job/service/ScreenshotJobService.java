@@ -55,17 +55,29 @@ public class ScreenshotJobService {
     }
 
     public ScreenshotJob submit(ApiKeyIdentity identity, String rawUrl) {
+        return submit(identity, rawUrl, null);
+    }
+
+    public ScreenshotJob submit(ApiKeyIdentity identity, String rawUrl, String requestKey) {
+        var submission = com.nexus.job.model.ScreenshotSubmissionKey.parse(requestKey, clock.instant());
         URI uri = urlPolicy.requirePage(rawUrl);
         requireValidIdentity(identity);
 
         admissionLock.lock();
         try {
+            ScreenshotJob replay = replay(identity, uri, submission);
+            if (replay != null) return replay;
             if (jobMapper.countUnfinished() >= MAX_UNFINISHED_JOBS) {
                 throw new ScreenshotJobQueueFullException();
             }
             try {
                 return quotaService.consumeOnceAndCommit(
-                        identity, () -> insertQueuedJob(identity.apiKeyId(), uri));
+                        identity, () -> insertQueuedJob(identity.apiKeyId(), uri, submission));
+            } catch (org.springframework.dao.DuplicateKeyException exception) {
+                // Another admission can win the unique key. Its loser transaction rolls back the quota debit.
+                ScreenshotJob replayed = replay(identity, uri, submission);
+                if (replayed != null) return replayed;
+                throw new ScreenshotJobSubmissionUnavailableException();
             } catch (DataAccessException | TransactionException exception) {
                 // 不记录 SQL、参数或目标 URL，只保留异常类型作为服务端诊断。
                 log.error("截图任务提交数据库操作失败 exception={}",
@@ -127,12 +139,16 @@ public class ScreenshotJobService {
         return expiresAt == null || !now.isBefore(expiresAt);
     }
 
-    private ScreenshotJob insertQueuedJob(long apiKeyId, URI uri) {
+    private ScreenshotJob insertQueuedJob(long apiKeyId, URI uri, com.nexus.job.model.ScreenshotSubmissionKey submission) {
         LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
         ScreenshotJob job = new ScreenshotJob();
         job.setJobId(UUID.randomUUID().toString());
         job.setApiKeyId(apiKeyId);
         job.setTargetUrl(uri.toString());
+        if (submission != null) {
+            job.setSubmissionKey(submission.value());
+            job.setSubmissionExpiresAt(LocalDateTime.ofInstant(submission.expiresAt(), ZoneOffset.UTC));
+        }
         job.setStatus(ScreenshotJobStatus.QUEUED.code());
         job.setAttemptCount(0);
         job.setCreatedAt(now);
@@ -141,6 +157,17 @@ public class ScreenshotJobService {
             throw new ScreenshotJobCreationException();
         }
         return job;
+    }
+
+    private ScreenshotJob replay(ApiKeyIdentity identity, URI uri, com.nexus.job.model.ScreenshotSubmissionKey submission) {
+        if (submission == null) return null;
+        ScreenshotJob existing = jobMapper.selectOne(Wrappers.<ScreenshotJob>lambdaQuery()
+                .eq(ScreenshotJob::getApiKeyId, identity.apiKeyId()).eq(ScreenshotJob::getSubmissionKey, submission.value()));
+        if (existing != null && !uri.toString().equals(existing.getTargetUrl())) {
+            throw new com.nexus.job.exception.ScreenshotSubmissionException(
+                    com.nexus.job.exception.ScreenshotSubmissionException.Kind.CONFLICT);
+        }
+        return existing;
     }
 
     private static void requireValidIdentity(ApiKeyIdentity identity) {
