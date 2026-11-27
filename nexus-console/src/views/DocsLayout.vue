@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, provide, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 import type { ScrollbarInstance } from 'element-plus'
 import { ArrowLeft, Close, Document, HomeFilled, Menu, Monitor } from '@element-plus/icons-vue'
 import brandSpark from '@/assets/icons/brand-spark.svg'
 import { docGroups, docs } from '@/docs/catalog'
+import { useUserStore } from '@/stores/userStore'
 import '@/assets/docs.css'
 
 const route = useRoute()
+const userStore = useUserStore()
+const signedIn = computed(() => Boolean(userStore.accessToken) && userStore.expiresAt > Date.now())
 const mobileNavOpen = ref(false)
 const mainScrollbar = ref<ScrollbarInstance | null>(null)
 provide('docs-scrollbar', mainScrollbar)
@@ -28,7 +31,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   <div class="docs-shell">
     <header class="docs-topbar">
       <div class="docs-topbar-brand">
-        <RouterLink :to="{ name: 'applications' }" class="docs-brand" aria-label="Nexus 文档首页">
+        <RouterLink :to="{ name: signedIn ? 'applications' : 'landing' }" class="docs-brand" aria-label="Nexus 首页">
           <img :src="brandSpark" alt="" aria-hidden="true" />
           <span>Nexus</span>
         </RouterLink>
@@ -36,13 +39,23 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         <span class="docs-brand-label">开发文档</span>
       </div>
       <div class="docs-topbar-actions">
-        <RouterLink :to="{ name: 'playground' }" class="docs-playground-link" aria-label="打开 API 调试台">
-          <el-icon aria-hidden="true"><Monitor /></el-icon><span>API 调试台</span>
-        </RouterLink>
-        <RouterLink :to="{ name: 'applications' }" class="docs-console-link">
-          <el-icon aria-hidden="true"><ArrowLeft /></el-icon>
-          返回控制台
-        </RouterLink>
+        <template v-if="signedIn">
+          <RouterLink :to="{ name: 'playground' }" class="docs-playground-link" aria-label="打开 API 调试台">
+            <el-icon aria-hidden="true"><Monitor /></el-icon><span>API 调试台</span>
+          </RouterLink>
+          <RouterLink :to="{ name: 'applications' }" class="docs-console-link">
+            <el-icon aria-hidden="true"><ArrowLeft /></el-icon>
+            返回控制台
+          </RouterLink>
+        </template>
+        <template v-else>
+          <RouterLink :to="{ name: 'landing' }" class="docs-playground-link">
+            <el-icon aria-hidden="true"><ArrowLeft /></el-icon><span>返回首页</span>
+          </RouterLink>
+          <RouterLink :to="{ name: 'login' }" class="docs-console-link">
+            登录 / 注册
+          </RouterLink>
+        </template>
         <button class="docs-mobile-toggle" type="button" aria-controls="docs-primary-nav" :aria-expanded="mobileNavOpen" :aria-label="mobileNavOpen ? '关闭文档目录' : '打开文档目录'" @click="mobileNavOpen = !mobileNavOpen">
           <el-icon aria-hidden="true"><Close v-if="mobileNavOpen" /><Menu v-else /></el-icon>
         </button>
