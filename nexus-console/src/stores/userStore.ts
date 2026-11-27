@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia'
 import { toRaw } from 'vue'
 import type { AuthMeResponse, LoginResponse } from "@/api/auth"
-import { getMe } from "@/api/auth"
 import type { AuthState } from '@/types/desktop'
 import { isWebBrowser, webSession, type WebTokens, type SharedWebState } from '../auth/webSession.ts'
 
@@ -538,6 +537,7 @@ export const useUserStore = defineStore('userStore', {
       const versionAtStart = this.operationVersion
       const sessionAtStart = this.sessionId
       try {
+        const { getMe } = await import('@/api/auth')
         const res = await getMe()
         if (this.operationVersion !== versionAtStart || this.sessionId !== sessionAtStart) {
           return null
