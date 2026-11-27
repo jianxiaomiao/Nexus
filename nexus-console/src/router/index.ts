@@ -9,7 +9,11 @@ const router = createRouter({
   routes: [
     {
       path: '/',
-      redirect: { name: 'applications' },
+      name: 'landing',
+      component: () => import('../views/LandingView.vue'),
+    },
+    {
+      path: '/',
       component: () => import('../views/ConsoleLayout.vue'),
       meta: { requiresAuth: true },
       children: [
@@ -43,12 +47,23 @@ const router = createRouter({
           name: 'support-tickets',
           component: () => import('../views/SupportTicketsView.vue'),
         },
+        {
+          path: 'admin/users',
+          name: 'admin-users',
+          meta: { requiresAdmin: true },
+          component: () => import('../views/AdminUsersView.vue'),
+        },
+        {
+          path: 'admin/applications',
+          name: 'admin-applications',
+          meta: { requiresAdmin: true },
+          component: () => import('../views/AdminApplicationsView.vue'),
+        },
       ],
     },
     {
       path: '/docs',
       component: () => import('../views/DocsLayout.vue'),
-      meta: { requiresAuth: true },
       children: [
         { path: '', name: 'docs-home', component: () => import('../views/DocsHomeView.vue') },
         { path: ':slug', name: 'docs-article', component: () => import('../views/DocsArticleView.vue') },
@@ -102,8 +117,18 @@ router.beforeEach(async (to) => {
   // The state may have changed while the clear was pending.
   const signedIn = Boolean(userStore.accessToken) && userStore.expiresAt > Date.now()
 
+  if (desktop && to.name === 'landing') {
+    return signedIn ? { name: 'applications', replace: true } : { name: 'login', replace: true }
+  }
   if (to.matched.some((record) => record.meta.requiresAuth) && !signedIn) {
     return { name: 'login', replace: true }
+  }
+  if (signedIn && to.matched.some((record) => record.meta.requiresAdmin)) {
+    const profile = await userStore.ensureProfile()
+    if (profile?.role !== 'ADMIN') {
+      ElMessage.warning({ message: '需要管理员权限才能访问该页面', grouping: true })
+      return { name: 'applications', replace: true }
+    }
   }
   if (signedIn && (to.name === 'login' || to.name === 'register')) {
     return { name: 'applications' }

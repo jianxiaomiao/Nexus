@@ -56,15 +56,51 @@ export async function login(request: LoginRequest, expectedRevision?: number | n
   return response.data
 }
 
+export interface AuthMeResponse {
+  id: number
+  email: string
+  displayName: string
+  role: 'USER' | 'ADMIN' | string
+  status: number
+}
+
+export async function getMe(): Promise<ApiResponse<AuthMeResponse>> {
+  const response = await http.get<ApiResponse<AuthMeResponse>>('/auth/me')
+  return response.data
+}
+
 export interface RegisterRequest {
   email: string
   displayName: string
   password: string
+  verificationCode: string
 }
 
 export interface RegisterResponse {
   email: string
   displayName: string
+}
+
+export interface CaptchaResponse {
+  captchaId: string
+  imageDataUrl: string
+  expiresInSeconds: number
+}
+
+export async function fetchRegisterCaptcha(): Promise<ApiResponse<CaptchaResponse>> {
+  const response = await http.get<ApiResponse<CaptchaResponse>>('/auth/register/captcha')
+  return response.data
+}
+
+export interface SendRegisterEmailCodeRequest {
+  email: string
+  captchaId: string
+  captchaAnswer: string
+}
+
+export async function sendRegisterEmailCode(request: SendRegisterEmailCodeRequest): Promise<ApiResponse<void>> {
+  const response = await http.post<ApiResponse<void>>('/auth/register/email-code', request)
+  return response.data
 }
 
 export async function register(request: RegisterRequest): Promise<ApiResponse<RegisterResponse>> {

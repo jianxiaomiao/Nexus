@@ -6,6 +6,21 @@ spring:
     locations: classpath:db/migration
     validate-on-migrate: true
     clean-disabled: true
+  mail:
+    host: ${NEXUS_MAIL_HOST:smtp.qq.com}
+    port: ${NEXUS_MAIL_PORT:465}
+    username: ${NEXUS_MAIL_USERNAME:}
+    password: ${NEXUS_MAIL_PASSWORD:}
+    default-encoding: UTF-8
+    properties:
+      mail:
+        smtp:
+          auth: true
+          ssl:
+            enable: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
 
 # 本地从 nexus-server 目录启动时，../logger 即仓库根目录的 logger/。
 # 其他工作目录/部署环境可用 NEXUS_LOG_DIR 指定绝对目录。
@@ -21,5 +36,7 @@ logging:
       max-history: 30
 
 nexus:
+  application:
+    max-per-user: ${NEXUS_APPLICATION_MAX_PER_USER:10}
   screenshot-jobs:
     result-directory: ${NEXUS_SCREENSHOT_JOB_RESULT_DIR:../data/screenshot-jobs}

@@ -241,9 +241,16 @@ onMounted(() => {
       <div>
         <p class="eyebrow">你的开发者空间 <img :src="brandSpark" alt="" aria-hidden="true" /></p>
         <h1 id="applications-title">Applications</h1>
-        <p class="page-description">管理你的应用，接入 Nexus 提供的开放 API 能力。</p>
+        <p class="page-description">管理你的应用，接入 Nexus 提供的开放 API 能力（{{ total }} / 10）。</p>
       </div>
-      <el-button type="primary" size="large" :icon="Plus" @click="openCreate">创建 Application</el-button>
+      <el-button
+        type="primary"
+        size="large"
+        :icon="Plus"
+        :disabled="total >= 10"
+        :title="total >= 10 ? '每个用户最多创建 10 个应用' : ''"
+        @click="openCreate"
+      >创建 Application</el-button>
     </div>
 
     <div v-if="uncertain" class="notice error-notice" role="alert"><p>请先刷新核对最新资料，再决定下一步操作。</p><el-button @click="load()">刷新核对</el-button></div>

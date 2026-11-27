@@ -3,6 +3,8 @@ package com.nexus.auth.controller;
 import com.nexus.auth.dto.RegisterRequest;
 import com.nexus.auth.dto.RegisterResponse;
 import com.nexus.auth.exception.EmailAlreadyRegisteredException;
+import com.nexus.auth.service.ArithmeticCaptchaService;
+import com.nexus.auth.service.EmailVerificationService;
 import com.nexus.auth.service.RegistrationService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,11 +35,17 @@ class RegistrationControllerTests {
     @MockitoBean
     private RegistrationService registrationService;
 
+    @MockitoBean
+    private EmailVerificationService emailVerificationService;
+
+    @MockitoBean
+    private ArithmeticCaptchaService captchaService;
+
     @Test
     void normalRegisterTest() throws Exception {
         String email = "registration-" + UUID.randomUUID() + "@example.com";
         RegisterRequest registerRequest = new RegisterRequest(
-                email,"test-user-name","test-user-password"
+                email,"test-user-name","test-user-password","123456"
         );
         RegisterResponse mockResp = new RegisterResponse(email,"test-user-name");
 
@@ -59,7 +67,7 @@ class RegistrationControllerTests {
     void sameEmailRegisterTest() throws Exception {
         String email = "registration-" + UUID.randomUUID() + "@example.com";
         RegisterRequest registerRequest = new RegisterRequest(
-                email,"test-user-name","test-user-password"
+                email,"test-user-name","test-user-password","123456"
         );
         EmailAlreadyRegisteredException duplicateException = new EmailAlreadyRegisteredException(
                         new RuntimeException("模拟重复邮箱")
@@ -86,7 +94,8 @@ class RegistrationControllerTests {
         RegisterRequest registerRequest = new RegisterRequest(
                 "",
                 "test-user-name",
-                "test-user-password"
+                "test-user-password",
+                "123456"
         );
 
         mockMvc.perform(

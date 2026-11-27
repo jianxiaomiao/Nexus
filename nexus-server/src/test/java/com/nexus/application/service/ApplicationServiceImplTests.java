@@ -10,6 +10,7 @@ import com.nexus.quota.dto.QueryQuotaResponse;
 import com.nexus.quota.service.ApplicationQuotaService;
 import com.nexus.application.dto.UpdateApplicationRequest;
 import com.nexus.application.entity.Application;
+import com.nexus.application.exception.ApplicationLimitExceededException;
 import com.nexus.application.exception.ApplicationNameAlreadyExistsException;
 import com.nexus.application.exception.ApplicationNotFoundException;
 import com.nexus.application.exception.InvalidApplicationIdException;
@@ -17,6 +18,8 @@ import com.nexus.application.exception.InvalidApplicationUpdateException;
 import com.nexus.application.mapper.ApplicationMapper;
 import com.nexus.shortlink.entity.ShortLink;
 import com.nexus.shortlink.mapper.ShortLinkMapper;
+import com.nexus.user.entity.User;
+import com.nexus.user.mapper.UserMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
@@ -50,6 +53,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -74,6 +79,9 @@ class ApplicationServiceImplTests {
     @Mock
     private ApplicationQuotaService quotaService;
 
+    @Mock
+    private UserMapper userMapper;
+
     private ApplicationService applicationService;
 
     @BeforeAll
@@ -92,12 +100,21 @@ class ApplicationServiceImplTests {
                 new MybatisConfiguration(), ShortLinkMapper.class.getName());
         linkAssistant.setCurrentNamespace(ShortLinkMapper.class.getName());
         TableInfoHelper.initTableInfo(linkAssistant, ShortLink.class);
+
+        MapperBuilderAssistant userAssistant = new MapperBuilderAssistant(
+                new MybatisConfiguration(), UserMapper.class.getName());
+        userAssistant.setCurrentNamespace(UserMapper.class.getName());
+        TableInfoHelper.initTableInfo(userAssistant, User.class);
     }
 
     @BeforeEach
     void setUp() {
+        User activeUser = new User();
+        activeUser.setId(42L);
+        activeUser.setIsDeleted(0);
+        lenient().when(userMapper.selectOne(any())).thenReturn(activeUser);
         applicationService = new ApplicationService(applicationMapper, apiKeyMapper, shortLinkMapper, quotaService,
-                Clock.fixed(NOW, ZoneId.of("Asia/Shanghai")));
+                userMapper, Clock.fixed(NOW, ZoneId.of("Asia/Shanghai")), 10);
     }
 
     @Test
@@ -118,15 +135,28 @@ class ApplicationServiceImplTests {
 
         assertEquals(100L, response.id());
         assertEquals("appA", response.name());
+        verify(applicationMapper).selectCount(any());
         verify(applicationMapper).insert(any(Application.class));
         verifyNoMoreInteractions(applicationMapper);
+    }
+
+    @Test
+    void createShouldThrowWhenApplicationLimitReached() {
+        when(applicationMapper.selectCount(any())).thenReturn(10L);
+
+        ApplicationLimitExceededException exception = assertThrows(
+                ApplicationLimitExceededException.class,
+                () -> applicationService.createApplication(42L, new CreateApplicationRequest("app11")));
+
+        assertEquals("每个用户最多只能创建 10 个应用", exception.getMessage());
+        verify(applicationMapper, never()).insert(any(Application.class));
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"UTC", "Asia/Shanghai", "America/Los_Angeles"})
     void createShouldPersistSameUtcMillisRegardlessOfClockZone(String zone) {
         var service = new ApplicationService(applicationMapper, apiKeyMapper, shortLinkMapper, quotaService,
-                Clock.fixed(NOW, ZoneId.of(zone)));
+                userMapper, Clock.fixed(NOW, ZoneId.of(zone)), 10);
 
         service.createApplication(42L, new CreateApplicationRequest("appA"));
 
@@ -140,7 +170,8 @@ class ApplicationServiceImplTests {
     void createShouldReadClockOnlyOnceForBothTimestamps() {
         Clock clock = mock(Clock.class);
         when(clock.instant()).thenReturn(NOW, NOW.plusSeconds(1));
-        var service = new ApplicationService(applicationMapper, apiKeyMapper, shortLinkMapper, quotaService, clock);
+        var service = new ApplicationService(applicationMapper, apiKeyMapper, shortLinkMapper, quotaService,
+                userMapper, clock, 10);
 
         service.createApplication(42L, new CreateApplicationRequest("appA"));
 
@@ -165,6 +196,7 @@ class ApplicationServiceImplTests {
 
         assertEquals(101L, response.id());
         assertEquals("appA", response.name());
+        verify(applicationMapper).selectCount(any());
         verify(applicationMapper).insert(any(Application.class));
         verifyNoMoreInteractions(applicationMapper);
     }
@@ -180,6 +212,7 @@ class ApplicationServiceImplTests {
 
         assertInstanceOf(DuplicateKeyException.class, exception.getCause());
         assertEquals("应用名重复", exception.getMessage());
+        verify(applicationMapper).selectCount(any());
         verify(applicationMapper).insert(any(Application.class));
         verifyNoMoreInteractions(applicationMapper);
     }

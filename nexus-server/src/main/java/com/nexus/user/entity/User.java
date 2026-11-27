@@ -26,6 +26,8 @@ public class User {
 
     private LocalDateTime emailVerifiedAt;
 
+    private String role;
+
     private Integer status;
 
     private Integer isDeleted;

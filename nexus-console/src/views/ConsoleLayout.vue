@@ -6,7 +6,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useSupportUnread } from '@/composables/useSupportUnread'
 import { http, type ApiResponse } from '@/api/http'
 import { isWebBrowser } from '@/auth/webSession'
-import { Close, Document, Expand, Fold, Grid, Link, Monitor, SwitchButton, Tickets } from '@element-plus/icons-vue'
+import { Close, Document, Expand, Fold, Grid, Link, Monitor, Setting, SwitchButton, Tickets, User } from '@element-plus/icons-vue'
 import brandSpark from '@/assets/icons/brand-spark.svg'
 
 const route = useRoute()
@@ -21,6 +21,7 @@ const chatEnabled = import.meta.env.VITE_NEXUS_CHAT_ENABLED === 'true' && isWebB
 const chatUnread = useSupportUnread(chatEnabled)
 const logoutError = ref<string | null>(null)
 const logoutMessage = computed(() => logoutError.value ?? userStore.clearError)
+const isAdmin = computed(() => userStore.profile?.role === 'ADMIN')
 let disposed = false
 
 watch(() => route.fullPath, () => { mobileMenuOpen.value = false })
@@ -33,7 +34,10 @@ function closeMenuOnEscape(event: KeyboardEvent) {
   if (event.key === 'Escape') mobileMenuOpen.value = false
 }
 
-onMounted(() => window.addEventListener('keydown', closeMenuOnEscape))
+onMounted(() => {
+  window.addEventListener('keydown', closeMenuOnEscape)
+  void userStore.ensureProfile()
+})
 onUnmounted(() => {
   disposed = true
   window.removeEventListener('keydown', closeMenuOnEscape)
@@ -159,6 +163,17 @@ async function logout() {
           <el-icon class="nav-icon" :size="20" aria-hidden="true"><Monitor /></el-icon>
           <span>API 调试台</span>
         </RouterLink>
+        <template v-if="isAdmin">
+          <div class="nav-section-label">管理后台</div>
+          <RouterLink class="nav-item" :to="{ name: 'admin-users' }" active-class="is-active" aria-label="用户管理" @click="mobileMenuOpen = false">
+            <el-icon class="nav-icon" :size="20" aria-hidden="true"><User /></el-icon>
+            <span>用户管理</span>
+          </RouterLink>
+          <RouterLink class="nav-item" :to="{ name: 'admin-applications' }" active-class="is-active" aria-label="全局应用" @click="mobileMenuOpen = false">
+            <el-icon class="nav-icon" :size="20" aria-hidden="true"><Setting /></el-icon>
+            <span>全局应用</span>
+          </RouterLink>
+        </template>
       </nav>
 
       <div class="sidebar-bottom">
@@ -177,6 +192,8 @@ async function logout() {
           <span class="header-caption">Nexus / 开发者控制台</span>
           <div class="header-breadcrumb">
             <RouterLink v-if="route.name === 'application-detail' || route.name === 'api-key-detail'" :to="{ name: 'applications' }">Applications</RouterLink>
+            <strong v-else-if="route.name === 'admin-users'" aria-current="page">管理后台 / 用户管理</strong>
+            <strong v-else-if="route.name === 'admin-applications'" aria-current="page">管理后台 / 全局应用</strong>
             <strong v-else-if="route.name === 'playground'" aria-current="page">API 调试台</strong>
             <strong v-else-if="route.name === 'short-links'" aria-current="page">短链接</strong>
             <strong v-else-if="route.name === 'support-tickets'" aria-current="page">我的工单</strong>
@@ -405,4 +422,6 @@ button.nav-item:disabled { cursor: wait; }
   .console-header { min-height: 68px; padding: 12px 18px; }
   .console-content { padding: 28px 18px 64px; }
 }
+.nav-section-label { margin: 14px 12px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: var(--nexus-muted, #6a736d); text-transform: uppercase; }
+.console-sidebar.is-collapsed .nav-section-label { display: none; }
 </style>

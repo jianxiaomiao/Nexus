@@ -22,6 +22,7 @@ class RegistrationClockTests {
     void registrationStoresOneUtcMillisecondInstantRegardlessOfClockZone(String zone) {
         UserMapper users = mock(UserMapper.class);
         PasswordEncoder encoder = mock(PasswordEncoder.class);
+        EmailVerificationService emailVerificationService = mock(EmailVerificationService.class);
         Clock clock = spy(Clock.fixed(Instant.parse("2026-11-08T20:30:00.123456789Z"), ZoneId.of(zone)));
         when(encoder.encode("test-only-password")).thenReturn("test-only-encoded-value");
         when(users.insert(any(User.class))).thenAnswer(call -> {
@@ -30,8 +31,8 @@ class RegistrationClockTests {
             assertEquals(user.getCreatedAt(), user.getUpdatedAt());
             return 1;
         });
-        new RegistrationService(users, encoder, clock).register(
-                new RegisterRequest("clock@example.com", "clock", "test-only-password"));
+        new RegistrationService(users, encoder, emailVerificationService, clock).register(
+                new RegisterRequest("clock@example.com", "clock", "test-only-password", "123456"));
         verify(users).insert(any(User.class));
         verify(clock).instant();
     }

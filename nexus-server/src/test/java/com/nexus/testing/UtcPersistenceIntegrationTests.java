@@ -8,6 +8,8 @@ import com.nexus.apikey.service.ApiKeyService;
 import com.nexus.application.dto.CreateApplicationRequest;
 import com.nexus.application.service.ApplicationService;
 import com.nexus.auth.dto.RegisterRequest;
+import com.nexus.auth.service.EmailSender;
+import com.nexus.auth.service.EmailVerificationService;
 import com.nexus.auth.service.RegistrationService;
 import com.nexus.job.mapper.ScreenshotJobMapper;
 import com.nexus.user.mapper.UserMapper;
@@ -45,6 +47,8 @@ class UtcPersistenceIntegrationTests {
     @Autowired JdbcTemplate jdbc;
     @Autowired Flyway flyway;
     @Autowired RegistrationService registration;
+    @Autowired EmailVerificationService emailVerification;
+    @org.springframework.test.context.bean.override.mockito.MockitoBean EmailSender emailSender;
     @Autowired ApplicationService applications;
     @Autowired ApiKeyService keys;
     @Autowired ApiKeyMapper keyMapper;
@@ -143,7 +147,13 @@ class UtcPersistenceIntegrationTests {
 
     private long[] createOwnerAndApplication() {
         String email = UUID.randomUUID() + "@example.com";
-        registration.register(new RegisterRequest(email, "utc-owner", "test-only-password"));
+        java.util.concurrent.atomic.AtomicReference<String> code = new java.util.concurrent.atomic.AtomicReference<>();
+        org.mockito.Mockito.doAnswer(inv -> {
+            code.set(inv.getArgument(1));
+            return null;
+        }).when(emailSender).sendVerificationCode(org.mockito.ArgumentMatchers.eq(email), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyInt());
+        emailVerification.sendRegisterCode(email);
+        registration.register(new RegisterRequest(email, "utc-owner", "test-only-password", code.get()));
         long userId = jdbc.queryForObject("SELECT id FROM users WHERE email=?", Long.class, email);
         return new long[]{userId, applications.createApplication(userId, new CreateApplicationRequest("utc-app")).id()};
     }

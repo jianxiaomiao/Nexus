@@ -13,6 +13,8 @@ export function applicationErrorMessage(error: unknown, fallback: string): strin
       return '账号已被禁用，无法管理应用'
     case 'APPLICATION_NAME_ALREADY_EXISTS':
       return '这个应用名称已被使用，请换一个名称'
+    case 'APPLICATION_LIMIT_EXCEEDED':
+      return error.response.data.message || '每个用户最多只能创建 10 个应用'
     case 'APPLICATION_NOT_FOUND':
       return '应用不存在或已被删除，请刷新列表'
     case 'INVALID_LIST_PAGE':

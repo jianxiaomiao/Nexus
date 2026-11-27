@@ -2,15 +2,17 @@
 import LoginPlanetScene from '@/components/LoginPlanetScene.vue'
 import loginIllustration from '@/assets/login_page.png'
 import brandSpark from '@/assets/icons/brand-spark.svg'
-import { reactive, ref, onBeforeUnmount } from 'vue'
+import { reactive, ref, onMounted, onBeforeUnmount } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { isAxiosError } from 'axios'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { register, type RegisterRequest, type RegisterResponse } from '@/api/auth'
+import { fetchRegisterCaptcha, register, sendRegisterEmailCode, type RegisterRequest, type RegisterResponse } from '@/api/auth'
 import type { ApiResponse } from '@/api/http'
 
 const registerForm = reactive({
   email: '',
+  captchaAnswer: '',
+  verificationCode: '',
   displayName: '',
   password: '',
   confirmPassword: '',
@@ -18,9 +20,19 @@ const registerForm = reactive({
 
 const formRef = ref<FormInstance>()
 const submitting = ref(false)
+const sendingCode = ref(false)
+const captchaId = ref('')
+const captchaImage = ref('')
+const captchaLoading = ref(false)
+const cooldown = ref(0)
+let cooldownTimer: ReturnType<typeof setInterval> | null = null
 let disposed = false
 onBeforeUnmount(() => {
   disposed = true
+  if (cooldownTimer !== null) {
+    clearInterval(cooldownTimer)
+    cooldownTimer = null
+  }
   registerForm.password = ''
   registerForm.confirmPassword = ''
 })
@@ -31,6 +43,10 @@ const rules: FormRules<typeof registerForm> = {
     { required: true, whitespace: true, message: '邮箱不能为空', trigger: 'blur' },
     { type: 'email', message: '邮箱格式不正确', trigger: 'blur' },
     { max: 254, message: '邮箱长度不能超过254个字符', trigger: 'blur' },
+  ],
+  verificationCode: [
+    { required: true, whitespace: true, message: '请输入邮箱验证码', trigger: 'blur' },
+    { len: 6, message: '验证码为 6 位数字', trigger: 'blur' },
   ],
   displayName: [
     { required: true, whitespace: true, message: '显示名称不能为空', trigger: 'blur' },
@@ -52,6 +68,86 @@ const rules: FormRules<typeof registerForm> = {
   ],
 }
 
+function startCooldown() {
+  cooldown.value = 60
+  if (cooldownTimer !== null) clearInterval(cooldownTimer)
+  cooldownTimer = setInterval(() => {
+    cooldown.value = Math.max(0, cooldown.value - 1)
+    if (cooldown.value === 0 && cooldownTimer !== null) {
+      clearInterval(cooldownTimer)
+      cooldownTimer = null
+    }
+  }, 1000)
+}
+
+async function loadCaptcha() {
+  if (captchaLoading.value) return
+  captchaLoading.value = true
+  try {
+    const res = await fetchRegisterCaptcha()
+    if (disposed) return
+    captchaId.value = res.data.captchaId
+    captchaImage.value = res.data.imageDataUrl
+    registerForm.captchaAnswer = ''
+  } catch {
+    if (!disposed) {
+      ElMessage.error('图形验证码加载失败，请点击重试')
+    }
+  } finally {
+    if (!disposed) captchaLoading.value = false
+  }
+}
+
+onMounted(() => {
+  void loadCaptcha()
+})
+
+async function onSendCode() {
+  if (sendingCode.value || cooldown.value > 0 || !formRef.value) return
+  try {
+    await formRef.value.validateField('email')
+  } catch {
+    return
+  }
+  if (!registerForm.captchaAnswer.trim()) {
+    ElMessage.warning('请先输入图形验证码计算结果')
+    return
+  }
+  if (!captchaId.value) {
+    await loadCaptcha()
+    return
+  }
+  sendingCode.value = true
+  try {
+    await sendRegisterEmailCode({
+      email: registerForm.email.trim(),
+      captchaId: captchaId.value,
+      captchaAnswer: registerForm.captchaAnswer.trim(),
+    })
+    if (disposed) return
+    ElMessage.success('验证码已发送，请查收邮箱（5 分钟内有效）')
+    startCooldown()
+  } catch (error) {
+    if (disposed) return
+    if (isAxiosError<ApiResponse<unknown>>(error) && error.response?.data?.code === 'AUTH_INVALID_CAPTCHA') {
+      ElMessage.error('图形验证码答案错误或已过期，请重新计算')
+    } else if (isAxiosError<ApiResponse<unknown>>(error) && error.response?.data?.code === 'AUTH_EMAIL_ALREADY_REGISTERED') {
+      ElMessage.error('该邮箱已被注册，请直接登录')
+    } else if (isAxiosError<ApiResponse<unknown>>(error) && (error.response?.status === 429 || error.response?.data?.code === 'AUTH_EMAIL_CODE_RATE_LIMITED')) {
+      ElMessage.error(error.response?.data?.message || '发送过于频繁，请稍后再试')
+    } else if (isAxiosError<ApiResponse<unknown>>(error) && error.response?.data?.code === 'AUTH_EMAIL_DELIVERY_FAILED') {
+      ElMessage.error('验证码邮件发送失败，请稍后重试')
+    } else if (isAxiosError(error) && !error.response) {
+      ElMessage.error('无法连接服务器，请确认后端已启动')
+    } else {
+      ElMessage.error('发送验证码失败，请稍后重试')
+    }
+    void loadCaptcha()
+  } finally {
+    if (!disposed) sendingCode.value = false
+  }
+}
+
 const onSubmit = async () => {
   if (submitting.value || !formRef.value) return
 
@@ -71,6 +167,7 @@ const onSubmit = async () => {
     email: registerForm.email.trim(),
     displayName: registerForm.displayName.trim(),
     password: registerForm.password,
+    verificationCode: registerForm.verificationCode.trim(),
   }
 
   submitting.value = true
@@ -85,6 +182,8 @@ const onSubmit = async () => {
       error.response.data?.code === 'AUTH_EMAIL_ALREADY_REGISTERED'
     ) {
       ElMessage.error('该邮箱已被注册，请直接登录')
+    } else if (isAxiosError<ApiResponse<unknown>>(error) && error.response?.data?.code === 'AUTH_INVALID_EMAIL_CODE') {
+      ElMessage.error('邮箱验证码无效或已过期')
     } else if (isAxiosError(error) && error.response?.status === 429) {
       ElMessage.error('操作过于频繁，请稍后再试')
     } else if (isAxiosError(error) && !error.response) {
@@ -135,7 +234,31 @@ const onSubmit = async () => {
           >
             <el-form-item label="邮箱" prop="email">
               <el-input v-model="registerForm.email" type="email" placeholder="请输入常用邮箱" autocomplete="email" :maxlength="254" />
-              <p class="field-hint">此邮箱将用于登录。</p>
+              <p class="field-hint">此邮箱将用于登录与接收验证码。</p>
+            </el-form-item>
+            <el-form-item label="图形验证码" prop="captchaAnswer">
+              <div style="display: flex; gap: 8px; width: 100%; align-items: center">
+                <el-input v-model="registerForm.captchaAnswer" placeholder="请输入算术结果" :maxlength="16" />
+                <button
+                  type="button"
+                  style="border: 1px solid rgba(31,36,33,0.14); border-radius: 8px; padding: 0; background: #f5f1e6; cursor: pointer; flex-shrink: 0; height: 40px; min-width: 136px; overflow: hidden; display: inline-flex; align-items: center; justify-content: center"
+                  :disabled="captchaLoading"
+                  title="点击刷新图形验证码"
+                  @click="loadCaptcha"
+                >
+                  <img v-if="captchaImage" :src="captchaImage" alt="算术图形验证码，点击刷新" style="height: 38px; display: block" />
+                  <span v-else style="font-size: 12px; color: #5c635e">{{ captchaLoading ? '加载中…' : '点击刷新' }}</span>
+                </button>
+              </div>
+              <p class="field-hint">请先填写算术结果，再点击发送邮箱验证码（点击图片可刷新）。</p>
+            </el-form-item>
+            <el-form-item label="邮箱验证码" prop="verificationCode">
+              <div style="display: flex; gap: 8px; width: 100%">
+                <el-input v-model="registerForm.verificationCode" placeholder="6 位数字验证码" :maxlength="6" />
+                <el-button :loading="sendingCode" :disabled="sendingCode || cooldown > 0" @click="onSendCode">
+                  {{ cooldown > 0 ? `${cooldown}s 后重试` : '发送验证码' }}
+                </el-button>
+              </div>
             </el-form-item>
             <el-form-item label="显示名称" prop="displayName">
               <el-input v-model="registerForm.displayName" placeholder="给自己取个名字" :maxlength="64" />
