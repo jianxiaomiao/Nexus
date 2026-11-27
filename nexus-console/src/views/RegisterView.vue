@@ -127,7 +127,6 @@ async function onSendCode() {
     if (disposed) return
     ElMessage.success('验证码已发送，请查收邮箱（5 分钟内有效）')
     startCooldown()
-    void loadCaptcha()
   } catch (error) {
     if (disposed) return
     if (isAxiosError<ApiResponse<unknown>>(error) && error.response?.data?.code === 'AUTH_INVALID_CAPTCHA') {
